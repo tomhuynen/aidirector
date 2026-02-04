@@ -1,0 +1,8 @@
+{
+    "Dashboard": "Dashboard",
+    "Domain is required": "Domain is required",
+    "Domain must be less than 255 characters": "Domain must be less than 255 characters",
+    "Name is required": "Name is required",
+    "Tenant with domain :domain already exists": "Tenant with domain :domain already exists",
+    "The provided password does not match your current password.": "The provided password does not match your current password."
+}

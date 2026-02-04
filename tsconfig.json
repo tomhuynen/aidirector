@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "jsx": "preserve",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "lib": ["ESNext", "DOM", "DOM.iterable"],
+    "types": ["vite/client", "node"],
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["resources/shared/*"],
+      "@shared:ui/*": ["resources/shared/components/ui/*"],
+      "@admin/*": ["resources/admin/*"],
+      "@admin:css/*": ["resources/admin/css/*"],
+      "@admin:components/*": ["resources/admin/ts/components/*"],
+      "@admin:composables/*": ["resources/admin/ts/composables/*"],
+      "@admin:layouts/*": ["resources/admin/ts/layouts/*"],
+      "@admin:shared/*": ["resources/admin/ts/shared/*"],
+      "@admin:types/*": ["resources/admin/ts/types/*"],
+      "@public/*": ["resources/public/*"],
+      "@public:css/*": ["resources/public/css/*"],
+      "@public:components/*": ["resources/public/ts/components/*"]
+    }
+  },
+  "include": ["resources/**/*.ts", "resources/**/*.d.ts", "resources/**/*.tsx", "resources/**/*.vue"]
+}
