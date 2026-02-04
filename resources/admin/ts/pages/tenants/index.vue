@@ -1,0 +1,19 @@
+<template>
+  <Page :title="$t('Tenants')" :description="$t('Manage your tenants')">
+    <Table :resource="tenants" />
+  </Page>
+</template>
+
+<script setup lang="ts">
+import AppLayout from '@admin/ts/layouts/App.vue'
+import type { GetResponse } from '@admin/ts/types/utils'
+import Page from '@admin:components/Page.vue'
+import { $t } from '@admin:shared/i18n'
+import { Table } from '@inertiaui/table-vue'
+
+defineOptions({
+  layout: [AppLayout],
+})
+
+defineProps<{ tenants: GetResponse<'/admin/tenants'>['tenants'] }>()
+</script>

@@ -1,0 +1,67 @@
+@source '../../../vendor/inertiaui/table/vue/src/**/*.{js,vue}';
+
+@layer package-overrides {
+  & .it-wrapper div:has(table) {
+    @apply border border-border;
+
+    & > div {
+      @apply bg-transparent border-none;
+    }
+
+    & thead tr {
+      @apply bg-transparent border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted;
+
+      & th {
+        @apply h-10 first:px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0;
+      }
+    }
+  }
+
+  & .it-text-input {
+    @apply file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm;
+    @apply focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px];
+    @apply aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive;
+  }
+
+  & .it-button {
+    @apply text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2 outline-none ml-auto;
+  }
+
+  & .it-table {
+    @apply w-full caption-bottom text-sm;
+  }
+
+  & .it-table-head {
+    @apply [&_tr]:border-b;
+  }
+
+  & .it-table-body {
+    & tr {
+      @apply border-border;
+    }
+
+    & td {
+      @apply text-foreground;
+    }
+  }
+
+  & .it-dropdown-items {
+    @apply -mt-1 z-50 min-w-32 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md ring-0;
+  }
+
+  & .it-dropdown-item {
+    @apply relative flex cursor-default select-none items-center rounded-sm gap-2 px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50;
+
+    & > div {
+      @apply m-0;
+
+      & svg {
+        @apply size-4 shrink-0 w-full h-full;
+      }
+    }
+  }
+
+  & .it-select-input {
+    @apply flex h-10 items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate text-start w-[180px];
+  }
+}

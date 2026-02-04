@@ -1,0 +1,16 @@
+@source '../../../node_modules/@inertiaui/modal-vue/src/**/*.{js,vue}';
+
+@layer package-overrides {
+  & .im-modal-content,
+  & .im-slideover-content {
+    @apply bg-background text-foreground;
+  }
+
+  & .im-slideover-content {
+    @apply border-l border-border;
+  }
+
+  & .im-modal-content {
+    @apply border border-border;
+  }
+}

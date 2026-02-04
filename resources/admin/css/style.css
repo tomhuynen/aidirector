@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@shared/css/shadcn.css';
+@import '@shared/css/sidebar.css';
+
+@source "../ts/pages";
+
+@layer components {
+  .me-2 svg {
+    @apply w-full h-full;
+  }
+}

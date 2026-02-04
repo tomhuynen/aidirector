@@ -1,0 +1,14 @@
+<template>
+  <ul data-slot="sidebar-menu" data-sidebar="menu" :class="cn('flex w-full min-w-0 flex-col gap-1', props.class)">
+    <slot />
+  </ul>
+</template>
+
+<script setup lang="ts">
+import { cn } from '@shared/lib/utils'
+import type { HTMLAttributes } from 'vue'
+
+const props = defineProps<{
+  class?: HTMLAttributes['class']
+}>()
+</script>

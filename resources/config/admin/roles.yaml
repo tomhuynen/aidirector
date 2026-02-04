@@ -1,0 +1,40 @@
+- name: tech-admin
+  title: 'Tech Administrator'
+  description: |
+    Can manage the server.
+    Can manage the database and backups.
+  level: 100
+  permissions:
+    - admin.server.view
+    - admin.database.view
+    - admin.logs.view
+    - admin.horizon.view
+    - admin.impersonate
+
+- name: admin
+  title: 'Administrator'
+  description: |
+    Can manage accounts across all clients.
+    Can manage tenants.
+  level: 200
+  permissions:
+    - admin.tenants.view
+    - admin.tenants.create
+    - admin.tenants.update
+    - admin.tenants.destroy
+    - admin.tenants.switch
+    - admin.accounts.view
+    - admin.accounts.create
+    - admin.accounts.update
+    - admin.accounts.destroy
+    - admin.accounts.invite
+    - admin.activities.view
+    - admin.impersonate
+
+- name: user
+  title: 'User'
+  description: |
+    Can view the dashboard.
+    Can manage their own settings.
+  permissions:
+    - admin.dashboard.view

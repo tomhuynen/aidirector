@@ -1,0 +1,42 @@
+- title: Application
+  items:
+    - route: admin.dashboard.index
+      title: Dashboard
+      icon: Gauge
+    - route: admin.accounts.index
+      permission: admin.accounts.view
+      title: Accounts
+      icon: User
+    - route: admin.tenants.index
+      permission: admin.tenants.view
+      title: Tenants
+      icon: Building
+    - route: admin.activities.index
+      permission: admin.activities.view
+      title: Activities
+      icon: Clock
+
+- title: System
+  items:
+    - route: '#'
+      title: Settings
+      icon: Settings2
+      items:
+        - route: admin.system.database
+          title: Database
+          icon: Database
+          permission: admin.database.view
+        - route: admin.system.server
+          title: Server
+          icon: HardDrive
+          permission: admin.server.view
+        - route: log-viewer.index
+          title: Logs
+          icon: FileText
+          permission: admin.logs.view
+          external: true
+        - route: horizon.index
+          title: Queue
+          icon: Server
+          permission: admin.horizon.view
+          external: true
