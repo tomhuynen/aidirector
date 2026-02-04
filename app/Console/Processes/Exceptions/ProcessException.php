@@ -1,0 +1,9 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Console\Processes\Exceptions;
+
+use Exception;
+
+class ProcessException extends Exception {}
