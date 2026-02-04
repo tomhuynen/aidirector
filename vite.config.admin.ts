@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 
+import { wayfinder } from '@laravel/vite-plugin-wayfinder'
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
 import laravel from 'laravel-vite-plugin'
@@ -34,6 +35,10 @@ export default defineConfig(({ command }) => {
       typeGenerator({
         outputPath: resolve(__dirname, 'resources/admin/ts/types/schema.d.ts'),
         apiName: 'admin',
+        wayfinderTypesPath: resolve(__dirname, 'resources/shared/wayfinder/types.d.ts'),
+      }),
+      wayfinder({
+        path: resolve(__dirname, 'resources/shared/wayfinder'),
       }),
     ],
     build: {
@@ -97,6 +102,7 @@ export default defineConfig(({ command }) => {
         '@admin': resolve(__dirname, 'resources/admin/'),
         '@shared': resolve(__dirname, 'resources/shared/'),
         '@shared:ui': resolve(__dirname, 'resources/shared/components/ui/'),
+        '@wayfinder': resolve(__dirname, 'resources/shared/wayfinder/'),
       },
     },
   }

@@ -25,7 +25,8 @@
       "@admin:types/*": ["resources/admin/ts/types/*"],
       "@public/*": ["resources/public/*"],
       "@public:css/*": ["resources/public/css/*"],
-      "@public:components/*": ["resources/public/ts/components/*"]
+      "@public:components/*": ["resources/public/ts/components/*"],
+      "@wayfinder/*": ["resources/shared/wayfinder/*"]
     }
   },
   "include": ["resources/**/*.ts", "resources/**/*.d.ts", "resources/**/*.tsx", "resources/**/*.vue"]

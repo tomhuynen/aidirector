@@ -1,6 +1,8 @@
-import type { components, operations, paths } from './schema'
+// Re-export everything from the bridge (single source of truth)
+export type { App, components, Inertia, operations, PageProps, paths } from './schema-bridge'
 
-type ops = keyof operations
+// Legacy Scramble-based type utilities (kept for HTTP client typing)
+import type { paths } from './schema-bridge'
 
 type MethodKeys = keyof paths[keyof paths]
 
@@ -30,11 +32,11 @@ export type PutRequest<T extends keyof paths> = Request<T, 'put'>
 export type PatchRequest<T extends keyof paths> = Request<T, 'patch'>
 export type DeleteRequest<T extends keyof paths> = Request<T, 'delete'>
 
-type CanKeys<T> = T extends { can?: Record<string, boolean> } ? keyof NonNullable<T['can']> : never
+// Helper types from Scramble schemas
+import type { components } from './schema-bridge'
 
 export type Tenant = components['schemas']['TenantResource']
 export type Widget = components['schemas']['WidgetResource'] & {
   data: Record<string, any>
 }
-
 export type SearchResult = components['schemas']['SearchableResource']
