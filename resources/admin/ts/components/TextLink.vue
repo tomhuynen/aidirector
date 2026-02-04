@@ -11,8 +11,9 @@
 </template>
 
 <script setup lang="ts">
-import type { Method } from '@inertiajs/core'
 import { Link } from '@inertiajs/vue3'
+
+type Method = 'get' | 'post' | 'put' | 'patch' | 'delete'
 
 interface Props {
   href: string
