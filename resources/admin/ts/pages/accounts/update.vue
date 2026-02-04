@@ -52,7 +52,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { GetResponse, PostRequest } from '@admin/ts/types/utils'
+import type { App, Inertia, PageProps } from '@admin/ts/types/utils'
 import FormCheckbox from '@admin:components/Form/Checkbox.vue'
 import FormInput from '@admin:components/Form/Input.vue'
 import Page from '@admin:components/Page.vue'
@@ -66,12 +66,9 @@ defineOptions({
   layout: [AppLayout],
 })
 
-const props = defineProps<{
-  account: GetResponse<'/admin/accounts/{account}/update'>['account']
-  roles: GetResponse<'/admin/accounts/{account}/update'>['roles']
-}>()
+const props = defineProps<PageProps<Inertia.Pages.Accounts.Update>>()
 
-const form = useForm<PostRequest<'/admin/accounts/{account}/update'>>({
+const form = useForm<Omit<App.Http.Controllers.Admin.Accounts.UpdateController.Store.Request, 'roles.*'>>({
   name: props.account?.name ?? '',
   email: props.account?.email ?? '',
   roles: props.account?.roles.map((role) => role.name) ?? [],

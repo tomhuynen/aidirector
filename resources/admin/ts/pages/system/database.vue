@@ -55,7 +55,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { GetResponse } from '@admin/ts/types/utils'
+import type { Inertia, PageProps } from '@admin/ts/types/utils'
 import DefinitionListRow from '@admin:components/DefinitionListRow.vue'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
@@ -68,8 +68,5 @@ defineOptions({
   layout: [AppLayout],
 })
 
-defineProps<{
-  databaseInfo: GetResponse<'/admin/system/database'>['databaseInfo']
-  backupInfo: GetResponse<'/admin/system/database'>['backupInfo']
-}>()
+defineProps<PageProps<Inertia.Pages.System.Database>>()
 </script>

@@ -61,7 +61,7 @@ import AddPasskey from '@admin/ts/components/Settings/AddPasskey.vue'
 import Icon from '@admin:components/Icon.vue'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
-import type { GetResponse } from '@admin:types/utils'
+import type { Inertia, PageProps } from '@admin:types/utils'
 import { Table } from '@inertiaui/table-vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@shared:ui/card'
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser'
@@ -71,10 +71,7 @@ defineOptions({
   layout: [SettingsLayout],
 })
 
-defineProps<{
-  passkeys: GetResponse<'/admin/settings/security'>['passkeys']
-  sessions: GetResponse<'/admin/settings/security'>['sessions']
-}>()
+defineProps<PageProps<Inertia.Pages.Settings.Security>>()
 
 const passKeysSupported = computed(() => browserSupportsWebAuthn())
 </script>

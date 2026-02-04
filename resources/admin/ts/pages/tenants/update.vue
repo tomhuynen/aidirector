@@ -38,7 +38,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { GetResponse, PostRequest } from '@admin/ts/types/utils'
+import type { App, Inertia, PageProps } from '@admin/ts/types/utils'
 import FormInput from '@admin:components/Form/Input.vue'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
@@ -50,11 +50,9 @@ defineOptions({
   layout: [AppLayout],
 })
 
-const props = defineProps<{
-  tenant: GetResponse<'/admin/tenants/{tenant}/update'>['tenant']
-}>()
+const props = defineProps<PageProps<Inertia.Pages.Tenants.Update>>()
 
-const form = useForm<PostRequest<'/admin/tenants/create'>>({
+const form = useForm<App.Http.Controllers.Admin.Tenants.UpdateController.Store.Request>({
   name: props.tenant?.name ?? '',
   domain: props.tenant?.domain ?? '',
 })

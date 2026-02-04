@@ -62,7 +62,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { GetResponse } from '@admin/ts/types/utils'
+import type { Inertia, PageProps } from '@admin/ts/types/utils'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
 import { Deferred } from '@inertiajs/vue3'
@@ -77,9 +77,11 @@ defineOptions({
   layout: [AppLayout],
 })
 
+type Props = PageProps<Inertia.Pages.System.Server>
+
 defineProps<{
-  configuration: GetResponse<'/admin/system/server'>['configuration']
-  health: GetResponse<'/admin/system/server'>['health']
-  php?: GetResponse<'/admin/system/server'>['php']
+  configuration: Props['configuration']
+  health: Props['health']
+  php?: Props['php']
 }>()
 </script>

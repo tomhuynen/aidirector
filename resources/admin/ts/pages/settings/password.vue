@@ -53,22 +53,25 @@ import HeadingSmall from '@admin/ts/components/HeadingSmall.vue'
 import FormInput from '@admin:components/Form/Input.vue'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
-import type { PutRequest } from '@admin:types/utils'
+import type { App } from '@admin:types/utils'
 import { useForm } from '@inertiajs/vue3'
 import { Button } from '@shared:ui/button'
+import { update } from '@wayfinder/App/Http/Controllers/Admin/Settings/PasswordController'
 
 defineOptions({
   layout: [SettingsLayout],
 })
 
-const form = useForm<PutRequest<'/admin/settings/password'>>({
+const form = useForm<
+  App.Http.Controllers.Admin.Settings.PasswordController.Update.Request & { password_confirmation: string }
+>({
   current_password: '',
   password: '',
   password_confirmation: '',
 })
 
 const submit = () => {
-  form.put('/admin/settings/password', {
+  form.put(update.url(), {
     preserveScroll: true,
   })
 }

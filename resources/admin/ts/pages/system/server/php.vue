@@ -72,7 +72,7 @@
   </Card>
 </template>
 <script setup lang="ts">
-import type { GetResponse } from '@admin/ts/types/utils'
+import type { Inertia, PageProps } from '@admin/ts/types/utils'
 import DateTime from '@admin:components/DateTime.vue'
 import DefinitionListRow from '@admin:components/DefinitionListRow.vue'
 import { http } from '@admin:shared/http'
@@ -85,7 +85,7 @@ import filesize from 'filesize.js'
 import { RefreshCcwIcon } from 'lucide-vue-next'
 
 defineProps<{
-  value: GetResponse<'/admin/system/server'>['php']
+  value: PageProps<Inertia.Pages.System.Server>['php']
 }>()
 
 const resetOpcache = () => {

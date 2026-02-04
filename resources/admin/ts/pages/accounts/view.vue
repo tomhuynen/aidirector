@@ -128,7 +128,7 @@
 <script setup lang="ts">
 import TableSkeleton from '@admin/ts/components/TableSkeleton.vue'
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { GetResponse } from '@admin/ts/types/utils'
+import type { Inertia, PageProps } from '@admin/ts/types/utils'
 import ConfirmDelete from '@admin:components/ConfirmDelete.vue'
 import DateTime from '@admin:components/DateTime.vue'
 import Icon from '@admin:components/Icon.vue'
@@ -146,10 +146,12 @@ defineOptions({
   layout: [AppLayout],
 })
 
+type Props = PageProps<Inertia.Pages.Accounts.View>
+
 defineProps<{
-  account: GetResponse<'/admin/accounts/{account}'>['account']
-  logins?: GetResponse<'/admin/accounts/{account}'>['logins']
-  notifications?: GetResponse<'/admin/accounts/{account}'>['notifications']
+  account: Props['account']
+  logins?: Props['logins']
+  notifications?: Props['notifications']
 }>()
 
 const showDeleteModal = ref(false)
