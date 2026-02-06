@@ -45,13 +45,13 @@
       language="json"
     />
     <div class="flex justify-between absolute bottom-0 left-0 right-0 px-4 py-3 sm:px-6 border-t border-border">
-      <Button v-if="links.previous" :href="links.previous" :as="Link" size="sm" variant="outline">
+      <Button v-if="links.previous" :href="links.previous" :as="ModalLink" size="sm" variant="outline">
         <ArrowLeft class="size-4" />
         {{ $t('Previous') }}
       </Button>
       <template v-else> &nbsp; </template>
 
-      <Button v-if="links.next" :href="links.next" :as="Link" size="sm" variant="outline">
+      <Button v-if="links.next" :href="links.next" :as="ModalLink" size="sm" variant="outline">
         {{ $t('Next') }}
         <ArrowRight class="size-4" />
       </Button>
@@ -62,7 +62,7 @@
 import { $t } from '@admin/ts/shared/i18n'
 import type { GetResponse } from '@admin/ts/types/utils'
 import DateTime from '@admin:components/DateTime.vue'
-import { Link } from '@inertiajs/vue3'
+import { ModalLink } from '@inertiaui/modal-vue'
 import Badge from '@shared/components/ui/badge/Badge.vue'
 import { Button } from '@shared/components/ui/button'
 import { ArrowLeft, ArrowRight } from 'lucide-vue-next'

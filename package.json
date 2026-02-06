@@ -43,12 +43,13 @@
   "dependencies": {
     "@inertiaui/modal-vue": "^1.0.0-beta-4",
     "@inertiaui/table-vue": "./vendor/inertiaui/table/vue",
-    "@vueuse/core": "^14.0.0",
+    "@internationalized/date": "^3.11.0",
+    "@vueuse/core": "^14.2.0",
     "@vueuse/integrations": "^13.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-vue-next": "^0.511.0",
-    "reka-ui": "^2.6.0",
+    "reka-ui": "^2.8.0",
     "tailwind-merge": "^3.3.0",
     "tw-animate-css": "^1.3.0",
     "v-code-diff": "^1.13.1"

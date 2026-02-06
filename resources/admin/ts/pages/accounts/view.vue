@@ -71,31 +71,19 @@
                 <TableSkeleton />
               </template>
 
-              <Table :resource="logins">
+              <DataTable :resource="logins as TableResource">
                 <template #cell(ip)="{ value }">
-                  <span>
-                    <span v-if="value.bogon" class="text-sm mr-1">🌏</span>
-                    <span v-else class="text-sm mr-1" :title="value.countryCode">{{ value.countryFlag }}</span>
-                    <code class="text-muted-foreground" :title="value.organization">{{ value.value }}</code>
-                  </span>
+                  <IpAddressCell :value="value as IpAddressValue" />
                 </template>
 
                 <template #cell(user_agent)="{ value }">
-                  <span class="flex items-center gap-2">
-                    <Icon :name="value.deviceTypeIcon" />
-                    <span v-if="value.isBot">
-                      <div class="truncate" :title="value.value">{{ value.value }}</div>
-                    </span>
-                    <span v-else :title="value.value">
-                      {{ value.clientFamily }} {{ value.clientVersion }} @ {{ value.osName }} {{ value.osVersion }}
-                    </span>
-                  </span>
+                  <UserAgentCell :value="value as UserAgentValue" />
                 </template>
 
                 <template #cell(created_at)="{ value }">
-                  <relative-time :datetime="value">{{ value }}</relative-time>
+                  <RelativeTimeCell :value="value as string" />
                 </template>
-              </Table>
+              </DataTable>
             </Deferred>
           </CardContent>
         </Card>
@@ -111,7 +99,7 @@
               <template #fallback>
                 <TableSkeleton />
               </template>
-              <Table :resource="notifications" />
+              <DataTable :resource="notifications as TableResource" />
             </WhenVisible>
           </CardContent>
         </Card>
@@ -129,16 +117,17 @@
 import TableSkeleton from '@admin/ts/components/TableSkeleton.vue'
 import AppLayout from '@admin/ts/layouts/App.vue'
 import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { IpAddressValue, UserAgentValue } from '@admin:components/cells'
+import { IpAddressCell, RelativeTimeCell, UserAgentCell } from '@admin:components/cells'
 import ConfirmDelete from '@admin:components/ConfirmDelete.vue'
 import DateTime from '@admin:components/DateTime.vue'
-import Icon from '@admin:components/Icon.vue'
 import Page from '@admin:components/Page.vue'
 import PageActionItem from '@admin:components/Page/ActionItem.vue'
 import { $t } from '@admin:shared/i18n'
 import { Deferred, WhenVisible } from '@inertiajs/vue3'
-import { Table } from '@inertiaui/table-vue'
 import { Badge } from '@shared:ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@shared:ui/card'
+import { DataTable, type TableResource } from '@shared:ui/data-table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@shared:ui/tabs'
 import { ref } from 'vue'
 

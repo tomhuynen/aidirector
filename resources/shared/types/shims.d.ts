@@ -37,15 +37,19 @@ declare module '@inertiaui/table-vue' {
     multiple?: boolean
   }
 
-  // Type definitions for table filter
+  // Type definitions for table filter (used in state.filters)
   interface TableFilter {
     attribute: string
     type: string
-    enabled: boolean
-    clause: string
-    value: any
+    enabled?: boolean
+    clause?: string
+    value?: any
     new?: boolean
     hasDefaultValue?: boolean
+    label?: string
+    clauses?: string[]
+    options?: Array<{ value: string | number; label: string }>
+    multiple?: boolean
   }
 
   // Type definitions for table state
@@ -58,20 +62,34 @@ declare module '@inertiaui/table-vue' {
     sticky: string[]
   }
 
-  // Type definitions for table options
+  // Type definitions for table options (accepts full resource from server)
   interface TableOptions {
     name: string
     columns: TableColumn[]
     filters: TableFilter[]
-    defaultSort: string
-    defaultPerPage: number
-    paginationType: 'full' | 'simple' | 'cursor'
-    debounceTime: number
-    scrollPositionAfterPageChange: 'preserve' | 'topOfTable' | 'none'
-    reloadProps: string[]
-    hasBulkActions: boolean
-    hasExports: boolean
-    hasExportsThatLimitsToSelectedRows: boolean
+    defaultSort?: string | null
+    defaultPerPage?: number
+    paginationType?: 'full' | 'simple' | 'cursor'
+    debounceTime?: number
+    scrollPositionAfterPageChange?: 'preserve' | 'topOfTable' | 'none' | 'top'
+    reloadProps?: string[]
+    hasBulkActions?: boolean
+    hasExports?: boolean
+    hasExportsThatLimitsToSelectedRows?: boolean
+    // Additional fields from full TableResource
+    actions?: any[]
+    exports?: any[]
+    results?: any
+    state?: any
+    pagination?: boolean
+    perPageOptions?: number[]
+    hasFilters?: boolean
+    hasSearch?: boolean
+    hasToggleableColumns?: boolean
+    autofocus?: 'search' | null
+    emptyState?: boolean | Record<string, any>
+    stickyHeader?: boolean
+    views?: any
   }
 
   // Type definitions for table hook return
@@ -120,7 +138,11 @@ declare module '@inertiaui/table-vue' {
   // Export declarations
   export const Table: Component
   export function getActionForItem(action: ActionItem, item: any): ActionItem
-  export function getClickableColumn(column: TableColumn, row: any): ClickableColumnOptions | undefined
+  export function getClickableColumn(
+    column: TableColumn,
+    row: any,
+    event?: MouseEvent | null,
+  ): ClickableColumnOptions | undefined
   export function setClauseSymbols(symbols: Record<string, string>): void
   export function setDarkModeStrategy(strategy: 'auto' | 'class' | 'selector' | 'media' | (() => boolean)): void
   export function setIconResolver(resolver: (...args: any[]) => any): void

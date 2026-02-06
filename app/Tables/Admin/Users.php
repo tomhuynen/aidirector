@@ -62,7 +62,7 @@ class Users extends Table
         return [
             BooleanFilter::make(
                 attribute: 'deleted_at',
-                label: __('Archived'),
+                label: __('Show Trashed'),
             )
                 ->applyUsing(new FiltersSoftDeletes(), true),
         ];

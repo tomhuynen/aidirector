@@ -1,6 +1,5 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
-@import './inertia-table.css';
 @import './inertia-modal.css';
 
 @custom-variant dark (&:is(.dark *));

@@ -16,7 +16,7 @@
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Table :resource="passkeys" />
+        <DataTable :resource="passkeys" />
       </CardContent>
     </Card>
   </template>
@@ -31,39 +31,28 @@
       </CardDescription>
     </CardHeader>
     <CardContent>
-      <Table :resource="sessions">
+      <DataTable :resource="sessions">
         <template #cell(ip_address)="{ value }">
-          <span>
-            <span v-if="value.bogon" class="text-sm mr-1">🌏</span>
-            <span v-else class="text-sm mr-1" :title="value.countryCode">{{ value.countryFlag }}</span>
-            <code class="text-muted-foreground" :title="value.organization">{{ value.value }}</code>
-          </span>
+          <IpAddressCell :value="value as IpAddressValue" />
         </template>
 
         <template #cell(user_agent)="{ value }">
-          <span class="flex items-center gap-2">
-            <Icon :name="value.deviceTypeIcon" />
-            <span v-if="value.isBot">
-              <div class="truncate" :title="value.value">{{ value.value }}</div>
-            </span>
-            <span v-else :title="value.value">
-              {{ value.clientFamily }} {{ value.clientVersion }} @ {{ value.osName }} {{ value.osVersion }}
-            </span>
-          </span>
+          <UserAgentCell :value="value as UserAgentValue" />
         </template>
-      </Table>
+      </DataTable>
     </CardContent>
   </Card>
 </template>
 <script setup lang="ts">
 import HeadingSmall from '@admin/ts/components/HeadingSmall.vue'
 import AddPasskey from '@admin/ts/components/Settings/AddPasskey.vue'
-import Icon from '@admin:components/Icon.vue'
+import type { IpAddressValue, UserAgentValue } from '@admin:components/cells'
+import { IpAddressCell, UserAgentCell } from '@admin:components/cells'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
 import type { Inertia, PageProps } from '@admin:types/utils'
-import { Table } from '@inertiaui/table-vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@shared:ui/card'
+import { DataTable } from '@shared:ui/data-table'
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser'
 import { computed } from 'vue'
 

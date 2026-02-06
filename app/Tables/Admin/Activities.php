@@ -107,18 +107,19 @@ class Activities extends Table
                 alignment: ColumnAlignment::Right,
                 sortable: true,
             )->translate(),
-            ActionColumn::new()
-                ->asDropdown(),
+            ActionColumn::new(),
         ];
     }
 
     public function filters(): array
     {
         return [
+            // Text filter
             TextFilter::make(
                 attribute: 'subject_type',
                 label: __('Resource Type'),
             ),
+            // Date filter
             DateFilter::make(
                 attribute: 'created_at',
                 label: __('Happened At'),
@@ -131,6 +132,8 @@ class Activities extends Table
         return [
             Action::make(
                 label: __('View'),
+                icon: 'Eye',
+                showLabel: false,
                 url: fn(Activity $activity, Url $url) => $url
                     ->route('admin.activities.view', $activity)
                     ->modal(
