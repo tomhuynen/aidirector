@@ -11,7 +11,7 @@
       <template v-for="action in visibleActions" :key="action.key">
         <DropdownMenuItem
           :class="{ 'text-destructive focus:text-destructive': action.variant === 'danger' }"
-          :disabled="!action.authorized"
+          :disabled="!action.authorized || !!action.bindings?.disabled"
           @select="handleActionClick(action)"
         >
           <component :is="getIconComponent(action.icon)" v-if="action.icon" class="mr-2 size-4" />
@@ -28,7 +28,7 @@
       :key="action.key"
       :variant="action.variant === 'danger' ? 'destructive' : 'ghost'"
       size="sm"
-      :disabled="!action.authorized"
+      :disabled="!action.authorized || !!action.bindings?.disabled"
       @click="handleActionClick(action)"
     >
       <component
@@ -106,6 +106,10 @@ const props = defineProps<{
   actions: UseActionsReturn
 }>()
 
+const emit = defineEmits<{
+  'custom-action': [payload: { action: TableAction; keys: (string | number)[]; onFinish?: () => void }]
+}>()
+
 // Dialog state
 const confirmDialogOpen = ref(false)
 const actionFailed = ref(false)
@@ -174,6 +178,21 @@ const executeAction = async (action: ResolvedAction & { _index: number }) => {
       }
       return
     }
+  }
+
+  // Custom actions emit event instead of POSTing
+  if (action.isCustom) {
+    try {
+      const result = await props.actions.performAction(action, [props.item._primary_key])
+      emit('custom-action', {
+        action,
+        keys: result.keys,
+        onFinish: result.onFinish,
+      })
+    } catch {
+      actionFailed.value = true
+    }
+    return
   }
 
   // Non-link actions use performAction

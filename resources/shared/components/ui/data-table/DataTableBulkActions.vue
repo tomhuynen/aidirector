@@ -69,6 +69,19 @@
       </DialogFooter>
     </DialogContent>
   </Dialog>
+
+  <!-- Async Export Dialog -->
+  <Dialog v-model:open="exportDialogOpen">
+    <DialogContent :show-close-button="false">
+      <DialogHeader>
+        <DialogTitle v-if="exportDialogTitle">{{ exportDialogTitle }}</DialogTitle>
+        <DialogDescription v-if="exportDialogMessage">{{ exportDialogMessage }}</DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <Button @click="exportDialogOpen = false">{{ trans('Close') }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
@@ -102,6 +115,9 @@ const emit = defineEmits<{
 const confirmDialogOpen = ref(false)
 const actionFailed = ref(false)
 const pendingAction = ref<TableAction | null>(null)
+const exportDialogOpen = ref(false)
+const exportDialogTitle = ref('')
+const exportDialogMessage = ref('')
 
 const bulkActions = computed(() => props.resource.actions?.filter((a) => a.asBulkAction) ?? [])
 
@@ -147,7 +163,15 @@ const executeAction = async (action: TableAction) => {
 
 const handleExport = async (exp: TableExport) => {
   try {
-    await props.actions.performAsyncExport(exp)
+    const result = await props.actions.performAsyncExport(exp)
+    const response = result.response as { data?: Record<string, unknown> } | undefined
+    const data = response?.data
+
+    if (data && !data.targetUrl && (data.dialogTitle || data.dialogMessage)) {
+      exportDialogTitle.value = (data.dialogTitle as string) ?? ''
+      exportDialogMessage.value = (data.dialogMessage as string) ?? ''
+      exportDialogOpen.value = true
+    }
   } catch {
     actionFailed.value = true
   }

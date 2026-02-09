@@ -63,7 +63,7 @@
           variant="outline"
           size="icon"
           class="size-8"
-          :disabled="!resource.results.prev_page_url"
+          :disabled="!resource.results.prev_page_url || resource.results.on_first_page"
           @click="emit('paginate', resource.results.prev_page_url!)"
         >
           <ChevronLeft class="size-4" />
@@ -73,7 +73,7 @@
           variant="outline"
           size="icon"
           class="size-8"
-          :disabled="!resource.results.next_page_url"
+          :disabled="!resource.results.next_page_url || resource.results.on_last_page"
           @click="emit('paginate', resource.results.next_page_url!)"
         >
           <ChevronRight class="size-4" />

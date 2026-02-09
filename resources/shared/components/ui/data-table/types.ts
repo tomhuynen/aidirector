@@ -48,6 +48,7 @@ export interface TableColumn {
   trueIcon?: string
   falseIcon?: string
   asDropdown?: boolean
+  meta?: Record<string, unknown>
 }
 
 // Filter definition (what comes from the server in resource.filters)
@@ -87,6 +88,7 @@ export interface TableAction {
   variant?: 'default' | 'danger'
   asDownload?: boolean | string
   disabled?: boolean
+  meta?: Record<string, unknown>
 }
 
 export interface TableExport {
@@ -94,6 +96,7 @@ export interface TableExport {
   label: string
   url: string
   limitToSelectedRows?: boolean
+  meta?: Record<string, unknown>
 }
 
 export interface TableResults {
@@ -108,6 +111,8 @@ export interface TableResults {
   prev_page_url?: string | null
   from?: number
   to?: number
+  on_first_page?: boolean
+  on_last_page?: boolean
 }
 
 // Row action item (from _actions on each row - indexed by action position)

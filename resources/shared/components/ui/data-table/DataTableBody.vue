@@ -45,6 +45,7 @@
               :column="column"
               :resource="resource"
               :actions="actions"
+              @custom-action="emit('custom-action', $event)"
             />
             <DataTableCellBadge v-else-if="column.type === 'badge'" :value="item[column.attribute] as BadgeValue" />
             <DataTableCellBoolean
@@ -91,13 +92,25 @@ import DataTableCellBadge from './DataTableCellBadge.vue'
 import DataTableCellBoolean from './DataTableCellBoolean.vue'
 import DataTableCellImage from './DataTableCellImage.vue'
 import DataTableRowActions from './DataTableRowActions.vue'
-import type { BadgeValue, TableColumn, TableResource, TableRow, UseActionsReturn, UseTableReturn } from './types'
+import type {
+  BadgeValue,
+  TableAction,
+  TableColumn,
+  TableResource,
+  TableRow,
+  UseActionsReturn,
+  UseTableReturn,
+} from './types'
 
 const props = defineProps<{
   resource: TableResource
   table: UseTableReturn
   actions: UseActionsReturn
   onRowClick?: (item: TableRow, column: TableColumn) => void
+}>()
+
+const emit = defineEmits<{
+  'custom-action': [payload: { action: TableAction; keys: (string | number)[]; onFinish?: () => void }]
 }>()
 
 const visibleColumns = computed(() =>

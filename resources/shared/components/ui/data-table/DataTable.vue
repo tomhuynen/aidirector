@@ -49,7 +49,13 @@
             </slot>
 
             <slot name="body" :table="table" :actions="actions">
-              <DataTableBody :resource="resource" :table="table" :actions="actions" :on-row-click="onRowClick">
+              <DataTableBody
+                :resource="resource"
+                :table="table"
+                :actions="actions"
+                :on-row-click="onRowClick"
+                @custom-action="emit('custom-action', $event)"
+              >
                 <template
                   v-for="column in resource.columns"
                   :key="column.attribute"
@@ -87,11 +93,15 @@ import DataTableFilters from './DataTableFilters.vue'
 import DataTableHeader from './DataTableHeader.vue'
 import DataTablePagination from './DataTablePagination.vue'
 import DataTableToolbar from './DataTableToolbar.vue'
-import type { TableColumn, TableResource, TableRow } from './types'
+import type { TableAction, TableColumn, TableResource, TableRow } from './types'
 
 const props = defineProps<{
   resource: TableResource
   onRowClick?: (item: TableRow, column: TableColumn) => void
+}>()
+
+const emit = defineEmits<{
+  'custom-action': [payload: { action: TableAction; keys: (string | number)[]; onFinish?: () => void }]
 }>()
 
 const tableWrapperRef = ref<HTMLElement | null>(null)
