@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 
 import { exec } from 'child_process'
@@ -43,8 +43,31 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
       }
 
       if (options.wayfinderTypesPath) {
+        const filesExist = await Promise.all([
+          access(options.outputPath)
+            .then(() => true)
+            .catch(() => false),
+          access(options.wayfinderTypesPath)
+            .then(() => true)
+            .catch(() => false),
+        ])
+
         const bridgePath = options.bridgeOutputPath || options.outputPath.replace(/\.d\.ts$/, '-bridge.d.ts')
-        await generateBridge(options.outputPath, options.wayfinderTypesPath, bridgePath)
+
+        if (filesExist.every(Boolean)) {
+          await generateBridge(options.outputPath, options.wayfinderTypesPath, bridgePath)
+        } else {
+          // eslint-disable-next-line no-console
+          console.log('[type-generator] Skipping bridge generation (waiting for dependencies to be generated)')
+        }
+
+        // Watch for wayfinder types changes to regenerate bridge
+        server.watcher.add(options.wayfinderTypesPath)
+        server.watcher.on('change', async (changedPath) => {
+          if (changedPath === options.wayfinderTypesPath) {
+            await generateBridge(options.outputPath, options.wayfinderTypesPath!, bridgePath)
+          }
+        })
       }
     },
   }
