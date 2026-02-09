@@ -27,7 +27,7 @@ return [
      */
     'upstream_monitor' => [
         'enabled' => env('UPSTREAM_MONITOR_ENABLED', false),
-        'remote' => env('UPSTREAM_MONITOR_REMOTE', 'origin/main'),
+        'remote' => env('UPSTREAM_MONITOR_REMOTE', 'blueprint'),
         'branch' => env('UPSTREAM_MONITOR_BRANCH', 'main'),
     ],
 ];
