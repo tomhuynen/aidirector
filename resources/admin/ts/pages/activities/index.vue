@@ -3,8 +3,13 @@
     <DataTable :resource="activities">
       <template #cell(causer)="{ value }">
         <span class="flex items-center gap-1">
-          <LinkIcon class="size-3 text-muted-foreground" />
-          {{ value }}
+          <template v-if="value">
+            <LinkIcon class="size-3 text-muted-foreground" />
+            {{ value }}
+          </template>
+          <Badge v-else variant="outline">
+            {{ $t('System') }}
+          </Badge>
         </span>
       </template>
     </DataTable>
@@ -15,6 +20,7 @@ import AppLayout from '@admin/ts/layouts/App.vue'
 import type { Inertia, PageProps } from '@admin/ts/types/utils'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
+import Badge from '@shared/components/ui/badge/Badge.vue'
 import { DataTable } from '@shared:ui/data-table'
 import { LinkIcon } from 'lucide-vue-next'
 
