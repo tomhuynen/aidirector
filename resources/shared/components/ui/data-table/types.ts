@@ -217,8 +217,10 @@ export interface TableViews {
 }
 
 export interface TableView {
-  name: string
+  id: string | number
+  title: string
   state: TableState
+  deleteUrl: string
 }
 
 // Actions composable return type

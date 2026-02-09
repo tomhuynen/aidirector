@@ -5,7 +5,8 @@
       resource.hasSearch ||
       resource.hasExports ||
       resource.hasFilters ||
-      resource.hasToggleableColumns
+      resource.hasToggleableColumns ||
+      resource.views
     "
     class="flex flex-col justify-between gap-4 md:flex-row md:items-center"
   >
@@ -28,6 +29,13 @@
 
       <DataTableAddFilter v-if="resource.hasFilters" :resource="resource" :table="table" />
 
+      <DataTableViewsDropdown
+        v-if="resource.views"
+        :views="resource.views"
+        :current-state="resource.state"
+        @view-selected="(view) => table.putState(view.state)"
+      />
+
       <DataTableColumnToggle v-if="resource.hasToggleableColumns" :resource="resource" :table="table" />
     </div>
   </div>
@@ -41,6 +49,7 @@ import { computed } from 'vue'
 import DataTableAddFilter from './DataTableAddFilter.vue'
 import DataTableBulkActions from './DataTableBulkActions.vue'
 import DataTableColumnToggle from './DataTableColumnToggle.vue'
+import DataTableViewsDropdown from './DataTableViewsDropdown.vue'
 import type { TableResource, UseActionsReturn, UseTableReturn } from './types'
 
 const props = defineProps<{

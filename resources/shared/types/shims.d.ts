@@ -103,6 +103,7 @@ declare module '@inertiaui/table-vue' {
     isNavigating: Ref<boolean>
     isSortedByColumn: (column: TableColumn) => false | 'asc' | 'desc'
     makeSticky: (column: TableColumn) => void
+    putState: (state: Record<string, any>) => void
     removeFilter: (filter: TableFilter) => void
     setPerPage: (perPage: number) => void
     setSort: (sort: string) => void
