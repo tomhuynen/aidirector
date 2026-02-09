@@ -1,3 +1,4 @@
+export { setIconResolver } from './composables/useIcons'
 export { default as DataTable } from './DataTable.vue'
 export { default as DataTableAddFilter } from './DataTableAddFilter.vue'
 export { default as DataTableBody } from './DataTableBody.vue'
