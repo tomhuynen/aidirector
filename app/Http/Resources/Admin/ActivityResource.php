@@ -27,8 +27,8 @@ class ActivityResource extends JsonResource
                 'type' => $this->subject->getMorphClass(),
             ],
             'causer' => [
-                'id' => $this->causer->getRouteKey(),
-                'type' => $this->causer->getMorphClass(),
+                'id' => $this->causer?->getRouteKey(),
+                'type' => $this->causer?->getMorphClass(),
                 'name' => $this->causer->name ?? null,
                 'email' => $this->causer->email ?? null,
             ],

@@ -94,11 +94,13 @@ class Activities extends Table
                 attribute: 'causer',
                 header: __('Causer'),
                 toggleable: false,
-                mapAs: fn(User $user) => $user->email,
+                mapAs: fn(?User $user) => $user->email ?? null,
             )->url(
-                fn(Activity $activity, Url $url) => $url
+                fn(Activity $activity, Url $url) => $activity->causer
+                ? $url
                     ->route('admin.accounts.view', $activity->causer)
                     ->openInNewTab()
+                : null
             ),
             DateTimeColumn::make(
                 attribute: 'created_at',
