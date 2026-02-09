@@ -34,7 +34,7 @@ class AppCoreInit extends Command
      *
      * @var string
      */
-    protected $remoteName = 'coremis';
+    protected $remoteName = 'blueprint';
 
     public function __construct(protected Git $git)
     {
