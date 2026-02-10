@@ -31,7 +31,4 @@ yarn-error.log
 /public/vendor/*
 
 # AI
-.cursor
 .kiro
-CLAUDE.md
-.mcp.json
