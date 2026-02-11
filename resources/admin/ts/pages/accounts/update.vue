@@ -68,7 +68,11 @@ defineOptions({
 
 const props = defineProps<PageProps<Inertia.Pages.Accounts.Update>>()
 
-const form = useForm<Omit<App.Http.Controllers.Admin.Accounts.UpdateController.Store.Request, 'roles.*'>>({
+type Request = Omit<App.Http.Controllers.Admin.Accounts.UpdateController.Store.Request, 'roles.*' | 'roles'> & {
+  roles: string[]
+}
+
+const form = useForm<Request>({
   name: props.account?.name ?? '',
   email: props.account?.email ?? '',
   roles: props.account?.roles.map((role) => role.name) ?? [],

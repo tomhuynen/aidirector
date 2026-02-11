@@ -5,21 +5,28 @@ import { initializeTheme } from '@admin:composables/appearance'
 import { createInertiaApp } from '@inertiajs/vue3'
 import { initFromPageProps, ModalLink, ModalRoot } from '@inertiaui/modal-vue'
 import { AppModal } from '@shared:ui/modal'
-import { createApp, type DefineComponent, h } from 'vue'
+import { createApp, type DefineComponent, h, type Plugin } from 'vue'
 
 import { useIcons } from './composables/icons'
 import { registerPlugins } from './shared/plugins'
 
 const appName = import.meta.env.VITE_APP_NAME
 
+type SetupProps = {
+  el: HTMLElement
+  App: DefineComponent
+  props: Record<string, unknown>
+  plugin: Plugin
+}
+
 createInertiaApp({
-  title: (title) => `${title} - ${appName}`,
-  resolve: (name) => {
+  title: (title: string) => `${title} - ${appName}`,
+  resolve: (name: string) => {
     const pages = import.meta.glob('./pages/**/*.vue', { eager: true })
 
     return pages[`./pages/${name}.vue`] as DefineComponent
   },
-  setup: ({ el, App, props, plugin }) => {
+  setup: ({ el, App, props, plugin }: SetupProps) => {
     initFromPageProps(props)
 
     const app = createApp({
