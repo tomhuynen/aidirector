@@ -202,7 +202,8 @@ function extractScrambleProps(schema: string, operation: string): Record<string,
 
 function extractPages(content: string): PageType[] {
   const start = content.indexOf('export namespace Pages {')
-  const end = content.indexOf('export namespace Laravel')
+  // Match 'export namespace Laravel {' at root level (no leading spaces)
+  const end = content.indexOf('\nexport namespace Laravel {')
   if (start === -1 || end === -1) return []
 
   const pages: PageType[] = []
