@@ -13,6 +13,8 @@ type TypeGeneratorOptions = {
   wayfinderTypesPath?: string
   bridgeOutputPath?: string
   apiName?: string
+  /** Controller path prefixes to include (e.g., ['Admin', 'Auth'] or ['Public', '_root']). */
+  controllerPrefixes?: string[]
 }
 
 type ResourceRef = { fullPath: string; className: string }
@@ -55,7 +57,7 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
         const bridgePath = options.bridgeOutputPath || options.outputPath.replace(/\.d\.ts$/, '-bridge.d.ts')
 
         if (filesExist.every(Boolean)) {
-          await generateBridge(options.outputPath, options.wayfinderTypesPath, bridgePath)
+          await generateBridge(options.outputPath, options.wayfinderTypesPath, bridgePath, options.controllerPrefixes)
         } else {
           // eslint-disable-next-line no-console
           console.log('[type-generator] Skipping bridge generation (waiting for dependencies to be generated)')
@@ -65,7 +67,12 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
         server.watcher.add(options.wayfinderTypesPath)
         server.watcher.on('change', async (changedPath) => {
           if (changedPath === options.wayfinderTypesPath) {
-            await generateBridge(options.outputPath, options.wayfinderTypesPath!, bridgePath)
+            await generateBridge(
+              options.outputPath,
+              options.wayfinderTypesPath!,
+              bridgePath,
+              options.controllerPrefixes,
+            )
           }
         })
       }
@@ -73,7 +80,12 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
   }
 }
 
-async function generateBridge(schemaPath: string, wayfinderPath: string, outputPath: string): Promise<void> {
+async function generateBridge(
+  schemaPath: string,
+  wayfinderPath: string,
+  outputPath: string,
+  controllerPrefixes?: string[],
+): Promise<void> {
   try {
     const [wayfinder, schema, prettierConfig] = await Promise.all([
       readFile(wayfinderPath, 'utf-8'),
@@ -81,10 +93,10 @@ async function generateBridge(schemaPath: string, wayfinderPath: string, outputP
       prettier.resolveConfig(outputPath),
     ])
 
-    const resources = extractResources(wayfinder)
+    const resources = extractResources(wayfinder, controllerPrefixes)
     const schemas = extractSchemas(schema)
     const overrides = extractOverrides(wayfinder, schema)
-    const pages = extractPages(wayfinder)
+    const pages = extractPages(wayfinder, controllerPrefixes)
 
     const content = buildBridgeContent(resources, schemas, overrides, pages)
     const formatted = await prettier.format(content, { ...prettierConfig, filepath: outputPath })
@@ -98,12 +110,21 @@ async function generateBridge(schemaPath: string, wayfinderPath: string, outputP
   }
 }
 
-function extractResources(content: string): ResourceRef[] {
+function extractResources(content: string, controllerPrefixes?: string[]): ResourceRef[] {
   const matches = content.match(/App\.Http\.Resources\.[A-Za-z.]+/g) || []
-  return [...new Set(matches)].map((fullPath) => ({
-    fullPath,
-    className: fullPath.split('.').pop()!,
-  }))
+  return [...new Set(matches)]
+    .filter((fullPath) => {
+      if (!controllerPrefixes) return true
+      // Extract resource prefix (e.g., 'Admin' from 'App.Http.Resources.Admin.UserResource')
+      const parts = fullPath.split('.')
+      if (parts.length < 5) return false
+      const resourcePrefix = parts[3]
+      return controllerPrefixes.includes(resourcePrefix)
+    })
+    .map((fullPath) => ({
+      fullPath,
+      className: fullPath.split('.').pop()!,
+    }))
 }
 
 function extractSchemas(content: string): Set<string> {
@@ -200,24 +221,45 @@ function extractScrambleProps(schema: string, operation: string): Record<string,
   return props
 }
 
-function extractPages(content: string): PageType[] {
+function extractPages(content: string, controllerPrefixes?: string[]): PageType[] {
   const start = content.indexOf('export namespace Pages {')
-  // Match 'export namespace Laravel {' at root level (no leading spaces)
   const end = content.indexOf('\nexport namespace Laravel {')
   if (start === -1 || end === -1) return []
 
   const pages: PageType[] = []
-  let currentNamespace: string | null = null
+  const namespaceStack: string[] = []
+  let lastControllerPrefix: string | null = null
 
   for (const line of content.substring(start, end).split('\n')) {
+    // Track controller prefix from @see comments
+    const seeMatch = line.match(/@see\s*\[\\App\\Http\\Controllers\\([A-Za-z]+)(?:\\|::)/)
+    if (seeMatch) {
+      const firstPart = seeMatch[1]
+      // If it ends with 'Controller', it's a root-level controller (no prefix)
+      lastControllerPrefix = firstPart.endsWith('Controller') ? null : firstPart
+    }
+
     const nsMatch = line.match(/export namespace (\w+) \{/)
     if (nsMatch && !['Pages', 'Inertia'].includes(nsMatch[1])) {
-      currentNamespace = nsMatch[1]
+      namespaceStack.push(nsMatch[1])
+    }
+
+    if (/^\s*\}\s*$/.test(line) && namespaceStack.length > 0) {
+      namespaceStack.pop()
     }
 
     const typeMatch = line.match(/export type (\w+) = /)
-    if (typeMatch && currentNamespace) {
-      pages.push({ namespace: currentNamespace, typeName: typeMatch[1] })
+    if (typeMatch) {
+      // Filter by controller prefix if specified
+      if (controllerPrefixes) {
+        const matches = lastControllerPrefix
+          ? controllerPrefixes.includes(lastControllerPrefix)
+          : controllerPrefixes.includes('_root')
+        if (!matches) continue
+      }
+
+      const namespace = namespaceStack.length > 0 ? namespaceStack[namespaceStack.length - 1] : '_root'
+      pages.push({ namespace, typeName: typeMatch[1] })
     }
   }
 
@@ -250,7 +292,7 @@ export type { App } from '@wayfinder/types'
 export type PageProps<T> = Omit<T, 'app' | 'isImpersonated' | 'page'>
 
 declare module '@wayfinder/types' {
-${buildResourceAugmentation(resourceGroups, schemas)}
+${buildResourceNamespaces(resourceGroups, schemas)}
 ${buildIlluminateTypes()}
 }
 
@@ -263,7 +305,7 @@ ${buildPageTypes(pageGroups, overrideMap)}
 `
 }
 
-function buildResourceAugmentation(groups: Map<string, ResourceRef[]>, schemas: Set<string>): string {
+function buildResourceNamespaces(groups: Map<string, ResourceRef[]>, schemas: Set<string>): string {
   let content = ''
   for (const [path, refs] of groups) {
     const parts = path.split('.')
@@ -298,18 +340,30 @@ export type DatabaseNotification = { id: string; type: string; data: Record<stri
 function buildPageTypes(groups: Map<string, PageType[]>, overrides: Map<string, PageOverride>): string {
   let content = ''
   for (const [namespace, types] of groups) {
-    content += `export namespace ${namespace} {\n`
+    const isRoot = namespace === '_root'
+
+    if (!isRoot) {
+      content += `export namespace ${namespace} {\n`
+    }
+
     for (const { typeName } of types) {
       const override = overrides.get(`${namespace}.${typeName}`)
+      const wayfinderPath = isRoot
+        ? `WayfinderInertia.Pages.${typeName}`
+        : `WayfinderInertia.Pages.${namespace}.${typeName}`
+
       if (override) {
         const omit = override.properties.map((p) => `'${p.name}'`).join(' | ')
         const props = override.properties.map((p) => `${p.name}: ${p.type}`).join('; ')
-        content += `export type ${typeName} = Omit<WayfinderInertia.Pages.${namespace}.${typeName}, ${omit}> & { ${props} }\n`
+        content += `export type ${typeName} = Omit<${wayfinderPath}, ${omit}> & { ${props} }\n`
       } else {
-        content += `export type ${typeName} = WayfinderInertia.Pages.${namespace}.${typeName}\n`
+        content += `export type ${typeName} = ${wayfinderPath}\n`
       }
     }
-    content += '}\n'
+
+    if (!isRoot) {
+      content += '}\n'
+    }
   }
   return content
 }

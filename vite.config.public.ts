@@ -1,9 +1,13 @@
 import { resolve } from 'node:path'
 
+import { wayfinder } from '@laravel/vite-plugin-wayfinder'
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
 import laravel from 'laravel-vite-plugin'
 import { defineConfig } from 'vite'
+
+import { typeGenerator } from './resources/vite/plugins/type-generator'
+
 const customElementTags: string[] = []
 
 export default defineConfig(({ command }) => {
@@ -28,6 +32,15 @@ export default defineConfig(({ command }) => {
         },
       }),
       tailwindcss(),
+      typeGenerator({
+        outputPath: resolve(__dirname, 'resources/public/ts/types/schema.d.ts'),
+        apiName: 'public',
+        wayfinderTypesPath: resolve(__dirname, 'resources/public/ts/wayfinder/types.d.ts'),
+        controllerPrefixes: ['Public', '_root'],
+      }),
+      wayfinder({
+        path: resolve(__dirname, 'resources/public/ts/wayfinder'),
+      }),
     ],
     build: {
       outDir: resolve(__dirname, 'public/assets/public/'),
@@ -53,10 +66,11 @@ export default defineConfig(({ command }) => {
       alias: {
         '@public:css': resolve(__dirname, 'resources/public/css/'),
         '@public:components': resolve(__dirname, 'resources/public/ts/components/'),
+        '@public:types': resolve(__dirname, 'resources/public/ts/types/'),
         '@public': resolve(__dirname, 'resources/public/'),
         '@shared': resolve(__dirname, 'resources/shared/'),
         '@shared:ui': resolve(__dirname, 'resources/shared/components/ui/'),
-        '@wayfinder': resolve(__dirname, 'resources/shared/wayfinder/'),
+        '@wayfinder': resolve(__dirname, 'resources/public/ts/wayfinder/'),
       },
     },
   }
