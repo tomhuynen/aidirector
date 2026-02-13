@@ -1,5 +1,5 @@
 // Re-export everything from the bridge (single source of truth)
-export type { App, components, Inertia, operations, PageProps, paths } from './schema-bridge'
+export type { App, components, CursorPaginatedData, Inertia, operations, PageProps, paths } from './schema-bridge'
 
 // Legacy Scramble-based type utilities (kept for HTTP client typing)
 import type { paths } from './schema-bridge'
