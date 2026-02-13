@@ -17,23 +17,35 @@ class SetTenantStorage implements SwitchTenantTask
         /** @var Tenant $tenant */
         $prefix = $tenant->settings['storage_prefix'];
 
-        Storage::set(Disk::TENANT->value, Storage::build([
+        $tenantConfig = [
             'driver' => 'scoped',
             'disk' => 'local',
             'prefix' => $prefix,
-        ]));
+        ];
 
-        Storage::set(Disk::TENANT_CLOUD->value, Storage::build([
+        $tenantCloudConfig = [
             'driver' => 'scoped',
             'disk' => 's3',
             'prefix' => $prefix,
-        ]));
+        ];
 
-        Storage::set(Disk::TENANT_BACKUP->value, Storage::build([
+        $tenantBackupConfig = [
             'driver' => 'scoped',
             'disk' => 'backup',
             'prefix' => $prefix,
-        ]));
+        ];
+
+        // Register disks with Storage facade
+        Storage::set(Disk::TENANT->value, Storage::build($tenantConfig));
+        Storage::set(Disk::TENANT_CLOUD->value, Storage::build($tenantCloudConfig));
+        Storage::set(Disk::TENANT_BACKUP->value, Storage::build($tenantBackupConfig));
+
+        // Also set config so packages like Spatie Media Library can find them
+        config([
+            'filesystems.disks.' . Disk::TENANT->value => $tenantConfig,
+            'filesystems.disks.' . Disk::TENANT_CLOUD->value => $tenantCloudConfig,
+            'filesystems.disks.' . Disk::TENANT_BACKUP->value => $tenantBackupConfig,
+        ]);
     }
 
     public function forgetCurrent(): void
@@ -42,6 +54,13 @@ class SetTenantStorage implements SwitchTenantTask
             Disk::TENANT->value,
             Disk::TENANT_CLOUD->value,
             Disk::TENANT_BACKUP->value,
+        ]);
+
+        // Also remove from config
+        config([
+            'filesystems.disks.' . Disk::TENANT->value => null,
+            'filesystems.disks.' . Disk::TENANT_CLOUD->value => null,
+            'filesystems.disks.' . Disk::TENANT_BACKUP->value => null,
         ]);
     }
 }
