@@ -57,7 +57,13 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
         const bridgePath = options.bridgeOutputPath || options.outputPath.replace(/\.d\.ts$/, '-bridge.d.ts')
 
         if (filesExist.every(Boolean)) {
-          await generateBridge(options.outputPath, options.wayfinderTypesPath, bridgePath, options.controllerPrefixes)
+          await generateBridge(
+            options.outputPath,
+            options.wayfinderTypesPath,
+            bridgePath,
+            options.controllerPrefixes,
+            options.apiName,
+          )
         } else {
           // eslint-disable-next-line no-console
           console.log('[type-generator] Skipping bridge generation (waiting for dependencies to be generated)')
@@ -72,6 +78,7 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
               options.wayfinderTypesPath!,
               bridgePath,
               options.controllerPrefixes,
+              options.apiName,
             )
           }
         })
@@ -85,6 +92,7 @@ async function generateBridge(
   wayfinderPath: string,
   outputPath: string,
   controllerPrefixes?: string[],
+  apiName?: string,
 ): Promise<void> {
   try {
     const [wayfinder, schema, prettierConfig] = await Promise.all([
@@ -95,10 +103,10 @@ async function generateBridge(
 
     const resources = extractResources(wayfinder, controllerPrefixes)
     const schemas = extractSchemas(schema)
-    const overrides = extractOverrides(wayfinder, schema, schemas, controllerPrefixes)
+    const overrides = extractOverrides(wayfinder, schema)
     const pages = extractPages(wayfinder, controllerPrefixes)
 
-    const content = buildBridgeContent(resources, schemas, overrides, pages)
+    const content = buildBridgeContent(resources, schemas, overrides, pages, apiName)
     const formatted = await prettier.format(content, { ...prettierConfig, filepath: outputPath })
     await writeFile(outputPath, formatted)
 
@@ -135,55 +143,31 @@ function extractSchemas(content: string): Set<string> {
   return schemas
 }
 
-function extractOverrides(
-  wayfinder: string,
-  schema: string,
-  schemas: Set<string>,
-  controllerPrefixes?: string[],
-): PageOverride[] {
-  // Match docblock with @see comments + type definition (docblock ends with */)
-  const pattern = /((?:\s*\*\s*@see\s*\[[^\]]+\][^\n]*\n)+)[^]*?export type (\w+) = Inertia\.SharedData & \{([^}]+)\}/g
+function extractOverrides(wayfinder: string, schema: string): PageOverride[] {
+  const pattern = /@see\s*\[\\([^\]]+)\][^\n]*\n[^]*?export type (\w+) = Inertia\.SharedData & \{([^}]+)\}/g
   const overrides: PageOverride[] = []
-  const prefixes = controllerPrefixes || ['Admin', 'Public']
 
-  for (const [, seeBlock, typeName, propsBlock] of wayfinder.matchAll(pattern)) {
+  for (const [, controller, typeName, propsBlock] of wayfinder.matchAll(pattern)) {
     const needsFix = propsBlock.includes('AnonymousResourceCollection') || /:\s*unknown\b/.test(propsBlock)
     if (!needsFix) continue
 
-    // Find matching controller in the @see block for any allowed prefix
-    let namespace: string | null = null
-    let fullControllerPath: string | null = null
+    const nsMatch = controller.match(/App\\Http\\Controllers\\Admin\\(\w+)\\/)
+    if (!nsMatch) continue
 
-    for (const prefix of prefixes) {
-      const controllerMatch = seeBlock.match(new RegExp(`\\\\App\\\\Http\\\\Controllers\\\\${prefix}\\\\(\\w+)\\\\`))
-      if (controllerMatch) {
-        namespace = controllerMatch[1]
-        const fullMatch = seeBlock.match(new RegExp(`\\\\App\\\\Http\\\\Controllers\\\\${prefix}\\\\[^\\]]+`))
-        fullControllerPath = fullMatch ? fullMatch[0] : null
-        break
-      }
-    }
-
-    if (!namespace || !fullControllerPath) continue
-
-    const operationName = controllerToOperation(fullControllerPath, prefixes)
+    const operationName = controllerToOperation(controller)
     const scrambleProps = extractScrambleProps(schema, operationName)
     if (!scrambleProps) continue
 
-    const properties = extractPropertiesToFix(propsBlock, scrambleProps, schemas)
+    const properties = extractPropertiesToFix(propsBlock, scrambleProps)
     if (properties.length > 0) {
-      overrides.push({ namespace, typeName, properties })
+      overrides.push({ namespace: nsMatch[1], typeName, properties })
     }
   }
 
   return overrides
 }
 
-function extractPropertiesToFix(
-  propsBlock: string,
-  scrambleProps: Record<string, string>,
-  schemas: Set<string>,
-): Property[] {
+function extractPropertiesToFix(propsBlock: string, scrambleProps: Record<string, string>): Property[] {
   const properties: Property[] = []
   const patterns = [/(\w+):\s*Illuminate\.Http\.Resources\.Json\.AnonymousResourceCollection/g, /(\w+):\s*unknown\b/g]
 
@@ -191,17 +175,6 @@ function extractPropertiesToFix(
     for (const [, name] of propsBlock.matchAll(pattern)) {
       if (scrambleProps[name]) {
         properties.push({ name, type: scrambleProps[name] })
-      } else if (pattern.source.includes('unknown')) {
-        // Try to infer cursor-paginated type from property name
-        // e.g., 'messages' -> 'MessageResource', 'users' -> 'UserResource'
-        const singularName = name.endsWith('s') ? name.slice(0, -1) : name
-        const resourceName = singularName.charAt(0).toUpperCase() + singularName.slice(1) + 'Resource'
-        if (schemas.has(resourceName)) {
-          properties.push({
-            name,
-            type: `CursorPaginatedData<components['schemas']['${resourceName}']>`,
-          })
-        }
       }
     }
   }
@@ -209,33 +182,21 @@ function extractPropertiesToFix(
   return properties
 }
 
-function controllerToOperation(ref: string, controllerPrefixes: string[]): string {
-  // Build regex pattern from configured prefixes (ref may start with \)
-  const prefixPattern = controllerPrefixes.join('|')
-  const match = ref.match(
-    new RegExp(`\\\\?App\\\\Http\\\\Controllers\\\\(${prefixPattern})\\\\(\\w+)\\\\(\\w+)Controller(?:::(\\w+))?`),
-  )
+function controllerToOperation(ref: string): string {
+  const match = ref.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)Controller::(\w+)/)
   if (!match) return ''
 
-  const [, prefix, resource, controller, method = controller.toLowerCase()] = match
-  const p = prefix.toLowerCase()
+  const [, resource, controller, method] = match
   const r = resource.toLowerCase()
   const c = controller.toLowerCase()
 
-  // Determine route prefix based on controller prefix
-  // 'Admin' -> 'admin.', 'Public' -> '' (no prefix)
-  const routePrefix = p === 'public' ? '' : `${p}.`
-
-  // Handle special namespaced routes (admin only)
-  if (p === 'admin') {
-    if (r === 'system') return `admin.system.${c}`
-    if (r === 'settings') return `admin.settings.${c}.${method}`
-  }
+  if (r === 'system') return `admin.system.${c}`
+  if (r === 'settings') return `admin.settings.${c}.${method}`
 
   const crudMethods = ['index', 'view', 'update', 'create']
-  if (crudMethods.includes(c) && c === method) return `${routePrefix}${r}.${method}`
+  if (crudMethods.includes(c) && c === method) return `admin.${r}.${method}`
 
-  return `${routePrefix}${r}.${method}`
+  return `admin.${r}.${method}`
 }
 
 function extractScrambleProps(schema: string, operation: string): Record<string, string> | null {
@@ -318,6 +279,7 @@ function buildBridgeContent(
   schemas: Set<string>,
   overrides: PageOverride[],
   pages: PageType[],
+  apiName?: string,
 ): string {
   const needsOperations = overrides.some((o) => o.properties.some((p) => p.type.startsWith("operations['")))
   const imports = needsOperations ? 'components, operations' : 'components'
@@ -332,24 +294,13 @@ function buildBridgeContent(
  * Auto-generated by type-generator plugin.
  */
 import type { ${imports} } from './schema'
-import type { Inertia as WayfinderInertia } from '@wayfinder/types'
+import type { Inertia as WayfinderInertia } from '@${apiName}:wayfinder/types'
 
 export type { components, paths, operations } from './schema'
-export type { App } from '@wayfinder/types'
+export type { App } from '@${apiName}:wayfinder/types'
 export type PageProps<T> = Omit<T, 'app' | 'isImpersonated' | 'page'>
 
-/** Laravel cursor-paginated response structure (for Inertia::scroll with cursorPaginate) */
-export interface CursorPaginatedData<T> {
-  data: T[]
-  path: string
-  per_page: number
-  next_cursor: string | null
-  next_page_url: string | null
-  prev_cursor: string | null
-  prev_page_url: string | null
-}
-
-declare module '@wayfinder/types' {
+declare module '@${apiName}:wayfinder/types' {
 ${buildResourceNamespaces(resourceGroups, schemas)}
 ${buildIlluminateTypes()}
 }

@@ -103,7 +103,7 @@ export default defineConfig(({ command }) => {
         '@admin': resolve(__dirname, 'resources/admin/'),
         '@shared': resolve(__dirname, 'resources/shared/'),
         '@shared:ui': resolve(__dirname, 'resources/shared/components/ui/'),
-        '@wayfinder': resolve(__dirname, 'resources/admin/ts/wayfinder/'),
+        '@admin:wayfinder': resolve(__dirname, 'resources/admin/ts/wayfinder/'),
       },
     },
   }

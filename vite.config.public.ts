@@ -70,7 +70,7 @@ export default defineConfig(({ command }) => {
         '@public': resolve(__dirname, 'resources/public/'),
         '@shared': resolve(__dirname, 'resources/shared/'),
         '@shared:ui': resolve(__dirname, 'resources/shared/components/ui/'),
-        '@wayfinder': resolve(__dirname, 'resources/public/ts/wayfinder/'),
+        '@public:wayfinder': resolve(__dirname, 'resources/public/ts/wayfinder/'),
       },
     },
   }
