@@ -187,6 +187,22 @@ function extractPropertiesToFix(propsBlock: string, scrambleProps: Record<string
 }
 
 function controllerToOperation(ref: string): string {
+  // Handle nested controllers like Admin\Clients\Programs\ViewController
+  const nestedMatch = ref.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)\\(\w+)Controller::(\w+)/)
+  if (nestedMatch) {
+    const [, parent, child, controller, method] = nestedMatch
+    const p = parent.toLowerCase()
+    const ch = child.toLowerCase()
+    const c = controller.toLowerCase()
+
+    const crudMethods = ['index', 'view', 'update', 'create']
+    if (crudMethods.includes(c) && c === method) {
+      return `admin.${p}.${ch}.${method}`
+    }
+    return `admin.${p}.${ch}.${method}`
+  }
+
+  // Handle standard controllers like Admin\Programs\ViewController
   const match = ref.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)Controller::(\w+)/)
   if (!match) return ''
 
