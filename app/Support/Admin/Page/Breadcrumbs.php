@@ -59,16 +59,17 @@ class Breadcrumbs
     {
         $routeParts = collect(['admin']);
         $breadcrumbs = collect();
+        $accumulatedParams = [];
 
         $segments
             ->reject(fn(string $segment) => in_array($segment, self::$skip, true))
-            ->each(function (string $segment) use ($parameters, $routeParts, $breadcrumbs) {
+            ->each(function (string $segment) use ($parameters, $routeParts, $breadcrumbs, &$accumulatedParams) {
                 $routeParts->push($segment);
                 $title = self::$titles[$segment] ?? Str::headline($segment);
 
                 // Try index route, fall back to no link if it doesn't exist
                 $indexRouteName = collect($routeParts)->push('index')->implode('.');
-                $href = self::routeExists($indexRouteName) ? route($indexRouteName) : null;
+                $href = self::routeExists($indexRouteName) ? route($indexRouteName, $accumulatedParams) : null;
 
                 $breadcrumbs->push(BreadcrumbItem::make(__($title), $href));
 
@@ -77,11 +78,12 @@ class Breadcrumbs
 
                 if ($parameters->has($modelKey)) {
                     $model = $parameters->get($modelKey);
+                    $accumulatedParams[$modelKey] = $model;
                     $viewRouteName = collect($routeParts)->push('view')->implode('.');
 
                     // Only add model breadcrumb if view route exists
                     if (self::routeExists($viewRouteName)) {
-                        $breadcrumbs->push(BreadcrumbItem::fromModel($model, $viewRouteName));
+                        $breadcrumbs->push(BreadcrumbItem::fromModel($model, $viewRouteName, $accumulatedParams));
                     }
                 }
             });

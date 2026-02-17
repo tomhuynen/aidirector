@@ -36,12 +36,14 @@ class BreadcrumbItem implements Arrayable
 
     /**
      * Create from model with name/title attribute.
+     *
+     * @param  array<string, mixed>  $routeParameters
      */
-    public static function fromModel(Model $model, string $routeName): self
+    public static function fromModel(Model $model, string $routeName, array $routeParameters = []): self
     {
         return new self(
             title: $model->name ?? $model->title ?? (string) $model->getKey(),
-            href: route($routeName, $model),
+            href: route($routeName, $routeParameters ?: $model),
         );
     }
 
