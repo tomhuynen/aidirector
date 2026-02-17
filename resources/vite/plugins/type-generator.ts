@@ -151,8 +151,12 @@ function extractOverrides(wayfinder: string, schema: string): PageOverride[] {
     const needsFix = propsBlock.includes('AnonymousResourceCollection') || /:\s*unknown\b/.test(propsBlock)
     if (!needsFix) continue
 
+    // Handle nested controllers like Clients/Programs/ViewController
+    const nestedMatch = controller.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)\\/)
     const nsMatch = controller.match(/App\\Http\\Controllers\\Admin\\(\w+)\\/)
     if (!nsMatch) continue
+
+    const namespace = nestedMatch ? `${nestedMatch[1]}.${nestedMatch[2]}` : nsMatch[1]
 
     const operationName = controllerToOperation(controller)
     const scrambleProps = extractScrambleProps(schema, operationName)
@@ -160,7 +164,7 @@ function extractOverrides(wayfinder: string, schema: string): PageOverride[] {
 
     const properties = extractPropertiesToFix(propsBlock, scrambleProps)
     if (properties.length > 0) {
-      overrides.push({ namespace: nsMatch[1], typeName, properties })
+      overrides.push({ namespace, typeName, properties })
     }
   }
 
@@ -266,7 +270,8 @@ function extractPages(content: string, controllerPrefixes?: string[]): PageType[
         if (!matches) continue
       }
 
-      const namespace = namespaceStack.length > 0 ? namespaceStack[namespaceStack.length - 1] : '_root'
+      // Use full namespace path to avoid collisions (e.g., Programs.View vs Clients.Programs.View)
+      const namespace = namespaceStack.length > 0 ? namespaceStack.join('.') : '_root'
       pages.push({ namespace, typeName: typeMatch[1] })
     }
   }
@@ -350,9 +355,11 @@ function buildPageTypes(groups: Map<string, PageType[]>, overrides: Map<string, 
   let content = ''
   for (const [namespace, types] of groups) {
     const isRoot = namespace === '_root'
+    const parts = isRoot ? [] : namespace.split('.')
 
     if (!isRoot) {
-      content += `export namespace ${namespace} {\n`
+      // Open nested namespaces
+      content += parts.map((p) => `export namespace ${p} {`).join(' ') + '\n'
     }
 
     for (const { typeName } of types) {
@@ -371,7 +378,8 @@ function buildPageTypes(groups: Map<string, PageType[]>, overrides: Map<string, 
     }
 
     if (!isRoot) {
-      content += '}\n'
+      // Close nested namespaces
+      content += '}'.repeat(parts.length) + '\n'
     }
   }
   return content
