@@ -54,9 +54,9 @@ import FormInput from '@admin:components/Form/Input.vue'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
 import type { App } from '@admin:types/utils'
+import { update } from '@admin:wayfinder/App/Http/Controllers/Admin/Settings/PasswordController'
 import { useForm } from '@inertiajs/vue3'
 import { Button } from '@shared:ui/button'
-import { update } from '@wayfinder/App/Http/Controllers/Admin/Settings/PasswordController'
 
 defineOptions({
   layout: [SettingsLayout],
