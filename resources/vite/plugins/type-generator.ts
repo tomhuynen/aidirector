@@ -186,13 +186,17 @@ function extractPropertiesToFix(propsBlock: string, scrambleProps: Record<string
   return properties
 }
 
+function pascalToKebab(str: string): string {
+  return str.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()
+}
+
 function controllerToOperation(ref: string): string {
   // Handle nested controllers like Admin\Clients\Programs\ViewController
   const nestedMatch = ref.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)\\(\w+)Controller::(\w+)/)
   if (nestedMatch) {
     const [, parent, child, controller, method] = nestedMatch
-    const p = parent.toLowerCase()
-    const ch = child.toLowerCase()
+    const p = pascalToKebab(parent)
+    const ch = pascalToKebab(child)
     const c = controller.toLowerCase()
 
     const crudMethods = ['index', 'view', 'update', 'create']
@@ -207,7 +211,7 @@ function controllerToOperation(ref: string): string {
   if (!match) return ''
 
   const [, resource, controller, method] = match
-  const r = resource.toLowerCase()
+  const r = pascalToKebab(resource)
   const c = controller.toLowerCase()
 
   if (r === 'system') return `admin.system.${c}`
@@ -256,15 +260,15 @@ function extractPages(content: string, controllerPrefixes?: string[]): PageType[
 
   const pages: PageType[] = []
   const namespaceStack: string[] = []
-  let lastControllerPrefix: string | null = null
+  const seenControllerPrefixes: Set<string | null> = new Set()
 
   for (const line of content.substring(start, end).split('\n')) {
-    // Track controller prefix from @see comments
+    // Track controller prefixes from @see comments (may have multiple per type)
     const seeMatch = line.match(/@see\s*\[\\App\\Http\\Controllers\\([A-Za-z]+)(?:\\|::)/)
     if (seeMatch) {
       const firstPart = seeMatch[1]
       // If it ends with 'Controller', it's a root-level controller (no prefix)
-      lastControllerPrefix = firstPart.endsWith('Controller') ? null : firstPart
+      seenControllerPrefixes.add(firstPart.endsWith('Controller') ? null : firstPart)
     }
 
     const nsMatch = line.match(/export namespace (\w+) \{/)
@@ -278,17 +282,21 @@ function extractPages(content: string, controllerPrefixes?: string[]): PageType[
 
     const typeMatch = line.match(/export type (\w+) = /)
     if (typeMatch) {
-      // Filter by controller prefix if specified
+      // Filter by controller prefix if specified - match if ANY prefix matches
       if (controllerPrefixes) {
-        const matches = lastControllerPrefix
-          ? controllerPrefixes.includes(lastControllerPrefix)
-          : controllerPrefixes.includes('_root')
-        if (!matches) continue
+        const matches = [...seenControllerPrefixes].some((prefix) =>
+          prefix ? controllerPrefixes.includes(prefix) : controllerPrefixes.includes('_root'),
+        )
+        if (!matches) {
+          seenControllerPrefixes.clear()
+          continue
+        }
       }
 
       // Use full namespace path to avoid collisions (e.g., Programs.View vs Clients.Programs.View)
       const namespace = namespaceStack.length > 0 ? namespaceStack.join('.') : '_root'
       pages.push({ namespace, typeName: typeMatch[1] })
+      seenControllerPrefixes.clear()
     }
   }
 
@@ -368,37 +376,65 @@ export type DatabaseNotification = { id: string; type: string; data: Record<stri
 }
 
 function buildPageTypes(groups: Map<string, PageType[]>, overrides: Map<string, PageOverride>): string {
-  let content = ''
-  for (const [namespace, types] of groups) {
-    const isRoot = namespace === '_root'
-    const parts = isRoot ? [] : namespace.split('.')
+  // Build a tree structure to properly nest namespaces
+  type NamespaceNode = {
+    types: PageType[]
+    children: Map<string, NamespaceNode>
+  }
 
-    if (!isRoot) {
-      // Open nested namespaces
-      content += parts.map((p) => `export namespace ${p} {`).join(' ') + '\n'
+  const root: NamespaceNode = { types: [], children: new Map() }
+
+  // Build the tree
+  for (const [namespace, types] of groups) {
+    if (namespace === '_root') {
+      root.types.push(...types)
+      continue
     }
 
-    for (const { typeName } of types) {
-      const override = overrides.get(`${namespace}.${typeName}`)
-      const wayfinderPath = isRoot
-        ? `WayfinderInertia.Pages.${typeName}`
-        : `WayfinderInertia.Pages.${namespace}.${typeName}`
+    const parts = namespace.split('.')
+    let current = root
+    for (const part of parts) {
+      if (!current.children.has(part)) {
+        current.children.set(part, { types: [], children: new Map() })
+      }
+      current = current.children.get(part)!
+    }
+    current.types.push(...types)
+  }
+
+  // Render the tree
+  function renderNode(node: NamespaceNode, namespace: string, indent: string): string {
+    let content = ''
+
+    // Render types at this level
+    for (const { typeName } of node.types) {
+      const fullNamespace = namespace || '_root'
+      const override = overrides.get(`${fullNamespace}.${typeName}`)
+      const wayfinderPath = namespace
+        ? `WayfinderInertia.Pages.${namespace}.${typeName}`
+        : `WayfinderInertia.Pages.${typeName}`
 
       if (override) {
         const omit = override.properties.map((p) => `'${p.name}'`).join(' | ')
         const props = override.properties.map((p) => `${p.name}: ${p.type}`).join('; ')
-        content += `export type ${typeName} = Omit<${wayfinderPath}, ${omit}> & { ${props} }\n`
+        content += `${indent}export type ${typeName} = Omit<${wayfinderPath}, ${omit}> & { ${props} }\n`
       } else {
-        content += `export type ${typeName} = ${wayfinderPath}\n`
+        content += `${indent}export type ${typeName} = ${wayfinderPath}\n`
       }
     }
 
-    if (!isRoot) {
-      // Close nested namespaces
-      content += '}'.repeat(parts.length) + '\n'
+    // Render child namespaces
+    for (const [name, child] of node.children) {
+      const childNamespace = namespace ? `${namespace}.${name}` : name
+      content += `${indent}export namespace ${name} {\n`
+      content += renderNode(child, childNamespace, indent + '  ')
+      content += `${indent}}\n`
     }
+
+    return content
   }
-  return content
+
+  return renderNode(root, '', '')
 }
 
 function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
