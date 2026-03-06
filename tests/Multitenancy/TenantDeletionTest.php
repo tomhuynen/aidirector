@@ -6,6 +6,7 @@ use App\Enums\Disk;
 use App\Events\TenantDeleted;
 use App\Events\TenantDeleting;
 use App\Models\Tenant;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
@@ -56,7 +57,7 @@ test('the tenant storage is deleted', function () {
 
     expect(Storage::disk(Disk::TENANT->value)->exists('test.txt'))->toBeTrue();
 
-    $storagePrefix = $tenant->settings->storagePrefix;
+    $storagePrefix = Arr::get($tenant->settings, 'storage_prefix');
 
     $tenant->delete();
 
