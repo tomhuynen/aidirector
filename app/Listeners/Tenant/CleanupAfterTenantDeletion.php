@@ -16,6 +16,9 @@ class CleanupAfterTenantDeletion
     {
         $tenant = $event->tenant;
 
+        // Clear tenant context before dropping database
+        $tenant->forget();
+
         Schema::dropDatabaseIfExists($tenant->getDatabaseName());
     }
 }

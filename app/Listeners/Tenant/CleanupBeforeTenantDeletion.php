@@ -22,8 +22,6 @@ class CleanupBeforeTenantDeletion
             return;
         }
 
-        $tenant->forget();
-
         // Delete all local files in the tenant storage
         $localDisk = Storage::disk('local');
 
