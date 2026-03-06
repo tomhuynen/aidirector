@@ -23,6 +23,7 @@ Route::middleware([
     NeedsTenant::class,
     Delay::class,
 ])
+    ->as('public.')
     ->group(function () {
         require __DIR__ . '/public.php';
     });

@@ -40,6 +40,7 @@ export default defineConfig(({ command }) => {
       }),
       wayfinder({
         path: resolve(__dirname, 'resources/public/ts/wayfinder'),
+        command: 'WAYFINDER_IGNORE_ROUTE_NAMES=nova.*,admin.* php -d memory_limit=-1 ./artisan wayfinder:generate',
       }),
     ],
     build: {
