@@ -39,6 +39,7 @@ This project has domain-specific skills available. You MUST activate the relevan
 - `shadcn-vue-components` — Always checks shadcn-vue for appropriate components before writing custom implementations. Activates when building UI components, forms, dialogs, dropdowns, or any interactive elements. Uses official shadcn-vue patterns.
 - `datatable-architecture` — Monitors DataTable architecture for code duplication. Extracts repeated logic to shared composables/utils. Check before implementing helpers that may already exist.
 - `inertiaui-table-extraction` — Extracts and rewrites @inertiaui/table-vue composables and utilities to local implementations. MANDATORY: read the original source file before writing any replacement code. Activates when extracting useTable, useActions, visitUrl, getActionForItem, getClickableColumn, or any other import from @inertiaui/table-vue.
+- `type-system` — Manages the Scramble → OpenAPI → TypeScript type pipeline. Activates when working with Inertia page props, form request types, `inertia.d.ts`, `schema.d.ts`, Scramble extensions, or TypeScript type generation.
 
 ## Conventions
 
