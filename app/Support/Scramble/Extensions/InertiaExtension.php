@@ -50,7 +50,7 @@ class InertiaExtension implements ExpressionTypeInferExtension
             );
         }
 
-        if (in_array($node->name->toString(), ['lazy', 'defer']) && count($node->args) > 0) {
+        if (in_array($node->name->toString(), ['lazy', 'defer', 'optional']) && count($node->args) > 0) {
             return TypeHelper::getArgType($scope, $node->args, ['content', 0], new ArrayType());
         }
 

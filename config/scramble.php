@@ -8,6 +8,8 @@ use App\Support\Scramble\Extensions\CacheTypeInfer;
 use App\Support\Scramble\Extensions\CallbackExtension;
 use App\Support\Scramble\Extensions\EnumHelpersExtension;
 use App\Support\Scramble\Extensions\InertiaExtension;
+use App\Support\Scramble\Extensions\InertiaSharedDataExtension;
+use App\Support\Scramble\Extensions\TableTypeInfer;
 
 return [
     /*
@@ -23,9 +25,11 @@ return [
 
     'extensions' => [
         InertiaExtension::class,
+        InertiaSharedDataExtension::class,
         CallbackExtension::class,
         ArrayableExtension::class,
         EnumHelpersExtension::class,
         CacheTypeInfer::class,
+        TableTypeInfer::class,
     ],
 ];

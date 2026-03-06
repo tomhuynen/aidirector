@@ -46,7 +46,7 @@ class CacheTypeInfer implements ExpressionTypeInferExtension
         ) {
             // Get the default value type (second argument) if provided
             if (isset($node->args[1])) {
-                $closureType = $scope->getType($node->args[2]->value);
+                $closureType = $scope->getType($node->args[1]->value);
 
                 if ($closureType instanceof FunctionType) {
                     return $closureType->getReturnType();

@@ -1,4 +1,5 @@
 import { access, readFile, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
 import { exec } from 'child_process'
@@ -8,19 +9,13 @@ import { loadEnv } from 'vite'
 
 const execAsync = promisify(exec)
 
+type TypeImport = { type: string; from: string }
+
 type TypeGeneratorOptions = {
   outputPath: string
-  wayfinderTypesPath?: string
-  bridgeOutputPath?: string
   apiName?: string
-  /** Controller path prefixes to include (e.g., ['Admin', 'Auth'] or ['Public', '_root']). */
-  controllerPrefixes?: string[]
+  typeImports?: Record<string, TypeImport>
 }
-
-type ResourceRef = { fullPath: string; className: string }
-type PageOverride = { namespace: string; typeName: string; properties: Property[] }
-type Property = { name: string; type: string }
-type PageType = { namespace: string; typeName: string }
 
 export function typeGenerator(options: TypeGeneratorOptions): Plugin {
   return {
@@ -31,419 +26,345 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
       if (!appUrl) return
 
       const apiName = options.apiName || 'api'
-      const { stdout, stderr } = await execAsync(
-        `npx openapi-typescript ${appUrl}/docs/${apiName}.json -o ${options.outputPath}`,
-        { env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' } },
-      )
+      const inertiaPath = resolve(dirname(options.outputPath), 'inertia.d.ts')
 
-      if (stdout) {
-        // eslint-disable-next-line no-console
-        console.log(stdout)
-      }
-      if (stderr) {
-        // eslint-disable-next-line no-console
-        console.error(stderr)
-      }
+      const fetchSchema = async () => {
+        const { stdout, stderr } = await execAsync(
+          `npx openapi-typescript ${appUrl}/docs/${apiName}.json -o ${options.outputPath}`,
+          { env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' } },
+        )
 
-      if (options.wayfinderTypesPath) {
-        const filesExist = await Promise.all([
-          access(options.outputPath)
-            .then(() => true)
-            .catch(() => false),
-          access(options.wayfinderTypesPath)
-            .then(() => true)
-            .catch(() => false),
-        ])
-
-        const bridgePath = options.bridgeOutputPath || options.outputPath.replace(/\.d\.ts$/, '-bridge.d.ts')
-
-        if (filesExist.every(Boolean)) {
-          await generateBridge(
-            options.outputPath,
-            options.wayfinderTypesPath,
-            bridgePath,
-            options.controllerPrefixes,
-            options.apiName,
-          )
-        } else {
+        if (stdout) {
           // eslint-disable-next-line no-console
-          console.log('[type-generator] Skipping bridge generation (waiting for dependencies to be generated)')
+          console.log(stdout)
         }
-
-        // Watch for wayfinder types changes to regenerate bridge
-        server.watcher.add(options.wayfinderTypesPath)
-        server.watcher.on('change', async (changedPath) => {
-          if (changedPath === options.wayfinderTypesPath) {
-            await generateBridge(
-              options.outputPath,
-              options.wayfinderTypesPath!,
-              bridgePath,
-              options.controllerPrefixes,
-              options.apiName,
-            )
-          }
-        })
+        if (stderr) {
+          // eslint-disable-next-line no-console
+          console.error(stderr)
+        }
       }
+
+      await fetchSchema()
+
+      const exists = await access(options.outputPath)
+        .then(() => true)
+        .catch(() => false)
+
+      if (exists) {
+        await generateInertiaTypes(options.outputPath, inertiaPath, apiName, options.typeImports)
+      }
+
+      // Re-generate inertia.d.ts when schema.d.ts changes
+      server.watcher.add(options.outputPath)
+      server.watcher.on('change', async (changedPath) => {
+        if (changedPath === options.outputPath) {
+          await generateInertiaTypes(options.outputPath, inertiaPath, apiName, options.typeImports)
+        }
+      })
+
+      // Re-fetch schema when PHP files change
+      let debounceTimer: ReturnType<typeof setTimeout>
+      server.watcher.add(resolve(process.cwd(), 'app'))
+      server.watcher.on('change', (changedPath) => {
+        if (!changedPath.endsWith('.php')) return
+
+        clearTimeout(debounceTimer)
+        debounceTimer = setTimeout(async () => {
+          // eslint-disable-next-line no-console
+          console.log(`[type-generator] PHP change detected, refreshing schema...`)
+          await fetchSchema()
+        }, 1000)
+      })
     },
   }
 }
 
-async function generateBridge(
+type OperationTypes = { responseType: string | null; requestType: string | null }
+
+async function generateInertiaTypes(
   schemaPath: string,
-  wayfinderPath: string,
   outputPath: string,
-  controllerPrefixes?: string[],
-  apiName?: string,
+  apiName: string,
+  typeImports?: Record<string, TypeImport>,
 ): Promise<void> {
   try {
-    const [wayfinder, schema, prettierConfig] = await Promise.all([
-      readFile(wayfinderPath, 'utf-8'),
+    const [schema, prettierConfig] = await Promise.all([
       readFile(schemaPath, 'utf-8'),
       prettier.resolveConfig(outputPath),
     ])
 
-    const resources = extractResources(wayfinder, controllerPrefixes)
-    const schemas = extractSchemas(schema)
-    const overrides = extractOverrides(wayfinder, schema)
-    const pages = extractPages(wayfinder, controllerPrefixes)
+    const operations = parseOperations(schema)
+    const prefix = apiName + '.'
+    const pages = new Map<string, string>()
+    const requests = new Map<string, string>()
+    const usedImports = new Set<string>()
 
-    const content = buildBridgeContent(resources, schemas, overrides, pages, apiName)
+    for (const [name, op] of operations) {
+      if (!name.startsWith(prefix)) continue
+
+      const path = name.slice(prefix.length)
+      const nsPath = toNamespacePath(path)
+      if (!nsPath) continue
+
+      if (op.responseType && isObjectType(op.responseType)) {
+        const inlined = inlineSchemaRefs(op.responseType, schema, new Set(), typeImports, usedImports)
+        pages.set(nsPath, stripComments(inlined))
+      }
+
+      if (op.requestType) {
+        const inlined = inlineSchemaRefs(op.requestType, schema, new Set(), typeImports, usedImports)
+        requests.set(nsPath, stripComments(inlined))
+      }
+    }
+
+    const content = buildOutput(pages, requests, typeImports, usedImports)
     const formatted = await prettier.format(content, { ...prettierConfig, filepath: outputPath })
     await writeFile(outputPath, formatted)
 
     // eslint-disable-next-line no-console
-    console.log(`[type-generator] Bridge: ${resources.length} resources, ${overrides.length} overrides`)
+    console.log(`[type-generator] Inertia: ${pages.size} pages, ${requests.size} requests`)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('[type-generator] Failed:', error)
   }
 }
 
-function extractResources(content: string, controllerPrefixes?: string[]): ResourceRef[] {
-  const matches = content.match(/App\.Http\.Resources\.[A-Za-z.]+/g) || []
-  return [...new Set(matches)]
-    .filter((fullPath) => {
-      if (!controllerPrefixes) return true
-      // Extract resource prefix (e.g., 'Admin' from 'App.Http.Resources.Admin.UserResource')
-      const parts = fullPath.split('.')
-      if (parts.length < 5) return false
-      const resourcePrefix = parts[3]
-      return controllerPrefixes.includes(resourcePrefix)
-    })
-    .map((fullPath) => ({
-      fullPath,
-      className: fullPath.split('.').pop()!,
-    }))
-}
+// --- Parsing ---
 
-function extractSchemas(content: string): Set<string> {
-  const schemas = new Set<string>()
-  for (const [, name] of content.matchAll(/^\s+([A-Za-z]+Resource): \{$/gm)) {
-    schemas.add(name)
-  }
-  return schemas
-}
+function parseOperations(content: string): Map<string, OperationTypes> {
+  const ops = new Map<string, OperationTypes>()
 
-function extractOverrides(wayfinder: string, schema: string): PageOverride[] {
-  const pattern = /@see\s*\[\\([^\]]+)\][^\n]*\n[^]*?export type (\w+) = Inertia\.SharedData & \{([^}]+)\}/g
-  const overrides: PageOverride[] = []
+  const opsIdx = content.indexOf('export interface operations {')
+  if (opsIdx === -1) return ops
 
-  for (const [, controller, typeName, propsBlock] of wayfinder.matchAll(pattern)) {
-    const needsFix = propsBlock.includes('AnonymousResourceCollection') || /:\s*unknown\b/.test(propsBlock)
-    if (!needsFix) continue
+  const opsBlockStart = opsIdx + 'export interface operations '.length
+  const opsBlockEnd = findClosingBrace(content, opsBlockStart)
+  if (opsBlockEnd === -1) return ops
 
-    // Handle nested controllers like Clients/Programs/ViewController
-    const nestedMatch = controller.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)\\/)
-    const nsMatch = controller.match(/App\\Http\\Controllers\\Admin\\(\w+)\\/)
-    if (!nsMatch) continue
+  const opsBlock = content.substring(opsBlockStart, opsBlockEnd + 1)
 
-    const namespace = nestedMatch ? `${nestedMatch[1]}.${nestedMatch[2]}` : nsMatch[1]
+  const opPattern = /\n {4}"([^"]+)":\s*\{/g
+  let match
+  while ((match = opPattern.exec(opsBlock)) !== null) {
+    const name = match[1]
+    const blockStart = match.index + match[0].length - 1
+    const blockEnd = findClosingBrace(opsBlock, blockStart)
+    if (blockEnd === -1) continue
 
-    const operationName = controllerToOperation(controller)
-    const scrambleProps = extractScrambleProps(schema, operationName)
-    if (!scrambleProps) continue
+    const block = opsBlock.substring(blockStart, blockEnd + 1)
 
-    const properties = extractPropertiesToFix(propsBlock, scrambleProps)
-    if (properties.length > 0) {
-      overrides.push({ namespace, typeName, properties })
-    }
-  }
-
-  return overrides
-}
-
-function extractPropertiesToFix(propsBlock: string, scrambleProps: Record<string, string>): Property[] {
-  const properties: Property[] = []
-  const patterns = [/(\w+):\s*Illuminate\.Http\.Resources\.Json\.AnonymousResourceCollection/g, /(\w+):\s*unknown\b/g]
-
-  for (const pattern of patterns) {
-    for (const [, name] of propsBlock.matchAll(pattern)) {
-      if (scrambleProps[name]) {
-        properties.push({ name, type: scrambleProps[name] })
-      }
-    }
-  }
-
-  return properties
-}
-
-function pascalToKebab(str: string): string {
-  return str.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()
-}
-
-function controllerToOperation(ref: string): string {
-  // Handle nested controllers like Admin\Clients\Programs\ViewController
-  const nestedMatch = ref.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)\\(\w+)Controller::(\w+)/)
-  if (nestedMatch) {
-    const [, parent, child, controller, method] = nestedMatch
-    const p = pascalToKebab(parent)
-    const ch = pascalToKebab(child)
-    const c = controller.toLowerCase()
-
-    const crudMethods = ['index', 'view', 'update', 'create']
-    if (crudMethods.includes(c) && c === method) {
-      return `admin.${p}.${ch}.${method}`
-    }
-    return `admin.${p}.${ch}.${method}`
-  }
-
-  // Handle standard controllers like Admin\Programs\ViewController
-  const match = ref.match(/App\\Http\\Controllers\\Admin\\(\w+)\\(\w+)Controller::(\w+)/)
-  if (!match) return ''
-
-  const [, resource, controller, method] = match
-  const r = pascalToKebab(resource)
-  const c = controller.toLowerCase()
-
-  if (r === 'system') return `admin.system.${c}`
-  if (r === 'settings') return `admin.settings.${c}.${method}`
-
-  const crudMethods = ['index', 'view', 'update', 'create']
-  if (crudMethods.includes(c) && c === method) return `admin.${r}.${method}`
-
-  return `admin.${r}.${method}`
-}
-
-function extractScrambleProps(schema: string, operation: string): Record<string, string> | null {
-  const escaped = operation.replace(/\./g, '\\.')
-  const pattern = new RegExp(
-    `"${escaped}":\\s*\\{[^]*?responses:\\s*\\{\\s*200:\\s*\\{[^]*?content:\\s*\\{\\s*"application/json":\\s*\\{([\\s\\S]*?)\\n\\s{20}\\}`,
-    'm',
-  )
-
-  const match = schema.match(pattern)
-  if (!match) return null
-
-  const props: Record<string, string> = {}
-  const block = match[1]
-
-  for (const [, name, schemaName] of block.matchAll(/(\w+):\s*components\["schemas"\]\["(\w+)"\]\[\]/g)) {
-    props[name] = `components['schemas']['${schemaName}'][]`
-  }
-
-  for (const [, name, schemaName] of block.matchAll(/(\w+):\s*components\["schemas"\]\["(\w+)"\](?!\[)/g)) {
-    props[name] = `components['schemas']['${schemaName}']`
-  }
-
-  for (const [, name] of block.matchAll(/^ {24}(\w+):\s*\{/gm)) {
-    if (!props[name]) {
-      props[name] = `operations['${operation}']['responses'][200]['content']['application/json']['${name}']`
-    }
-  }
-
-  return props
-}
-
-function extractPages(content: string, controllerPrefixes?: string[]): PageType[] {
-  const start = content.indexOf('export namespace Pages {')
-  const end = content.indexOf('\nexport namespace Laravel {')
-  if (start === -1 || end === -1) return []
-
-  const pages: PageType[] = []
-  const namespaceStack: string[] = []
-  const seenControllerPrefixes: Set<string | null> = new Set()
-
-  for (const line of content.substring(start, end).split('\n')) {
-    // Track controller prefixes from @see comments (may have multiple per type)
-    const seeMatch = line.match(/@see\s*\[\\App\\Http\\Controllers\\([A-Za-z]+)(?:\\|::)/)
-    if (seeMatch) {
-      const firstPart = seeMatch[1]
-      // If it ends with 'Controller', it's a root-level controller (no prefix)
-      seenControllerPrefixes.add(firstPart.endsWith('Controller') ? null : firstPart)
+    if (!ops.has(name)) {
+      ops.set(name, {
+        responseType: extractResponseType(block),
+        requestType: extractRequestBodyType(block),
+      })
     }
 
-    const nsMatch = line.match(/export namespace (\w+) \{/)
-    if (nsMatch && !['Pages', 'Inertia'].includes(nsMatch[1])) {
-      namespaceStack.push(nsMatch[1])
-    }
-
-    if (/^\s*\}\s*$/.test(line) && namespaceStack.length > 0) {
-      namespaceStack.pop()
-    }
-
-    const typeMatch = line.match(/export type (\w+) = /)
-    if (typeMatch) {
-      // Filter by controller prefix if specified - match if ANY prefix matches
-      if (controllerPrefixes) {
-        const matches = [...seenControllerPrefixes].some((prefix) =>
-          prefix ? controllerPrefixes.includes(prefix) : controllerPrefixes.includes('_root'),
-        )
-        if (!matches) {
-          seenControllerPrefixes.clear()
-          continue
-        }
-      }
-
-      // Use full namespace path to avoid collisions (e.g., Programs.View vs Clients.Programs.View)
-      const namespace = namespaceStack.length > 0 ? namespaceStack.join('.') : '_root'
-      pages.push({ namespace, typeName: typeMatch[1] })
-      seenControllerPrefixes.clear()
-    }
+    opPattern.lastIndex = blockEnd + 1
   }
 
-  return pages
+  return ops
 }
 
-function buildBridgeContent(
-  resources: ResourceRef[],
-  schemas: Set<string>,
-  overrides: PageOverride[],
-  pages: PageType[],
-  apiName?: string,
+function extractResponseType(block: string): string | null {
+  const twoHundredMatch = block.match(/\b200:\s*\{/)
+  if (!twoHundredMatch || twoHundredMatch.index === undefined) return null
+
+  const twoHundredStart = twoHundredMatch.index + twoHundredMatch[0].length - 1
+  const twoHundredEnd = findClosingBrace(block, twoHundredStart)
+  if (twoHundredEnd === -1) return null
+
+  const twoHundredBlock = block.substring(twoHundredStart, twoHundredEnd + 1)
+
+  return extractApplicationJsonType(twoHundredBlock)
+}
+
+function extractRequestBodyType(block: string): string | null {
+  if (block.includes('requestBody?: never') || !block.includes('requestBody:')) return null
+
+  const rbMatch = block.match(/requestBody:\s*\{/)
+  if (!rbMatch || rbMatch.index === undefined) return null
+
+  const rbStart = rbMatch.index + rbMatch[0].length - 1
+  const rbEnd = findClosingBrace(block, rbStart)
+  if (rbEnd === -1) return null
+
+  const rbBlock = block.substring(rbStart, rbEnd + 1)
+
+  return extractApplicationJsonType(rbBlock)
+}
+
+function extractApplicationJsonType(block: string): string | null {
+  const marker = '"application/json": '
+  const jsonIdx = block.indexOf(marker)
+  if (jsonIdx === -1) return null
+
+  const valueStart = jsonIdx + marker.length
+
+  if (block[valueStart] === '{') {
+    const end = findClosingBrace(block, valueStart)
+    if (end === -1) return null
+    return block.substring(valueStart, end + 1)
+  }
+
+  const semicolon = block.indexOf(';', valueStart)
+  if (semicolon === -1) return null
+  return block.substring(valueStart, semicolon).trim()
+}
+
+// --- Schema inlining ---
+
+function extractSchemaType(content: string, name: string): string {
+  const pattern = `\n        ${name}: `
+  const idx = content.indexOf(pattern)
+  if (idx === -1) return 'unknown'
+
+  const valueStart = idx + pattern.length
+
+  if (content[valueStart] === '{') {
+    const end = findClosingBrace(content, valueStart)
+    if (end === -1) return 'unknown'
+    return content.substring(valueStart, end + 1)
+  }
+
+  const semicolon = content.indexOf(';', valueStart)
+  if (semicolon === -1) return 'unknown'
+  return content.substring(valueStart, semicolon).trim()
+}
+
+function inlineSchemaRefs(
+  type: string,
+  fullContent: string,
+  ancestors: Set<string>,
+  typeImports?: Record<string, TypeImport>,
+  usedImports?: Set<string>,
 ): string {
-  const needsOperations = overrides.some((o) => o.properties.some((p) => p.type.startsWith("operations['")))
-  const imports = needsOperations ? 'components, operations' : 'components'
-
-  const resourceGroups = groupBy(resources, (r) => r.fullPath.split('.').slice(0, -1).join('.'))
-  const overrideMap = new Map(overrides.map((o) => [`${o.namespace}.${o.typeName}`, o]))
-  const pageGroups = groupBy(pages, (p) => p.namespace)
-
-  return `/**
- * Type bridge - single import point for Wayfinder + Scramble types.
- * Re-exports Wayfinder types and provides corrected versions where needed.
- * Auto-generated by type-generator plugin.
- */
-import type { ${imports} } from './schema'
-import type { Inertia as WayfinderInertia } from '@${apiName}:wayfinder/types'
-
-export type { components, paths, operations } from './schema'
-export type { App } from '@${apiName}:wayfinder/types'
-export type PageProps<T> = Omit<T, 'app' | 'isImpersonated' | 'page'>
-
-declare module '@${apiName}:wayfinder/types' {
-${buildResourceNamespaces(resourceGroups, schemas)}
-${buildIlluminateTypes()}
+  return type.replace(/components\["schemas"\]\["(\w+)"\]/g, (_, name: string) => {
+    if (typeImports?.[name]) {
+      usedImports?.add(name)
+      return typeImports[name].type
+    }
+    if (ancestors.has(name)) return 'Record<string, unknown>'
+    const newAncestors = new Set(ancestors)
+    newAncestors.add(name)
+    const schemaType = extractSchemaType(fullContent, name)
+    return inlineSchemaRefs(schemaType, fullContent, newAncestors, typeImports, usedImports)
+  })
 }
 
+// --- Helpers ---
+
+function findClosingBrace(content: string, start: number): number {
+  let depth = 0
+  for (let i = start; i < content.length; i++) {
+    if (content[i] === '{') depth++
+    else if (content[i] === '}') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+function isObjectType(type: string): boolean {
+  const trimmed = type.trim()
+  return trimmed.startsWith('{') || trimmed.startsWith('Record<')
+}
+
+function stripComments(type: string): string {
+  return type.replace(/\/\*\*[^]*?\*\/\s*/g, '')
+}
+
+function toNamespacePath(path: string): string | null {
+  const cleaned = path.replace(/_\d+$/, '')
+  const segments = cleaned.split('.')
+  if (segments.some((s) => !s)) return null
+  return segments.map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('.')
+}
+
+// --- Output ---
+
+type NamespaceNode = {
+  types: Map<string, string>
+  children: Map<string, NamespaceNode>
+}
+
+function buildTree(entries: Map<string, string>): NamespaceNode {
+  const root: NamespaceNode = { types: new Map(), children: new Map() }
+
+  for (const [path, typeBody] of entries) {
+    const segments = path.split('.')
+    const typeName = segments.pop()!
+    let current = root
+    for (const seg of segments) {
+      if (!current.children.has(seg)) {
+        current.children.set(seg, { types: new Map(), children: new Map() })
+      }
+      current = current.children.get(seg)!
+    }
+    current.types.set(typeName, typeBody)
+  }
+
+  return root
+}
+
+function renderTree(node: NamespaceNode, indent: string): string {
+  let out = ''
+
+  for (const [name, body] of node.types) {
+    out += `${indent}export type ${name} = ${body}\n`
+  }
+
+  for (const [name, child] of node.children) {
+    out += `${indent}export namespace ${name} {\n`
+    out += renderTree(child, indent + '  ')
+    out += `${indent}}\n`
+  }
+
+  return out
+}
+
+function buildOutput(
+  pages: Map<string, string>,
+  requests: Map<string, string>,
+  typeImports?: Record<string, TypeImport>,
+  usedImports?: Set<string>,
+): string {
+  const pagesTree = buildTree(pages)
+  const requestsTree = buildTree(requests)
+
+  let out = `/**
+ * Inertia page and request types.
+ * Auto-generated by type-generator plugin from Scramble's OpenAPI schema.
+ */\n`
+
+  if (typeImports && usedImports) {
+    const grouped = new Map<string, string[]>()
+    for (const name of usedImports) {
+      const imp = typeImports[name]
+      if (!grouped.has(imp.from)) grouped.set(imp.from, [])
+      grouped.get(imp.from)!.push(imp.type)
+    }
+    for (const [from, types] of grouped) {
+      out += `import type { ${types.join(', ')} } from '${from}'\n`
+    }
+  }
+
+  out += `
 export namespace Inertia {
-export type SharedData = WayfinderInertia.SharedData
 export namespace Pages {
-${buildPageTypes(pageGroups, overrideMap)}
-}
+${renderTree(pagesTree, '')}
 }
 `
-}
 
-function buildResourceNamespaces(groups: Map<string, ResourceRef[]>, schemas: Set<string>): string {
-  let content = ''
-  for (const [path, refs] of groups) {
-    const parts = path.split('.')
-    content += parts.map((p) => `export namespace ${p} {`).join(' ') + '\n'
-    for (const { className } of refs) {
-      content += schemas.has(className)
-        ? `export type ${className} = components['schemas']['${className}']\n`
-        : `export type ${className} = Record<string, unknown>\n`
-    }
-    content += '}'.repeat(parts.length) + '\n'
-  }
-  return content
+  if (requests.size > 0) {
+    out += `export namespace Requests {
+${renderTree(requestsTree, '')}
 }
-
-function buildIlluminateTypes(): string {
-  return `export namespace Illuminate {
-export namespace Http { export namespace Resources { export namespace Json {
-export type AnonymousResourceCollection<T = unknown> = { data: T[] }
-}}}
-export namespace Database { export namespace Eloquent { export namespace Casts {
-export type Attribute<TGet = unknown, TSet = unknown> = TGet
-}}}
-export namespace Bus {
-export type Batch = { id: string; name: string; totalJobs: number; pendingJobs: number; failedJobs: number }
-}
-export namespace Notifications {
-export type DatabaseNotification = { id: string; type: string; data: Record<string, unknown>; read_at: string | null; created_at: string }
-}
-}`
-}
-
-function buildPageTypes(groups: Map<string, PageType[]>, overrides: Map<string, PageOverride>): string {
-  // Build a tree structure to properly nest namespaces
-  type NamespaceNode = {
-    types: PageType[]
-    children: Map<string, NamespaceNode>
+`
   }
 
-  const root: NamespaceNode = { types: [], children: new Map() }
+  out += `}\n`
 
-  // Build the tree
-  for (const [namespace, types] of groups) {
-    if (namespace === '_root') {
-      root.types.push(...types)
-      continue
-    }
-
-    const parts = namespace.split('.')
-    let current = root
-    for (const part of parts) {
-      if (!current.children.has(part)) {
-        current.children.set(part, { types: [], children: new Map() })
-      }
-      current = current.children.get(part)!
-    }
-    current.types.push(...types)
-  }
-
-  // Render the tree
-  function renderNode(node: NamespaceNode, namespace: string, indent: string): string {
-    let content = ''
-
-    // Render types at this level
-    for (const { typeName } of node.types) {
-      const fullNamespace = namespace || '_root'
-      const override = overrides.get(`${fullNamespace}.${typeName}`)
-      const wayfinderPath = namespace
-        ? `WayfinderInertia.Pages.${namespace}.${typeName}`
-        : `WayfinderInertia.Pages.${typeName}`
-
-      if (override) {
-        const omit = override.properties.map((p) => `'${p.name}'`).join(' | ')
-        const props = override.properties.map((p) => `${p.name}: ${p.type}`).join('; ')
-        content += `${indent}export type ${typeName} = Omit<${wayfinderPath}, ${omit}> & { ${props} }\n`
-      } else {
-        content += `${indent}export type ${typeName} = ${wayfinderPath}\n`
-      }
-    }
-
-    // Render child namespaces
-    for (const [name, child] of node.children) {
-      const childNamespace = namespace ? `${namespace}.${name}` : name
-      content += `${indent}export namespace ${name} {\n`
-      content += renderNode(child, childNamespace, indent + '  ')
-      content += `${indent}}\n`
-    }
-
-    return content
-  }
-
-  return renderNode(root, '', '')
-}
-
-function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
-  const map = new Map<string, T[]>()
-  for (const item of items) {
-    const key = keyFn(item)
-    if (!map.has(key)) map.set(key, [])
-    map.get(key)!.push(item)
-  }
-  return map
+  return out
 }

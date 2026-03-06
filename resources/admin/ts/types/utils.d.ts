@@ -1,8 +1,14 @@
-// Re-export everything from the bridge (single source of truth)
-export type { App, components, CursorPaginatedData, Inertia, operations, PageProps, paths } from './schema-bridge'
+// Re-export Inertia types from generated file
+export type { Inertia } from './inertia'
 
-// Legacy Scramble-based type utilities (kept for HTTP client typing)
-import type { paths } from './schema-bridge'
+import type { PageProps as SharedData } from './shared'
+
+export type PageProps<T> = Omit<T, keyof SharedData>
+
+// Re-export Scramble schema types for HTTP client typing
+export type { components, operations, paths } from './schema'
+
+import type { paths } from './schema'
 
 type MethodKeys = keyof paths[keyof paths]
 
@@ -33,7 +39,7 @@ export type PatchRequest<T extends keyof paths> = Request<T, 'patch'>
 export type DeleteRequest<T extends keyof paths> = Request<T, 'delete'>
 
 // Helper types from Scramble schemas
-import type { components } from './schema-bridge'
+import type { components } from './schema'
 
 export type Tenant = components['schemas']['TenantResource']
 export type Widget = components['schemas']['WidgetResource'] & {
