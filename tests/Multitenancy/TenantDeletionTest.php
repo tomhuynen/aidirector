@@ -6,7 +6,6 @@ use App\Enums\Disk;
 use App\Events\TenantDeleted;
 use App\Events\TenantDeleting;
 use App\Models\Tenant;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
@@ -20,6 +19,7 @@ test('tenant deletion dispatches deleting and deleted events', function () {
         'domain' => $this->uniqueDomain('delete-events'),
     ]);
 
+    $tenant->makeCurrent();
     $tenant->delete();
 
     Event::assertDispatched(TenantDeleting::class, fn($event) => $event->tenant->is($tenant));
@@ -34,6 +34,8 @@ test('the tenant database is dropped', function () {
         'name' => 'Test Tenant',
         'domain' => $this->uniqueDomain('delete-db'),
     ]);
+
+    $tenant->makeCurrent();
 
     expect(DB::select("SHOW DATABASES LIKE '{$tenant->getDatabaseName()}'"))->not->toBeEmpty();
 
@@ -54,7 +56,7 @@ test('the tenant storage is deleted', function () {
 
     expect(Storage::disk(Disk::TENANT->value)->exists('test.txt'))->toBeTrue();
 
-    $storagePrefix = Arr::get($tenant->settings, 'storage_prefix');
+    $storagePrefix = $tenant->settings->storagePrefix;
 
     $tenant->delete();
 
