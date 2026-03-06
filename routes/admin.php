@@ -38,7 +38,7 @@ Route::prefix('accounts')
         Route::get('create', [AccountUpdateController::class, 'update'])->name('create');
         Route::post('create', [AccountUpdateController::class, 'store'])->name('store');
         Route::get('{account}/update', [AccountUpdateController::class, 'update'])->name('update');
-        Route::post('{account}/update', [AccountUpdateController::class, 'store'])->name('store');
+        Route::post('{account}/update', [AccountUpdateController::class, 'store']);
         Route::get('{account}/invite', [AccountInviteController::class, 'invite'])->name('invite');
         Route::get('{account}', [AccountViewController::class, 'view'])->name('view');
         Route::get('/', [AccountIndexController::class, 'index'])->name('index');
@@ -92,7 +92,7 @@ Route::prefix('tenants')
         Route::get('{tenant}', [TenantViewController::class, 'view'])->name('view');
         Route::delete('{tenant}', [TenantDestroyController::class, 'destroy'])->name('destroy');
         Route::get('{tenant}/update', [TenantUpdateController::class, 'update'])->name('update');
-        Route::post('{tenant}/update', [TenantUpdateController::class, 'store'])->name('store');
+        Route::post('{tenant}/update', [TenantUpdateController::class, 'store']);
         Route::patch('{tenant}/switch', [TenantSwitchController::class, 'update'])->name('switch');
     });
 
@@ -101,7 +101,7 @@ Route::prefix('system')
     ->group(function () {
         Route::redirect('', '/admin/system/server');
 
-        Route::post('server', [ServerController::class, 'store']);
+        Route::post('server', [ServerController::class, 'store'])->name('server.store');
         Route::get('server', [ServerController::class, 'index'])->name('server');
         Route::get('database', [DatabaseController::class, 'index'])->name('database');
         Route::get('/database/download/{name}', [DatabaseController::class, 'download'])->name('database.download');

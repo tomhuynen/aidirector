@@ -53,7 +53,6 @@
 import FormInput from '@admin:components/Form/Input.vue'
 import AuthBaseLayout from '@admin:layouts/Auth.vue'
 import { $t } from '@admin:shared/i18n'
-import type { PostRequest } from '@admin:types/utils'
 import { Head, useForm } from '@inertiajs/vue3'
 import { Button } from '@shared:ui/button'
 import { LoaderCircle } from 'lucide-vue-next'
@@ -74,7 +73,7 @@ const props = defineProps<{
 const minPassLength = computed(() => props.passwordRules.min as number)
 const maxPassLength = computed(() => (props.passwordRules.max || 50) as number)
 
-const form = useForm<PostRequest<'/auth/reset-password/{token}'> & { password_confirmation: string }>({
+const form = useForm({
   token: props.token,
   email: props.email,
   password: '',

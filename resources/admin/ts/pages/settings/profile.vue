@@ -34,24 +34,24 @@ import HeadingSmall from '@admin:components/HeadingSmall.vue'
 import DeleteUser from '@admin:components/Settings/DeleteUser.vue'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
-import type { App, Inertia, PageProps } from '@admin:types/utils'
-import { update } from '@admin:wayfinder/App/Http/Controllers/Admin/Settings/ProfileController'
+import type { Inertia, PageProps } from '@admin:types/utils'
 import { useForm } from '@inertiajs/vue3'
+import { update } from '@routes/admin/settings/profile'
 import { Button } from '@shared:ui/button'
 
 defineOptions({
   layout: [SettingsLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.Settings.Profile>>()
+defineProps<PageProps<Inertia.Pages.Settings.Profile.Edit>>()
 
-const form = useForm<App.Http.Controllers.Admin.Settings.ProfileController.Update.Request>({
+const form = useForm<Inertia.Requests.Settings.Profile.Update>({
   name: '',
   email: '',
 })
 
 const submit = () => {
-  form.patch(update.url(), {
+  form.submit(update(), {
     preserveScroll: true,
   })
 }

@@ -38,11 +38,12 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { App, Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia, PageProps } from '@admin/ts/types/utils'
 import FormInput from '@admin:components/Form/Input.vue'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
 import { useForm } from '@inertiajs/vue3'
+import { store, update } from '@routes/admin/tenants'
 import { Button } from '@shared:ui/button'
 import { toast } from 'vue-sonner'
 
@@ -52,13 +53,13 @@ defineOptions({
 
 const props = defineProps<PageProps<Inertia.Pages.Tenants.Update>>()
 
-const form = useForm<App.Http.Controllers.Admin.Tenants.UpdateController.Store.Request>({
+const form = useForm<Inertia.Requests.Tenants.Store>({
   name: props.tenant?.name ?? '',
   domain: props.tenant?.domain ?? '',
 })
 
 const submit = () => {
-  form.post(location.pathname, {
+  form.post(props.tenant ? update.url(props.tenant.id) : store.url(), {
     only: ['tenant'],
     onSuccess: () => {
       toast.success($t('Tenant saved.'))

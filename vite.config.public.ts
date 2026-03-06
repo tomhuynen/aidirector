@@ -31,16 +31,14 @@ export default defineConfig(({ command }) => {
           },
         },
       }),
+      wayfinder({
+        path: 'resources/shared/wayfinder',
+        actions: false,
+      }),
       tailwindcss(),
       typeGenerator({
         outputPath: resolve(__dirname, 'resources/public/ts/types/schema.d.ts'),
         apiName: 'public',
-        wayfinderTypesPath: resolve(__dirname, 'resources/public/ts/wayfinder/types.d.ts'),
-        controllerPrefixes: ['Public', '_root'],
-      }),
-      wayfinder({
-        path: resolve(__dirname, 'resources/public/ts/wayfinder'),
-        command: 'WAYFINDER_IGNORE_ROUTE_NAMES=nova.*,admin.* php -d memory_limit=-1 ./artisan wayfinder:generate',
       }),
     ],
     build: {
@@ -71,7 +69,7 @@ export default defineConfig(({ command }) => {
         '@public': resolve(__dirname, 'resources/public/'),
         '@shared': resolve(__dirname, 'resources/shared/'),
         '@shared:ui': resolve(__dirname, 'resources/shared/components/ui/'),
-        '@public:wayfinder': resolve(__dirname, 'resources/public/ts/wayfinder/'),
+        '@routes': resolve(__dirname, 'resources/shared/wayfinder/routes/'),
       },
     },
   }

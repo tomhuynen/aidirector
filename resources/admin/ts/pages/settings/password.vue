@@ -53,25 +53,23 @@ import HeadingSmall from '@admin/ts/components/HeadingSmall.vue'
 import FormInput from '@admin:components/Form/Input.vue'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
-import type { App } from '@admin:types/utils'
-import { update } from '@admin:wayfinder/App/Http/Controllers/Admin/Settings/PasswordController'
+import type { Inertia } from '@admin:types/utils'
 import { useForm } from '@inertiajs/vue3'
+import { update } from '@routes/admin/settings/password'
 import { Button } from '@shared:ui/button'
 
 defineOptions({
   layout: [SettingsLayout],
 })
 
-const form = useForm<
-  App.Http.Controllers.Admin.Settings.PasswordController.Update.Request & { password_confirmation: string }
->({
+const form = useForm<Inertia.Requests.Settings.Password.Update>({
   current_password: '',
   password: '',
   password_confirmation: '',
 })
 
 const submit = () => {
-  form.put(update.url(), {
+  form.submit(update(), {
     preserveScroll: true,
   })
 }

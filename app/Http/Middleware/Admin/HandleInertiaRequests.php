@@ -47,7 +47,8 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
-        return array_merge(parent::share($request), [
+        return [
+            ...parent::share($request),
             'app' => [
                 'env' => config('app.env'),
                 'title' => config('app.title'),
@@ -57,7 +58,7 @@ class HandleInertiaRequests extends Middleware
             ],
             'isImpersonated' => fn() => Auth::user()?->isImpersonated() ?? false,
             'page' => fn() => $this->page($request),
-        ]);
+        ];
     }
 
     /**

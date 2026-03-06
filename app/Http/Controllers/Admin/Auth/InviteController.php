@@ -21,6 +21,7 @@ class InviteController
 
         return Inertia::render('auth/invite', [
             'email' => $user->email,
+            /** @var array{min: int, max: int} */
             'passwordRules' => Password::default()->appliedRules(),
             'suggestion' => collect(range(1, 4))->map(fn() => Str::random(4))->join('-'),
         ]);

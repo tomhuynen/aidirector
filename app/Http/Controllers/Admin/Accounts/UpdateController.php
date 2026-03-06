@@ -43,6 +43,7 @@ class UpdateController
             'name' => ['required', 'string', 'min:2', 'max:100'],
             'email' => ['required', 'email', 'max:200', Rule::unique('users')->ignore($account->id)],
             'roles' => ['required', 'array'],
+            /** @var string */
             'roles.*' => ['required', 'string', Rule::in($roles)],
         ]);
 

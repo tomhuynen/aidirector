@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Route;
 use Spatie\LaravelPasskeys\Http\Controllers\GeneratePasskeyAuthenticationOptionsController;
 
 Route::middleware('guest')->group(function () {
-    Route::post('invite/{user}', [InviteController::class, 'store']);
+    Route::post('invite/{user}', [InviteController::class, 'store'])->name('invite.store');
     Route::get('invite/{user}', [InviteController::class, 'view'])->name('invite');
 
     Route::post('passkeys/login', AuthenticateUsingPasskeyController::class);

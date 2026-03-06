@@ -16,6 +16,8 @@ return $config
     ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/ArrayableExtension.php', [ErrorType::DEV_DEPENDENCY_IN_PROD])
     ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/CallbackExtension.php', [ErrorType::DEV_DEPENDENCY_IN_PROD])
     ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/CacheTypeInfer.php', [ErrorType::DEV_DEPENDENCY_IN_PROD, ErrorType::SHADOW_DEPENDENCY])
+    ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/InertiaSharedDataExtension.php', [ErrorType::DEV_DEPENDENCY_IN_PROD])
+    ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/TableTypeInfer.php', [ErrorType::DEV_DEPENDENCY_IN_PROD])
     ->ignoreErrorsOnPackages([
         'league/flysystem-aws-s3-v3',
         'league/flysystem-path-prefixing',

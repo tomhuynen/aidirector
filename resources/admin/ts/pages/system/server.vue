@@ -45,7 +45,7 @@
               </Badge>
             </summary>
             <ol class="py-4 px-10 bg-muted rounded-md mt-2 list-decimal">
-              <li v-for="path in configuration.path" :key="path" class="p-1">
+              <li v-for="(path, index) in configuration.path" :key="index" class="p-1">
                 <code class="text-sm text-muted-foreground">{{ path }}</code>
               </li>
             </ol>

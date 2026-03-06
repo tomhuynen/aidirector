@@ -78,6 +78,7 @@ import DefinitionListRow from '@admin:components/DefinitionListRow.vue'
 import { http } from '@admin:shared/http'
 import { isPast } from '@admin:shared/utils/date'
 import { router } from '@inertiajs/vue3'
+import { server } from '@routes/admin/system'
 import { Badge } from '@shared:ui/badge'
 import { Button } from '@shared:ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@shared:ui/card'
@@ -90,7 +91,7 @@ defineProps<{
 
 const resetOpcache = () => {
   http
-    .post(location.pathname, {
+    .post(server.url(), {
       action: 'resetOpcache',
     })
     .then(() => {

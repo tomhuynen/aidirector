@@ -52,12 +52,13 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { App, Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia, PageProps } from '@admin/ts/types/utils'
 import FormCheckbox from '@admin:components/Form/Checkbox.vue'
 import FormInput from '@admin:components/Form/Input.vue'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
 import { useForm } from '@inertiajs/vue3'
+import { store, update } from '@routes/admin/accounts'
 import { Button } from '@shared:ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@shared:ui/card'
 import { toast } from 'vue-sonner'
@@ -68,11 +69,7 @@ defineOptions({
 
 const props = defineProps<PageProps<Inertia.Pages.Accounts.Update>>()
 
-type Request = Omit<App.Http.Controllers.Admin.Accounts.UpdateController.Store.Request, 'roles.*' | 'roles'> & {
-  roles: string[]
-}
-
-const form = useForm<Request>({
+const form = useForm<Inertia.Requests.Accounts.Store>({
   name: props.account?.name ?? '',
   email: props.account?.email ?? '',
   roles: props.account?.roles.map((role) => role.name) ?? [],
@@ -87,8 +84,8 @@ const handleRoleChange = (role: string) => {
 }
 
 const submit = () => {
-  form.post(location.pathname, {
-    only: ['tenant'],
+  form.post(props.account ? update.url(props.account.id) : store.url(), {
+    only: ['account'],
     onSuccess: () => {
       toast.success($t('Account saved.'))
     },

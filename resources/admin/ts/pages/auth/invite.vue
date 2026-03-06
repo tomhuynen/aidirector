@@ -53,8 +53,9 @@
 import FormInput from '@admin:components/Form/Input.vue'
 import AuthBaseLayout from '@admin:layouts/Auth.vue'
 import { $t } from '@admin:shared/i18n'
-import type { PostRequest } from '@admin:types/utils'
+import type { Inertia, PageProps } from '@admin:types/utils'
 import { Head, useForm } from '@inertiajs/vue3'
+import { invite } from '@routes/admin/auth'
 import { Button } from '@shared:ui/button'
 import { LoaderCircle } from 'lucide-vue-next'
 import { computed } from 'vue'
@@ -64,16 +65,12 @@ defineOptions({
   layout: AuthBaseLayout,
 })
 
-const props = defineProps<{
-  email: string
-  passwordRules: Record<string, number | boolean>
-  suggestion: string
-}>()
+const props = defineProps<PageProps<Inertia.Pages.Auth.Invite>>()
 
 const minPassLength = computed(() => props.passwordRules.min as number)
 const maxPassLength = computed(() => (props.passwordRules.max || 50) as number)
 
-const form = useForm<PostRequest<'/auth/invite/{user}'> & { password_confirmation: string }>({
+const form = useForm<Inertia.Requests.Auth.Invite.Store>({
   password: '',
   password_confirmation: '',
 })
@@ -84,7 +81,7 @@ const useSuggestion = () => {
 }
 
 const submit = () => {
-  form.post(location.pathname, {
+  form.post(invite.url(props.email), {
     only: ['errors'],
     onSuccess: () => {
       toast.success($t('Password reset successfully.'))

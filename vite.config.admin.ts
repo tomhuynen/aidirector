@@ -31,16 +31,17 @@ export default defineConfig(({ command }) => {
           },
         },
       }),
+      wayfinder({
+        path: 'resources/shared/wayfinder',
+        actions: false,
+      }),
       tailwindcss(),
       typeGenerator({
         outputPath: resolve(__dirname, 'resources/admin/ts/types/schema.d.ts'),
         apiName: 'admin',
-        wayfinderTypesPath: resolve(__dirname, 'resources/admin/ts/wayfinder/types.d.ts'),
-        controllerPrefixes: ['Admin', 'Auth'],
-      }),
-      wayfinder({
-        path: resolve(__dirname, 'resources/admin/ts/wayfinder'),
-        command: 'WAYFINDER_IGNORE_ROUTE_NAMES=nova.*,public.* php -d memory_limit=-1 ./artisan wayfinder:generate',
+        typeImports: {
+          TableResource: { type: 'TableResource', from: '@shared:ui/data-table' },
+        },
       }),
     ],
     build: {
@@ -104,7 +105,7 @@ export default defineConfig(({ command }) => {
         '@admin': resolve(__dirname, 'resources/admin/'),
         '@shared': resolve(__dirname, 'resources/shared/'),
         '@shared:ui': resolve(__dirname, 'resources/shared/components/ui/'),
-        '@admin:wayfinder': resolve(__dirname, 'resources/admin/ts/wayfinder/'),
+        '@routes': resolve(__dirname, 'resources/shared/wayfinder/routes/'),
       },
     },
   }

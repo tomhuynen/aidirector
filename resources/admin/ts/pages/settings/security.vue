@@ -60,7 +60,7 @@ defineOptions({
   layout: [SettingsLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.Settings.Security>>()
+defineProps<PageProps<Inertia.Pages.Settings.Security.View>>()
 
 const passKeysSupported = computed(() => browserSupportsWebAuthn())
 </script>

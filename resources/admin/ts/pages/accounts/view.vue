@@ -99,7 +99,7 @@
               <template #fallback>
                 <TableSkeleton />
               </template>
-              <DataTable :resource="notifications as TableResource" />
+              <DataTable :resource="notifications" />
             </WhenVisible>
           </CardContent>
         </Card>
@@ -135,13 +135,7 @@ defineOptions({
   layout: [AppLayout],
 })
 
-type Props = PageProps<Inertia.Pages.Accounts.View>
-
-defineProps<{
-  account: Props['account']
-  logins?: Props['logins']
-  notifications?: Props['notifications']
-}>()
+defineProps<PageProps<Inertia.Pages.Accounts.View>>()
 
 const showDeleteModal = ref(false)
 </script>
