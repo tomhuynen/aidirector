@@ -13,7 +13,8 @@ return [
                 // Patterns to ignore for URLs (e.g. 'nova-api/*')
                 'urls' => [],
                 // Patterns to ignore for route names (e.g. 'nova.*')
-                'names' => ['nova.*'],
+                // Can be overridden via WAYFINDER_IGNORE_ROUTE_NAMES env var (comma-separated)
+                'names' => array_filter(explode(',', env('WAYFINDER_IGNORE_ROUTE_NAMES', 'nova.*'))),
             ],
         ],
         'models' => env('WAYFINDER_GENERATE_MODELS', true),
