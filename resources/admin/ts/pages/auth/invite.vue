@@ -53,7 +53,7 @@
 import FormInput from '@admin:components/Form/Input.vue'
 import AuthBaseLayout from '@admin:layouts/Auth.vue'
 import { $t } from '@admin:shared/i18n'
-import type { Inertia, PageProps } from '@admin:types/utils'
+import type { Inertia } from '@admin:types/utils'
 import { Head, useForm } from '@inertiajs/vue3'
 import { invite } from '@routes/admin/auth'
 import { Button } from '@shared:ui/button'
@@ -65,7 +65,7 @@ defineOptions({
   layout: AuthBaseLayout,
 })
 
-const props = defineProps<PageProps<Inertia.Pages.Auth.Invite>>()
+const props = defineProps<Inertia.Pages.Auth.Invite>()
 
 const minPassLength = computed(() => props.passwordRules.min as number)
 const maxPassLength = computed(() => (props.passwordRules.max || 50) as number)

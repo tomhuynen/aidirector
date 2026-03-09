@@ -56,7 +56,7 @@
 
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import ConfirmDelete from '@admin:components/ConfirmDelete.vue'
 import DateTime from '@admin:components/DateTime.vue'
 import Page from '@admin:components/Page.vue'
@@ -70,7 +70,7 @@ defineOptions({
   layout: [AppLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.Tenants.View>>()
+defineProps<Inertia.Pages.Tenants.View>()
 
 const showDeleteModal = ref(false)
 </script>

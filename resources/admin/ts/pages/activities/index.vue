@@ -17,7 +17,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
 import Badge from '@shared/components/ui/badge/Badge.vue'
@@ -28,5 +28,5 @@ defineOptions({
   layout: [AppLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.Activities.Index>>()
+defineProps<Inertia.Pages.Activities.Index>()
 </script>

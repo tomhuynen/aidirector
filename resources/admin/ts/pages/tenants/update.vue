@@ -38,7 +38,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import FormInput from '@admin:components/Form/Input.vue'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
@@ -51,7 +51,7 @@ defineOptions({
   layout: [AppLayout],
 })
 
-const props = defineProps<PageProps<Inertia.Pages.Tenants.Update>>()
+const props = defineProps<Inertia.Pages.Tenants.Update>()
 
 const form = useForm<Inertia.Requests.Tenants.Store>({
   name: props.tenant?.name ?? '',

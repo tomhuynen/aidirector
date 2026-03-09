@@ -34,7 +34,7 @@ import HeadingSmall from '@admin:components/HeadingSmall.vue'
 import DeleteUser from '@admin:components/Settings/DeleteUser.vue'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
-import type { Inertia, PageProps } from '@admin:types/utils'
+import type { Inertia } from '@admin:types/utils'
 import { useForm } from '@inertiajs/vue3'
 import { update } from '@routes/admin/settings/profile'
 import { Button } from '@shared:ui/button'
@@ -43,7 +43,7 @@ defineOptions({
   layout: [SettingsLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.Settings.Profile.Edit>>()
+defineProps<Inertia.Pages.Settings.Profile.Edit>()
 
 const form = useForm<Inertia.Requests.Settings.Profile.Update>({
   name: '',

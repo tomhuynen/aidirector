@@ -52,7 +52,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import FormCheckbox from '@admin:components/Form/Checkbox.vue'
 import FormInput from '@admin:components/Form/Input.vue'
 import Page from '@admin:components/Page.vue'
@@ -67,7 +67,7 @@ defineOptions({
   layout: [AppLayout],
 })
 
-const props = defineProps<PageProps<Inertia.Pages.Accounts.Update>>()
+const props = defineProps<Inertia.Pages.Accounts.Update>()
 
 const form = useForm<Inertia.Requests.Accounts.Store>({
   name: props.account?.name ?? '',

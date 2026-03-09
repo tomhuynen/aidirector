@@ -55,7 +55,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import DefinitionListRow from '@admin:components/DefinitionListRow.vue'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
@@ -68,5 +68,5 @@ defineOptions({
   layout: [AppLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.System.Database>>()
+defineProps<Inertia.Pages.System.Database>()
 </script>

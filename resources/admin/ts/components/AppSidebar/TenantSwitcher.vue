@@ -59,6 +59,7 @@ import { useSetting } from '@admin:composables/settings'
 import { $t } from '@admin:shared/i18n'
 import type { Tenant } from '@admin:types/utils'
 import { Link, router } from '@inertiajs/vue3'
+import { switchMethod } from '@routes/admin/tenants'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -76,12 +77,8 @@ const currentTenant = computed(() => tenants.value.find((tenant) => tenant.isCur
 const { isMobile } = useSidebar()
 
 const switchTenant = (tenant: Tenant) => {
-  if (!tenant.links) {
-    return
-  }
-
   router.patch(
-    tenant.links.switch,
+    switchMethod.url(tenant.id),
     {
       tenant: tenant.id,
     },

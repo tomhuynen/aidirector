@@ -116,7 +116,7 @@
 <script setup lang="ts">
 import TableSkeleton from '@admin/ts/components/TableSkeleton.vue'
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import type { IpAddressValue, UserAgentValue } from '@admin:components/cells'
 import { IpAddressCell, RelativeTimeCell, UserAgentCell } from '@admin:components/cells'
 import ConfirmDelete from '@admin:components/ConfirmDelete.vue'
@@ -135,7 +135,7 @@ defineOptions({
   layout: [AppLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.Accounts.View>>()
+defineProps<Inertia.Pages.Accounts.View>()
 
 const showDeleteModal = ref(false)
 </script>

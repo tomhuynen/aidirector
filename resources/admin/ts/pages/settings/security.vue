@@ -50,7 +50,7 @@ import type { IpAddressValue, UserAgentValue } from '@admin:components/cells'
 import { IpAddressCell, UserAgentCell } from '@admin:components/cells'
 import SettingsLayout from '@admin:layouts/settings/Layout.vue'
 import { $t } from '@admin:shared/i18n'
-import type { Inertia, PageProps } from '@admin:types/utils'
+import type { Inertia } from '@admin:types/utils'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@shared:ui/card'
 import { DataTable } from '@shared:ui/data-table'
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser'
@@ -60,7 +60,7 @@ defineOptions({
   layout: [SettingsLayout],
 })
 
-defineProps<PageProps<Inertia.Pages.Settings.Security.View>>()
+defineProps<Inertia.Pages.Settings.Security.View>()
 
 const passKeysSupported = computed(() => browserSupportsWebAuthn())
 </script>

@@ -1,10 +1,6 @@
 // Re-export Inertia types from generated file
 export type { Inertia } from './inertia'
 
-import type { PageProps as SharedData } from './shared'
-
-export type PageProps<T> = Omit<T, keyof SharedData>
-
 // Re-export Scramble schema types for HTTP client typing
 export type { components, operations, paths } from './schema'
 

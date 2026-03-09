@@ -62,7 +62,7 @@
 </template>
 <script setup lang="ts">
 import AppLayout from '@admin/ts/layouts/App.vue'
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import Page from '@admin:components/Page.vue'
 import { $t } from '@admin:shared/i18n'
 import { Deferred } from '@inertiajs/vue3'
@@ -77,7 +77,7 @@ defineOptions({
   layout: [AppLayout],
 })
 
-type Props = PageProps<Inertia.Pages.System.Server>
+type Props = Inertia.Pages.System.Server
 
 defineProps<{
   configuration: Props['configuration']

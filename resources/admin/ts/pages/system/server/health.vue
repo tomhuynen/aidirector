@@ -23,12 +23,12 @@
   </Card>
 </template>
 <script setup lang="ts">
-import type { Inertia, PageProps } from '@admin/ts/types/utils'
+import type { Inertia } from '@admin/ts/types/utils'
 import DefinitionListRow from '@admin:components/DefinitionListRow.vue'
 import { Badge } from '@shared:ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@shared:ui/card'
 
 defineProps<{
-  value: PageProps<Inertia.Pages.System.Server>['health']
+  value: Inertia.Pages.System.Server['health']
 }>()
 </script>
