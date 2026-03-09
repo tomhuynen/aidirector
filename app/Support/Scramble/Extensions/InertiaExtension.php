@@ -6,12 +6,24 @@ namespace App\Support\Scramble\Extensions;
 
 use Dedoc\Scramble\Infer\Extensions\ExpressionTypeInferExtension;
 use Dedoc\Scramble\Infer\Scope\Scope;
+use Dedoc\Scramble\Infer\Services\ReferenceTypeResolver;
+use Dedoc\Scramble\Support\Type\ArrayItemType_;
 use Dedoc\Scramble\Support\Type\ArrayType;
 use Dedoc\Scramble\Support\Type\Generic;
+use Dedoc\Scramble\Support\Type\KeyedArrayType;
 use Dedoc\Scramble\Support\Type\Literal\LiteralIntegerType;
+use Dedoc\Scramble\Support\Type\ObjectType;
 use Dedoc\Scramble\Support\Type\Type;
 use Dedoc\Scramble\Support\Type\TypeHelper;
+use Dedoc\Scramble\Support\TypeManagers\CursorPaginatorTypeManager;
+use Dedoc\Scramble\Support\TypeManagers\LengthAwarePaginatorTypeManager;
+use Dedoc\Scramble\Support\TypeManagers\PaginatorTypeManager;
+use Dedoc\Scramble\Support\TypeManagers\ResourceCollectionTypeManager;
+use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Http\Response;
+use Illuminate\Pagination\AbstractCursorPaginator;
+use Illuminate\Pagination\AbstractPaginator;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Inertia\Inertia;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\MethodCall;
@@ -22,12 +34,10 @@ class InertiaExtension implements ExpressionTypeInferExtension
 {
     public function getType(Expr $node, Scope $scope): ?Type
     {
-        // Handle direct static calls: Inertia::render() or Inertia::modal()
         if ($node instanceof StaticCall && $node->class instanceof FullyQualified && $node->class->toString() === Inertia::class) {
             return $this->handleInertiaStaticCall($node, $scope);
         }
 
-        // Handle method calls on Inertia static calls: Inertia::modal()->baseRoute()
         if ($node instanceof MethodCall) {
             $inertiaCall = $this->findInertiaStaticCall($node);
             if ($inertiaCall) {
@@ -41,17 +51,109 @@ class InertiaExtension implements ExpressionTypeInferExtension
     private function handleInertiaStaticCall(StaticCall $node, Scope $scope): ?Type
     {
         if (in_array($node->name->toString(), ['render', 'modal']) && count($node->args) > 1) {
+            $propsType = TypeHelper::getArgType($scope, $node->args, ['content', 1], new ArrayType());
+            $propsType = $this->transformPaginatedCollections($propsType, $scope);
+
             return new Generic(
                 Response::class,
-                [
-                    TypeHelper::getArgType($scope, $node->args, ['content', 1], new ArrayType()),
-                    new LiteralIntegerType(200),
-                ],
+                [$propsType, new LiteralIntegerType(200)],
             );
         }
 
-        if (in_array($node->name->toString(), ['lazy', 'defer', 'optional']) && count($node->args) > 0) {
-            return TypeHelper::getArgType($scope, $node->args, ['content', 0], new ArrayType());
+        if (in_array($node->name->toString(), ['lazy', 'defer', 'optional', 'scroll']) && count($node->args) > 0) {
+            $argType = TypeHelper::getArgType($scope, $node->args, ['content', 0], new ArrayType());
+            $resolvedType = ReferenceTypeResolver::getInstance()->resolve($scope, $argType);
+
+            return $this->transformPaginatedCollection($resolvedType) ?? $argType;
+        }
+
+        return null;
+    }
+
+    private function transformPaginatedCollections(Type $type, Scope $scope): Type
+    {
+        if (! $type instanceof KeyedArrayType) {
+            return $type;
+        }
+
+        $hasChanges = false;
+        $transformedItems = [];
+
+        foreach ($type->items as $item) {
+            $resolvedValue = ReferenceTypeResolver::getInstance()->resolve($scope, $item->value);
+            $paginationType = $this->transformPaginatedCollection($resolvedValue);
+
+            if ($paginationType !== null) {
+                $hasChanges = true;
+                $transformedItems[] = new ArrayItemType_(
+                    $item->key,
+                    $paginationType,
+                    $item->isOptional,
+                    $item->shouldUnpack,
+                    $item->keyType,
+                );
+            } else {
+                $transformedItems[] = $item;
+            }
+        }
+
+        return $hasChanges ? new KeyedArrayType($transformedItems) : $type;
+    }
+
+    private function transformPaginatedCollection(Type $type): ?KeyedArrayType
+    {
+        if (! $type instanceof ObjectType) {
+            return null;
+        }
+
+        if (! $type->isInstanceOf(ResourceCollection::class)) {
+            return null;
+        }
+
+        $paginatorType = $this->getPaginatorType($type);
+        if ($paginatorType === null) {
+            return null;
+        }
+
+        $normalizedType = $type instanceof Generic ? $type : new Generic($type->name);
+        $manager = ResourceCollectionTypeManager::make($normalizedType);
+        $collectedType = $manager->getCollectedType();
+        $dataType = new ArrayType($collectedType);
+
+        return match ($paginatorType) {
+            'cursor' => (new CursorPaginatorTypeManager())->getToArrayType($dataType),
+            'length_aware' => (new LengthAwarePaginatorTypeManager())->getToArrayType($dataType),
+            'simple' => (new PaginatorTypeManager())->getToArrayType($dataType),
+        };
+    }
+
+    /**
+     * Detect the pagination type from a ResourceCollection's template types.
+     *
+     * @return 'cursor'|'length_aware'|'simple'|null
+     */
+    private function getPaginatorType(ObjectType $type): ?string
+    {
+        if (! $type instanceof Generic) {
+            return null;
+        }
+
+        $resourceType = $type->templateTypes[0] ?? null;
+
+        if (! $resourceType instanceof ObjectType) {
+            return null;
+        }
+
+        if ($resourceType->isInstanceOf(AbstractCursorPaginator::class)) {
+            return 'cursor';
+        }
+
+        if ($resourceType->isInstanceOf(LengthAwarePaginator::class)) {
+            return 'length_aware';
+        }
+
+        if ($resourceType->isInstanceOf(AbstractPaginator::class)) {
+            return 'simple';
         }
 
         return null;
@@ -61,12 +163,10 @@ class InertiaExtension implements ExpressionTypeInferExtension
     {
         $current = $methodCall->var;
 
-        // Traverse the chain to find the original Inertia static call
         while ($current instanceof MethodCall) {
             $current = $current->var;
         }
 
-        // Check if we found an Inertia static call
         if ($current instanceof StaticCall
             && $current->class instanceof FullyQualified
             && $current->class->toString() === Inertia::class) {
