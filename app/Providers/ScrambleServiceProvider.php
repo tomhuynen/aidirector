@@ -30,7 +30,7 @@ class ScrambleServiceProvider extends ServiceProvider
         $apis = [
             'api' => fn(Route $r) => str_starts_with($r->uri(), 'api'),
             'admin' => fn(Route $r) => str_starts_with($r->uri(), 'admin') || str_starts_with($r->uri(), 'auth'),
-            'public' => fn(Route $r) => ! collect(['admin', 'api', 'auth'])
+            'public' => fn(Route $r) => ! collect(['admin', 'api', 'auth', '_inertia-tables'])
                 ->contains(fn(string $prefix) => str_starts_with($r->uri(), $prefix)),        ];
 
         foreach ($apis as $name => $routes) {
