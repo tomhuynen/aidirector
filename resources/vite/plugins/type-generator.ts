@@ -176,13 +176,13 @@ function extractResponseType(block: string): string | null {
 
   const twoHundredBlock = block.substring(twoHundredStart, twoHundredEnd + 1)
 
-  return extractApplicationJsonType(twoHundredBlock)
+  return extractContentType(twoHundredBlock)
 }
 
 function extractRequestBodyType(block: string): string | null {
-  if (block.includes('requestBody?: never') || !block.includes('requestBody:')) return null
+  if (block.includes('requestBody?: never') || !block.includes('requestBody')) return null
 
-  const rbMatch = block.match(/requestBody:\s*\{/)
+  const rbMatch = block.match(/requestBody\??:\s*\{/)
   if (!rbMatch || rbMatch.index === undefined) return null
 
   const rbStart = rbMatch.index + rbMatch[0].length - 1
@@ -191,25 +191,41 @@ function extractRequestBodyType(block: string): string | null {
 
   const rbBlock = block.substring(rbStart, rbEnd + 1)
 
-  return extractApplicationJsonType(rbBlock)
+  return extractContentType(rbBlock)
 }
 
-function extractApplicationJsonType(block: string): string | null {
-  const marker = '"application/json": '
-  const jsonIdx = block.indexOf(marker)
-  if (jsonIdx === -1) return null
+function extractContentType(block: string): string | null {
+  // Try application/json first, then multipart/form-data
+  const contentTypes = ['"application/json": ', '"multipart/form-data": ']
 
-  const valueStart = jsonIdx + marker.length
+  for (const marker of contentTypes) {
+    const idx = block.indexOf(marker)
+    if (idx === -1) continue
 
-  if (block[valueStart] === '{') {
-    const end = findClosingBrace(block, valueStart)
-    if (end === -1) return null
-    return block.substring(valueStart, end + 1)
+    const valueStart = idx + marker.length
+
+    if (block[valueStart] === '{') {
+      const end = findClosingBrace(block, valueStart)
+      if (end === -1) continue
+      return block.substring(valueStart, end + 1)
+    }
+
+    // For non-object types (references, intersections), find the end properly
+    // by tracking brace depth to handle `Foo & { bar: string }`
+    let depth = 0
+    let end = valueStart
+    while (end < block.length) {
+      const char = block[end]
+      if (char === '{') depth++
+      else if (char === '}') depth--
+      else if (char === ';' && depth === 0) break
+      end++
+    }
+    if (end === block.length) continue
+    return block.substring(valueStart, end).trim()
   }
 
-  const semicolon = block.indexOf(';', valueStart)
-  if (semicolon === -1) return null
-  return block.substring(valueStart, semicolon).trim()
+  return null
 }
 
 // --- Schema inlining ---
@@ -279,7 +295,14 @@ function toNamespacePath(path: string): string | null {
   const cleaned = path.replace(/_\d+$/, '')
   const segments = cleaned.split('.')
   if (segments.some((s) => !s)) return null
-  return segments.map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('.')
+  return segments.map((s) => toPascalCase(s)).join('.')
+}
+
+function toPascalCase(str: string): string {
+  return str
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')
 }
 
 // --- Output ---
