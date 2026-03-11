@@ -52,6 +52,11 @@ class InertiaExtension implements ExpressionTypeInferExtension
     {
         if (in_array($node->name->toString(), ['render', 'modal']) && count($node->args) > 1) {
             $propsType = TypeHelper::getArgType($scope, $node->args, ['content', 1], new ArrayType());
+
+            // Resolve references in all props (method calls, static calls, etc.)
+            $propsType = $this->resolvePropsReferences($propsType, $scope);
+
+            // Transform paginated collections
             $propsType = $this->transformPaginatedCollections($propsType, $scope);
 
             return new Generic(
@@ -85,13 +90,15 @@ class InertiaExtension implements ExpressionTypeInferExtension
 
             if ($paginationType !== null) {
                 $hasChanges = true;
-                $transformedItems[] = new ArrayItemType_(
+                $newItem = new ArrayItemType_(
                     $item->key,
                     $paginationType,
                     $item->isOptional,
                     $item->shouldUnpack,
                     $item->keyType,
                 );
+                $newItem->mergeAttributes($item->attributes());
+                $transformedItems[] = $newItem;
             } else {
                 $transformedItems[] = $item;
             }
@@ -157,6 +164,35 @@ class InertiaExtension implements ExpressionTypeInferExtension
         }
 
         return null;
+    }
+
+    /**
+     * Resolve all reference types in the props array.
+     */
+    private function resolvePropsReferences(Type $type, Scope $scope): Type
+    {
+        if (! $type instanceof KeyedArrayType) {
+            return ReferenceTypeResolver::getInstance()->resolve($scope, $type);
+        }
+
+        $transformedItems = [];
+
+        foreach ($type->items as $item) {
+            $resolvedValue = ReferenceTypeResolver::getInstance()->resolve($scope, $item->value);
+
+            $newItem = new ArrayItemType_(
+                $item->key,
+                $resolvedValue,
+                $item->isOptional,
+                $item->shouldUnpack,
+                $item->keyType,
+            );
+            $newItem->mergeAttributes($item->attributes());
+
+            $transformedItems[] = $newItem;
+        }
+
+        return new KeyedArrayType($transformedItems);
     }
 
     private function findInertiaStaticCall(MethodCall $methodCall): ?StaticCall
