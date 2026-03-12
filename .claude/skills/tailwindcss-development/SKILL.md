@@ -1,10 +1,7 @@
 ---
 name: tailwindcss-development
-description: >-
-  Styles applications using Tailwind CSS v4 utilities. Activates when adding styles, restyling components,
-  working with gradients, spacing, layout, flex, grid, responsive design, dark mode, colors,
-  typography, or borders; or when the user mentions CSS, styling, classes, Tailwind, restyle,
-  hero section, cards, buttons, or any visual/UI changes.
+description: Tailwind CSS v4 utilities and patterns. Use when styling components or working with CSS classes.
+user-invocable: false
 ---
 
 # Tailwind CSS Development

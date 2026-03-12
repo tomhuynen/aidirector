@@ -1,9 +1,7 @@
 ---
 name: type-system
-description: >-
-  Manages the Scramble to OpenAPI to TypeScript type pipeline. Activates when working with
-  Inertia page props, form request types, inertia.d.ts, schema.d.ts, utils.d.ts, Scramble
-  extensions, OpenAPI schema generation, or TypeScript type generation for Inertia pages.
+description: CRITICAL for all Inertia page props, form request types, and schema generation. Manages the Scramble to OpenAPI to TypeScript type pipeline.
+user-invocable: false
 ---
 
 # Type System Skill

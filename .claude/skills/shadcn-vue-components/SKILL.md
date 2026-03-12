@@ -1,9 +1,7 @@
 ---
 name: shadcn-vue-components
-description: >-
-  Always checks shadcn-vue for appropriate components before writing custom implementations.
-  Activates when building UI components, forms, dialogs, dropdowns, or any interactive elements.
-  Uses official shadcn-vue patterns and avoids reinventing existing components.
+description: MANDATORY before building any UI component, form, dialog, or dropdown. Checks shadcn-vue library for existing components.
+user-invocable: false
 ---
 
 # shadcn-vue Component First

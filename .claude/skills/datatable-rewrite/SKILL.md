@@ -1,11 +1,6 @@
 ---
 name: datatable-rewrite
-description: >-
-  Rewrites @inertiaui/table-vue components using shadcn-vue. Activates when working on DataTable
-  components, table features, row actions, bulk actions, filters, pagination, column types,
-  extracting composables from @inertiaui/table-vue, or any data-table related Vue components.
-  Also activates when working with useTable, useActions, visitUrl, getActionForItem, or
-  getClickableColumn.
+description: DataTable component architecture — rewrites @inertiaui/table-vue using shadcn-vue. Use when working on DataTable components, row/bulk actions, filters, or table composables.
 ---
 
 # DataTable Rewrite Specialist

@@ -1,10 +1,7 @@
 ---
 name: pest-testing
-description: >-
-  Tests applications using the Pest 3 PHP framework. Activates when writing tests, creating unit or feature
-  tests, adding assertions, testing Livewire components, architecture testing, debugging test failures,
-  working with datasets or mocking; or when the user mentions test, spec, TDD, expects, assertion,
-  coverage, or needs to verify functionality works.
+description: Pest 3 PHP testing patterns. Use when writing, running, or debugging tests.
+user-invocable: false
 ---
 
 # Pest Testing 3
