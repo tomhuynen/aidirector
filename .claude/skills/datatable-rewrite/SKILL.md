@@ -2,28 +2,19 @@
 name: datatable-rewrite
 description: >-
   Rewrites @inertiaui/table-vue components using shadcn-vue. Activates when working on DataTable
-  components, table features, row actions, bulk actions, filters, pagination, or any data-table
-  related Vue components. Always checks original implementation before making changes.
+  components, table features, row actions, bulk actions, filters, pagination, column types,
+  extracting composables from @inertiaui/table-vue, or any data-table related Vue components.
+  Also activates when working with useTable, useActions, visitUrl, getActionForItem, or
+  getClickableColumn.
 ---
 
 # DataTable Rewrite Specialist
 
-## When to Apply
+## Core Principles
 
-Activate this skill when:
-- Working on any DataTable component
-- Implementing table features (sorting, filtering, pagination, actions)
-- Adding new column types or cell renderers
-- Fixing bugs in data-table components
-- Adding features from the original @inertiaui/table-vue
-
-## Core Principle
-
-**ALWAYS check the original implementation before making changes.** The original code is the source of truth for:
-- Property names and types
-- API contracts
-- Feature behavior
-- Edge cases
+1. **ALWAYS read the original implementation before making changes.** The original code is the source of truth.
+2. **No code duplication.** Check shared composables/utils before implementing helpers. Extract to shared modules when logic appears in 2+ components.
+3. **Use shadcn-vue components.** Never write custom UI when shadcn-vue has it.
 
 ## File References
 
@@ -45,6 +36,8 @@ resources/shared/components/ui/data-table/
 ├── DataTableCellBadge.vue     # Badge cell renderer
 ├── DataTableCellBoolean.vue   # Boolean cell renderer
 ├── DataTableCellImage.vue     # Image cell renderer
+├── composables/               # Shared composables (useIcons.ts, etc.)
+├── utils/                     # Pure utility functions
 ├── types.ts                   # TypeScript definitions
 └── index.ts                   # Barrel exports
 ```
@@ -52,10 +45,11 @@ resources/shared/components/ui/data-table/
 ### Original Implementation (ALWAYS CHECK THESE)
 ```
 vendor/inertiaui/table/vue/src/
-├── Table.vue                  # Main component (622 lines)
+├── Table.vue                  # Main component
 ├── table.js                   # useTable composable
 ├── actions.js                 # useActions composable
 ├── urlHelpers.js              # URL navigation helpers
+├── agnosticUrlHelpers.js      # Core logic behind urlHelpers
 ├── useStickyTable.js          # Sticky column/header logic
 ├── clauses.js                 # Filter clause definitions
 ├── translations.js            # i18n system
@@ -121,48 +115,27 @@ interface TableColumn {
   truncate?: number
   cellClass?: string
   headerClass?: string
-  // Boolean column specific
   trueIcon?: string
   falseIcon?: string
-  // Action column specific
   asDropdown?: boolean
-  // Sticky
   stickable?: boolean
 }
 ```
 
 ### BooleanColumn Behavior
-When no icons are configured, BooleanColumn returns the **label** ("Yes"/"No"), not the boolean value.
-```php
-// From BooleanColumn.php mapForTable()
-if ($bool && $this->getTrueIcon()) return $bool;
-if (!$bool && $this->getFalseIcon()) return $bool;
-return parent::mapForTable($value, ...); // Returns label string
-```
-
-Handle in frontend with:
-```typescript
-const toBooleanValue = (value: unknown): boolean => {
-  if (value === false || value === 0 || value === '0' ||
-      value === 'false' || value === 'No' || value === 'no' ||
-      value === null || value === undefined) {
-    return false
-  }
-  return Boolean(value)
-}
-```
+When no icons are configured, BooleanColumn returns the **label** ("Yes"/"No"), not the boolean value. Handle with `toBooleanValue()` helper.
 
 ### TableRow (from Table.php)
 ```typescript
 interface TableRow {
   _primary_key: string | number
   _is_selectable?: boolean
-  _actions?: Record<number, RowActionItem | string>  // Indexed by action position
+  _actions?: Record<number, RowActionItem | string>
   _data_attributes?: Record<string, string>
   _column_images?: Record<string, ColumnImage>
   _column_urls?: Record<string, string | ColumnUrl>
   _row_url?: string | ColumnUrl
-  [key: string]: unknown  // Column values
+  [key: string]: unknown
 }
 ```
 
@@ -173,8 +146,8 @@ interface TableFilterDefinition {
   label: string
   type: 'text' | 'numeric' | 'date' | 'set' | 'boolean'
   clauses: string[]
-  options?: FilterOption[]  // For set filters
-  multiple?: boolean        // Multi-select for set
+  options?: FilterOption[]
+  multiple?: boolean
   hasDefaultValue?: boolean
 }
 
@@ -182,7 +155,7 @@ interface FilterState {
   enabled: boolean
   clause: string
   value: FilterValue
-  new?: boolean  // Just added, auto-open popover
+  new?: boolean
 }
 
 type FilterValue = string | number | [number, number] | string[] | number[] | null
@@ -190,47 +163,63 @@ type FilterValue = string | number | [number, number] | string[] | number[] | nu
 
 ## shadcn-vue Components to Use
 
-- **Dialog** - Confirmation dialogs, modals
-- **Sheet** - Slideovers
-- **DropdownMenu** - Action menus, column toggle
-- **Button** - Action buttons
-- **Checkbox** - Row selection (use `model-value`, NOT `checked`)
-- **Popover** - Filter badges
-- **Calendar** - Date filters
-- **NativeSelect** - Set filters (NOT shadcn Select - has binding issues)
-- **Input** - Text/numeric filters
-- **Badge** - Badge columns, filter pills
+| Need | Component | Notes |
+|------|-----------|-------|
+| Confirmation | Dialog | |
+| Slideover | Sheet | |
+| Action menus | DropdownMenu | |
+| Row selection | Checkbox | Use `model-value`, NOT `checked` (reka-ui) |
+| Filter badges | Popover | |
+| Date filters | Calendar | |
+| Set filters | NativeSelect | NOT shadcn Select (binding issues) |
+| Text/numeric | Input | |
+| Badge columns | Badge | |
+
+## Extraction Reference (@inertiaui/table-vue → local)
+
+### Import Map
+| File | From `@inertiaui/table-vue` | Replacement Target |
+|------|----------------------------|-------------------|
+| `DataTable.vue` | `useTable`, `useActions` | `./composables/useTable`, `./composables/useActions` |
+| `DataTableRowActions.vue` | `getActionForItem` | `./utils/urlHelpers` |
+| `DataTableBody.vue` | `getClickableColumn`, `visitUrl` | `./utils/urlHelpers` |
+| `DataTableEmpty.vue` | `visitUrl` | `./utils/urlHelpers` |
+| `types.ts` | `TableHook` (type) | Define locally |
+
+### Key Behavior of Original Functions
+
+**visitUrl** — Normalizes string → object URL, opens new tab if `openInNewTab: true`, otherwise `router.visit()` with `preserveScroll` and `preserveState`.
+
+**getActionForItem** — Transforms action with per-row overrides. Determines component type: `'a'` (download), `'button-component'`, `'button'`. Copies `dataAttributes` to bindings. Handles `asDownload`, `disabled`, `isVisible`, `variant`.
+
+**getClickableColumn** — Skips action columns (`_actions`). Gets URL from `item._column_urls[column.attribute]` or `item._row_url`. Detects ctrl/cmd/middle-click → `openInNewTab: true`.
+
+**useActions** — `selectedItems` ref (array of IDs, `['*']` = select all). `performAction` checks `authorized`, handles `isCustom`, POSTs with `{ keys, json: true }`. Clears selection after action.
+
+**useTable** — State: `{ columns, filters, perPage, search, sort, sticky }`. Deep watches → debounced `router.visit()`. Builds query via `qs.stringify()`. Manages cancel tokens, scroll positioning, partial reloads.
+
+### Keep Separate: @inertiaui/modal-vue
+`visitModal` comes from `@inertiaui/modal-vue` (separate package). Do NOT try to extract it.
+
+### Extraction Workflow
+1. Read the original file in full (not just the function)
+2. Write replacement in TypeScript, match behavior exactly
+3. Update imports in consuming files
+4. Run `npx vue-tsc -p tsconfig.json --noEmit`
 
 ## Common Pitfalls
 
-1. **Wrong property names** - Always check PHP toArray() methods
-2. **Nested vs flat properties** - `confirmationTitle` NOT `confirm.title`
-3. **Boolean coercion** - `Boolean("No")` is `true`, handle label strings
-4. **Checkbox binding** - Use `:model-value`, not `:checked` (reka-ui)
-5. **Select binding** - Use NativeSelect for set filters, not shadcn Select
-6. **Icon resolution** - Convert kebab-case to PascalCase for lucide-vue-next
+1. **Wrong property names** — Always check PHP toArray() methods
+2. **Nested vs flat properties** — `confirmationTitle` NOT `confirm.title`
+3. **Boolean coercion** — `Boolean("No")` is `true`, handle label strings
+4. **Checkbox binding** — Use `:model-value`, not `:checked` (reka-ui)
+5. **Select binding** — Use NativeSelect for set filters, not shadcn Select
+6. **Icon resolution** — Use `composables/useIcons.ts`, don't duplicate
+7. **Cancel tokens** — Don't forget when extracting useTable
+8. **qs format** — Backend expects specific query string format, don't break it
 
 ## Workflow
 
-1. **Before implementing any feature:**
-   - Read the original Vue component
-   - Read the PHP class (for toArray() output)
-   - Check helpers.js for utility functions
-
-2. **During implementation:**
-   - Match property names exactly
-   - Use shadcn-vue components
-   - Follow existing patterns in our components
-
-3. **After implementation:**
-   - Run `vendor/bin/pint --dirty`
-   - Build and test the feature
-   - Verify edge cases match original behavior
-
-## Feature Parity Document
-
-See `docs/data-table-feature-analysis.md` for:
-- Full feature comparison (97 features)
-- Current coverage (~68%)
-- Priority improvements list
-- Quick wins identified
+1. **Before implementing:** Read original Vue + PHP source, check existing shared utils
+2. **During:** Match property names exactly, use shadcn-vue, follow existing patterns
+3. **After:** Run `vendor/bin/pint --dirty`, run `npx vue-tsc`, test the feature

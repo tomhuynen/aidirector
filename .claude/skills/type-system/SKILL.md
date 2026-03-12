@@ -1,15 +1,12 @@
+---
+name: type-system
+description: >-
+  Manages the Scramble to OpenAPI to TypeScript type pipeline. Activates when working with
+  Inertia page props, form request types, inertia.d.ts, schema.d.ts, utils.d.ts, Scramble
+  extensions, OpenAPI schema generation, or TypeScript type generation for Inertia pages.
+---
+
 # Type System Skill
-
-Manages the Scramble → OpenAPI → TypeScript type pipeline. Activates when working with TypeScript types, page props, form request types, Inertia type definitions, or any frontend type generation.
-
-## Activation Triggers
-
-- Working with `Inertia.Pages.*` or `Inertia.Requests.*` types
-- Modifying page props or form request types in Vue components
-- Adding/modifying Scramble extensions or OpenAPI schema generation
-- Creating new Inertia pages or controllers that return Inertia responses
-- Debugging type mismatches between PHP and TypeScript
-- Any work involving `inertia.d.ts`, `schema.d.ts`, or `utils.d.ts`
 
 ## Architecture
 
