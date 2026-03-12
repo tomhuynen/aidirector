@@ -6,6 +6,7 @@ use App\Http\Middleware\Admin\IdentifyTenant;
 use App\Support\Scramble\Extensions\ArrayableExtension;
 use App\Support\Scramble\Extensions\CacheTypeInfer;
 use App\Support\Scramble\Extensions\CallbackExtension;
+use App\Support\Scramble\Extensions\CastablePropertyExtension;
 use App\Support\Scramble\Extensions\CommonStaticMethodExtension;
 use App\Support\Scramble\Extensions\EnumHelpersExtension;
 use App\Support\Scramble\Extensions\InertiaExtension;
@@ -27,8 +28,8 @@ return [
     ],
 
     'extensions' => [
+        CastablePropertyExtension::class,
         InertiaExtension::class,
-        InertiaSharedDataExtension::class,
         CallbackExtension::class,
         ArrayableExtension::class,
         EnumHelpersExtension::class,
@@ -37,5 +38,6 @@ return [
         ProgramScheduleTypeInfer::class,
         CommonStaticMethodExtension::class,
         ReflectionMethodReturnTypeExtension::class,
+        InertiaSharedDataExtension::class,
     ],
 ];
