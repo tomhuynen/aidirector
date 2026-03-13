@@ -22,6 +22,7 @@ return $config
     ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/CommonStaticMethodExtension.php', [ErrorType::DEV_DEPENDENCY_IN_PROD])
     ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/ReflectionMethodReturnTypeExtension.php', [ErrorType::DEV_DEPENDENCY_IN_PROD])
     ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/CastablePropertyExtension.php', [ErrorType::DEV_DEPENDENCY_IN_PROD])
+    ->ignoreErrorsOnPath(__DIR__ . '/app/Support/Scramble/Extensions/EnumHelpersExtension.php', [ErrorType::DEV_DEPENDENCY_IN_PROD, ErrorType::SHADOW_DEPENDENCY])
     ->ignoreErrorsOnPackages([
         'league/flysystem-aws-s3-v3',
         'league/flysystem-path-prefixing',
