@@ -8,8 +8,8 @@ use Dedoc\Scramble\Extensions\TypeToSchemaExtension;
 use Dedoc\Scramble\Infer\Definition\FunctionLikeAstDefinition;
 use Dedoc\Scramble\Support\Type\ArrayType;
 use Dedoc\Scramble\Support\Type\KeyedArrayType;
+use Dedoc\Scramble\Support\Type\Literal\LiteralIntegerType;
 use Dedoc\Scramble\Support\Type\ObjectType;
-use Dedoc\Scramble\Support\Type\TemplateType;
 use Dedoc\Scramble\Support\Type\Type;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Model;
@@ -37,18 +37,19 @@ class ArrayableExtension extends TypeToSchemaExtension
 
         $toArrayReturnType = $type->getMethodReturnType('toArray');
 
-        // When the inferred return type has unresolved template keys (e.g., from
-        // Collection::all()), prefer the PHPDoc declaration type which is typically
-        // correct. Without this, ArrayType(key: TemplateType) generates an object
-        // schema instead of an array schema in OpenAPI.
-        if ($this->hasUnresolvedTemplateKeys($toArrayReturnType)) {
+        // When the inferred return type has non-integer keys on an ArrayType
+        // (e.g., from Collection::all() resolving template keys to string),
+        // prefer the PHPDoc declaration type which typically declares list<>.
+        // Without this, ArrayType(key: StringType) generates an object schema
+        // instead of an array schema in OpenAPI.
+        if ($this->hasNonIntegerArrayKeys($toArrayReturnType)) {
             $methodDef = $classDefinition->getMethodDefinition('toArray');
 
             if ($methodDef instanceof FunctionLikeAstDefinition) {
                 $declarationType = $methodDef->getDeclarationDefinition()?->getReturnType();
 
                 if ($declarationType !== null) {
-                    $toArrayReturnType = $declarationType;
+                    return $this->openApiTransformer->transform($declarationType);
                 }
             }
         }
@@ -56,15 +57,20 @@ class ArrayableExtension extends TypeToSchemaExtension
         return $this->openApiTransformer->transform($toArrayReturnType);
     }
 
-    private function hasUnresolvedTemplateKeys(Type $type): bool
+    /**
+     * Check if a type contains ArrayType nodes with non-integer keys.
+     * This catches both unresolved TemplateType keys and resolved StringType
+     * keys from Collection chains that should actually be list<> (int keys).
+     */
+    private function hasNonIntegerArrayKeys(Type $type): bool
     {
-        if ($type instanceof ArrayType && $type->key instanceof TemplateType) {
-            return true;
+        if ($type instanceof ArrayType) {
+            return ! ($type->key instanceof LiteralIntegerType);
         }
 
         if ($type instanceof KeyedArrayType) {
             foreach ($type->items as $item) {
-                if ($this->hasUnresolvedTemplateKeys($item->value)) {
+                if ($this->hasNonIntegerArrayKeys($item->value)) {
                     return true;
                 }
             }
