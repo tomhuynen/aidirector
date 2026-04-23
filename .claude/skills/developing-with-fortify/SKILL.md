@@ -1,7 +1,6 @@
 ---
 name: developing-with-fortify
-description: Laravel Fortify authentication patterns. Use when working with login, registration, password reset, 2FA, or auth guards.
-user-invocable: false
+description: Laravel Fortify headless authentication backend development. Activate when implementing authentication features including login, registration, password reset, email verification, two-factor authentication (2FA/TOTP), profile updates, headless auth, authentication scaffolding, or auth guards in Laravel applications.
 ---
 
 # Laravel Fortify Development
