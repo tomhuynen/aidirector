@@ -32,9 +32,9 @@ class Activities extends Table
         protected ?User $user = null,
     ) {}
 
-    public function withQueryBuilder(QueryBuilder $queryBuilder)
+    public function withQueryBuilder(QueryBuilder $queryBuilder): ?QueryBuilder
     {
-        $queryBuilder->searchUsing(function (Builder $query, string $search, Collection $terms) {
+        return $queryBuilder->searchUsing(function (Builder $query, string $search, Collection $terms) {
             if (empty($search)) {
                 return;
             }

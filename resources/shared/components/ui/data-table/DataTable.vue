@@ -13,15 +13,8 @@
       </div>
     </slot>
 
-    <slot
-      v-if="resource.emptyState && (!resource.results.data.length || resource.emptyState !== true)"
-      name="empty-state"
-      :table="table"
-    >
-      <DataTableEmpty
-        v-if="!resource.results.data.length"
-        :config="typeof resource.emptyState === 'object' ? resource.emptyState : undefined"
-      />
+    <slot v-if="resource.emptyState && !resource.results.data.length" name="empty-state" :table="table">
+      <DataTableEmpty :config="resource.emptyState as unknown as EmptyStateConfig" />
     </slot>
 
     <template v-else>
@@ -82,7 +75,7 @@
   </div>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends Record<string, any> = Record<string, any>">
 import { useActions, useTable } from '@inertiaui/table-vue'
 import { Loader2 } from 'lucide-vue-next'
 import { ref } from 'vue'
@@ -93,22 +86,47 @@ import DataTableFilters from './DataTableFilters.vue'
 import DataTableHeader from './DataTableHeader.vue'
 import DataTablePagination from './DataTablePagination.vue'
 import DataTableToolbar from './DataTableToolbar.vue'
-import type { TableAction, TableColumn, TableResource, TableRow } from './types'
+import type {
+  CellSlotProps,
+  EmptyStateConfig,
+  HeaderSlotProps,
+  TableAction,
+  TableColumn,
+  TableItem,
+  TableResource,
+  TableSlotProps,
+  UseActionsReturn,
+  UseTableReturn,
+} from './types'
 
 const props = defineProps<{
-  resource: TableResource
-  onRowClick?: (item: TableRow, column: TableColumn) => void
+  resource: TableResource<T>
+  onRowClick?: (item: TableItem<T>, column: TableColumn) => void
 }>()
 
 const emit = defineEmits<{
   'custom-action': [payload: { action: TableAction; keys: (string | number)[]; onFinish?: () => void }]
 }>()
 
+type BaseSlotProps = TableSlotProps<UseTableReturn, UseActionsReturn>
+
+defineSlots<{
+  loading(props: BaseSlotProps): unknown
+  'empty-state'(props: { table: UseTableReturn }): unknown
+  toolbar(props: BaseSlotProps): unknown
+  filters(props: BaseSlotProps): unknown
+  header(props: BaseSlotProps): unknown
+  body(props: BaseSlotProps): unknown
+  footer(props: BaseSlotProps): unknown
+  [key: `cell(${string})`]: (props: CellSlotProps<T, UseTableReturn, UseActionsReturn>) => unknown
+  [key: `header(${string})`]: (props: HeaderSlotProps<UseTableReturn, UseActionsReturn>) => unknown
+}>()
+
 const tableWrapperRef = ref<HTMLElement | null>(null)
 const tableContainerRef = ref<HTMLElement | null>(null)
 
-const table = useTable(props.resource)
-const actions = useActions()
+const table = useTable(() => props.resource)
+const actions = useActions(() => props.resource)
 
 const scrollToTopOfTable = () => {
   if (tableWrapperRef.value) {

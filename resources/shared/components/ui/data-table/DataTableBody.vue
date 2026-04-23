@@ -15,7 +15,9 @@
         v-if="actions.selectedItems && table.hasSelectableRows.value"
         class="w-10 cursor-pointer px-2 text-center align-middle"
         :class="{ 'pointer-events-none opacity-50': item._is_selectable === false }"
-        @click="item._is_selectable !== false && actions.toggleItem(item._primary_key)"
+        @click="
+          item._is_selectable !== false && item._primary_key !== undefined && actions.toggleItem(item._primary_key)
+        "
       >
         <Checkbox :model-value="isRowSelected(item)" class="pointer-events-none" />
       </td>
@@ -47,7 +49,7 @@
               :actions="actions"
               @custom-action="emit('custom-action', $event)"
             />
-            <DataTableCellBadge v-else-if="column.type === 'badge'" :value="item[column.attribute] as BadgeValue" />
+            <DataTableCellBadge v-else-if="column.type === 'badge'" :value="item[column.attribute] as BadgeData" />
             <DataTableCellBoolean
               v-else-if="column.type === 'boolean'"
               :value="toBooleanValue(item[column.attribute])"
@@ -56,14 +58,14 @@
             <DataTableCellImage v-else-if="column.type === 'image'" :value="item._column_images?.[column.attribute]" />
             <ul v-else-if="Array.isArray(item[column.attribute])" :class="getTruncateClass(column)">
               <li
-                v-for="(value, index) in column.truncate
+                v-for="(value, index) in typeof column.truncate === 'number'
                   ? (item[column.attribute] as unknown[]).slice(0, column.truncate)
                   : (item[column.attribute] as unknown[])"
                 :key="index"
               >
                 <template
                   v-if="
-                    column.truncate &&
+                    typeof column.truncate === 'number' &&
                     (item[column.attribute] as unknown[]).length > column.truncate &&
                     index === column.truncate - 1
                   "
@@ -81,7 +83,7 @@
   </tbody>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends Record<string, any> = Record<string, any>">
 import { visitModal } from '@inertiaui/modal-vue'
 import { getClickableColumn, visitUrl } from '@inertiaui/table-vue'
 import { Checkbox } from '@shared:ui/checkbox'
@@ -93,20 +95,25 @@ import DataTableCellBoolean from './DataTableCellBoolean.vue'
 import DataTableCellImage from './DataTableCellImage.vue'
 import DataTableRowActions from './DataTableRowActions.vue'
 import type {
-  BadgeValue,
+  BadgeData,
+  CellSlotProps,
   TableAction,
   TableColumn,
+  TableItem,
   TableResource,
-  TableRow,
   UseActionsReturn,
   UseTableReturn,
 } from './types'
 
 const props = defineProps<{
-  resource: TableResource
+  resource: TableResource<T>
   table: UseTableReturn
   actions: UseActionsReturn
-  onRowClick?: (item: TableRow, column: TableColumn) => void
+  onRowClick?: (item: TableItem<T>, column: TableColumn) => void
+}>()
+
+defineSlots<{
+  [key: `cell(${string})`]: (props: CellSlotProps<T, UseTableReturn, UseActionsReturn>) => unknown
 }>()
 
 const emit = defineEmits<{
@@ -123,11 +130,11 @@ const columnCount = computed(() => {
   return count
 })
 
-const getRowKey = (item: TableRow, index: number): string | number =>
-  props.table.hasSelectableRows.value ? item._primary_key : index
+const getRowKey = (item: TableItem<T>, index: number): string | number =>
+  props.table.hasSelectableRows.value && item._primary_key !== undefined ? item._primary_key : index
 
-const isRowSelected = (item: TableRow): boolean =>
-  props.actions.selectedItems.value.includes(item._primary_key) ||
+const isRowSelected = (item: TableItem<T>): boolean =>
+  (item._primary_key !== undefined && props.actions.selectedItems.value.includes(item._primary_key)) ||
   (item._is_selectable !== false && props.actions.allItemsAreSelected.value)
 
 const getAlignmentClass = (alignment: TableColumn['alignment']) => ({
@@ -141,7 +148,8 @@ const getCellClasses = (column: TableColumn) => [
   { 'whitespace-normal': column.wrap, 'whitespace-pre': !column.wrap },
 ]
 
-const getTruncateClass = (column: TableColumn) => (column.truncate ? `line-clamp-${column.truncate}` : '')
+const getTruncateClass = (column: TableColumn) =>
+  typeof column.truncate === 'number' ? `line-clamp-${column.truncate}` : ''
 
 // Handle various falsy values from server (string "0", "false", "No", etc.)
 const toBooleanValue = (value: unknown): boolean => {
@@ -160,12 +168,12 @@ const toBooleanValue = (value: unknown): boolean => {
   return Boolean(value)
 }
 
-const isClickable = (item: TableRow, column: TableColumn): boolean => {
+const isClickable = (item: TableItem<T>, column: TableColumn): boolean => {
   if (column.attribute === '_actions') return false
   return !!(props.onRowClick || getClickableColumn(column, item))
 }
 
-const handleCellClick = (item: TableRow, column: TableColumn, event: MouseEvent) => {
+const handleCellClick = (item: TableItem<T>, column: TableColumn, event: MouseEvent) => {
   if (column.attribute === '_actions') return
 
   // Check for clickable column URL first

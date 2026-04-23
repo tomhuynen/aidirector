@@ -8,22 +8,22 @@
 import type { BadgeVariants } from '@shared:ui/badge'
 import { Badge } from '@shared:ui/badge'
 
-import type { BadgeValue } from './types'
+import type { BadgeData, ButtonVariant } from './types'
 
 defineProps<{
-  value: BadgeValue | null | undefined
+  value: BadgeData | null | undefined
 }>()
 
-const getVariant = (variant?: string): BadgeVariants['variant'] => {
+const getVariant = (variant?: ButtonVariant): BadgeVariants['variant'] => {
   switch (variant) {
     case 'danger':
       return 'destructive'
-    case 'default':
-      return 'outline'
     case 'success':
       return 'success'
     case 'warning':
       return 'secondary'
+    case 'info':
+    case 'default':
     default:
       return 'outline'
   }

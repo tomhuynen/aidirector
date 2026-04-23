@@ -15,7 +15,7 @@
       v-model="searchQuery"
       class="w-full md:max-w-sm"
       :placeholder="trans('Search...')"
-      :autofocus="resource.autofocus === 'search'"
+      :autofocus="!!resource.autofocus"
     />
 
     <div class="flex items-center gap-2">

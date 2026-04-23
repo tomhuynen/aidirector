@@ -8,7 +8,7 @@
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" class="w-48">
-      <template v-for="action in visibleActions" :key="action.key">
+      <template v-for="action in visibleActions" :key="action.id">
         <DropdownMenuItem
           :class="{ 'text-destructive focus:text-destructive': action.variant === 'danger' }"
           :disabled="!action.authorized || !!action.bindings?.disabled"
@@ -25,7 +25,7 @@
   <div v-else-if="visibleActions.length" class="flex items-center justify-end gap-1">
     <Button
       v-for="action in visibleActions"
-      :key="action.key"
+      :key="action.id"
       :variant="action.variant === 'danger' ? 'destructive' : 'ghost'"
       size="sm"
       :disabled="!action.authorized || !!action.bindings?.disabled"
@@ -89,18 +89,21 @@ import { MoreHorizontal } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
 import { useIcons } from './composables/useIcons'
-import type { RowActionItem, TableAction, TableColumn, TableResource, TableRow, UseActionsReturn } from './types'
+import type {
+  ActionItem,
+  ActionResult,
+  RowActionItem,
+  TableAction,
+  TableColumn,
+  TableItem,
+  TableResource,
+  UseActionsReturn,
+} from './types'
 
 const { getIconComponent } = useIcons()
 
-interface ResolvedAction extends TableAction {
-  isVisible: boolean
-  isLink?: boolean
-  bindings: Record<string, unknown>
-}
-
 const props = defineProps<{
-  item: TableRow
+  item: TableItem
   column: TableColumn
   resource: TableResource
   actions: UseActionsReturn
@@ -113,7 +116,7 @@ const emit = defineEmits<{
 // Dialog state
 const confirmDialogOpen = ref(false)
 const actionFailed = ref(false)
-const pendingAction = ref<(ResolvedAction & { _index: number }) | null>(null)
+const pendingAction = ref<(ActionItem & { _index: number }) | null>(null)
 
 const visibleActions = computed(() => {
   const allActions = props.resource.actions ?? []
@@ -125,13 +128,13 @@ const visibleActions = computed(() => {
       if (!action.asRowAction) return null
 
       const itemAction = itemActions[index]
-      const resolved = getActionForItem(action, itemAction) as ResolvedAction
+      const resolved = getActionForItem(action, itemAction) as ActionItem
       return { ...action, ...resolved, _index: index }
     })
-    .filter((action): action is ResolvedAction & { _index: number } => action !== null && action.isVisible)
+    .filter((action): action is ActionItem & { _index: number } => action !== null && action.isVisible)
 })
 
-const handleActionClick = (action: ResolvedAction & { _index: number }) => {
+const handleActionClick = (action: ActionItem & { _index: number }) => {
   if (action.confirmationRequired) {
     pendingAction.value = action
     confirmDialogOpen.value = true
@@ -148,7 +151,7 @@ const confirmAction = () => {
   pendingAction.value = null
 }
 
-const executeAction = async (action: ResolvedAction & { _index: number }) => {
+const executeAction = async (action: ActionItem & { _index: number }) => {
   const itemActions = props.item._actions ?? {}
   const itemAction: RowActionItem | string | undefined = itemActions[action._index]
 
@@ -183,7 +186,8 @@ const executeAction = async (action: ResolvedAction & { _index: number }) => {
   // Custom actions emit event instead of POSTing
   if (action.isCustom) {
     try {
-      const result = await props.actions.performAction(action, [props.item._primary_key])
+      const keys = props.item._primary_key !== undefined ? [props.item._primary_key] : []
+      const result = (await props.actions.performAction(action, keys)) as ActionResult
       emit('custom-action', {
         action,
         keys: result.keys,
@@ -197,7 +201,8 @@ const executeAction = async (action: ResolvedAction & { _index: number }) => {
 
   // Non-link actions use performAction
   try {
-    await props.actions.performAction(action, [props.item._primary_key])
+    const keys = props.item._primary_key !== undefined ? [props.item._primary_key] : []
+    await props.actions.performAction(action, keys)
   } catch {
     actionFailed.value = true
   }

@@ -12,7 +12,7 @@
     <DropdownMenuContent align="end" class="w-48">
       <DropdownMenuLabel>{{ trans('Bulk actions') }}</DropdownMenuLabel>
       <DropdownMenuSeparator />
-      <template v-for="action in bulkActions" :key="action.key">
+      <template v-for="action in bulkActions" :key="action.id">
         <DropdownMenuItem v-if="action.authorized" :disabled="!hasSelection" @select="handleActionClick(action)">
           {{ action.label }}
         </DropdownMenuItem>
@@ -22,7 +22,7 @@
         <DropdownMenuLabel>{{ trans('Export') }}</DropdownMenuLabel>
         <DropdownMenuItem
           v-for="exp in resource.exports"
-          :key="exp.key"
+          :key="exp.url"
           :disabled="exp.limitToSelectedRows && !hasSelection"
           @select="handleExport(exp)"
         >
@@ -99,7 +99,7 @@ import { trans } from 'laravel-vue-i18n'
 import { Settings2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
-import type { TableAction, TableExport, TableResource, UseActionsReturn } from './types'
+import type { ActionResult, ExportResult, TableAction, TableExport, TableResource, UseActionsReturn } from './types'
 
 const props = defineProps<{
   resource: TableResource
@@ -150,7 +150,7 @@ const confirmAction = () => {
 
 const executeAction = async (action: TableAction) => {
   try {
-    const result = await props.actions.performAction(action)
+    const result = (await props.actions.performAction(action)) as ActionResult
     if (action.isCustom) {
       emit('custom-action', { action, ...result })
     } else {
@@ -163,7 +163,7 @@ const executeAction = async (action: TableAction) => {
 
 const handleExport = async (exp: TableExport) => {
   try {
-    const result = await props.actions.performAsyncExport(exp)
+    const result = (await props.actions.performAsyncExport(exp)) as ExportResult
     const response = result.response as { data?: Record<string, unknown> } | undefined
     const data = response?.data
 

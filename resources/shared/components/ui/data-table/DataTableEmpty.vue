@@ -41,7 +41,7 @@ import { Inbox } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 import { useIcons } from './composables/useIcons'
-import type { EmptyStateAction, EmptyStateConfig } from './types'
+import type { ButtonVariant, EmptyStateAction, EmptyStateConfig } from './types'
 
 const { getIconComponent } = useIcons()
 
@@ -61,16 +61,21 @@ const iconComponent = computed(() => {
 })
 
 // Filter out hidden actions
-const visibleActions = computed(() => (props.config?.actions ?? []).filter((action) => !action.url.hidden))
+const visibleActions = computed(() =>
+  (props.config?.actions ?? []).filter((action: EmptyStateAction) => !action.url.hidden),
+)
 
 // Map variant to shadcn Button variant
-const getButtonVariant = (variant?: string): 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link' => {
+const getButtonVariant = (
+  variant?: ButtonVariant,
+): 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link' => {
   switch (variant) {
     case 'danger':
       return 'destructive'
     case 'info':
     case 'success':
     case 'warning':
+    case 'default':
     default:
       return 'default'
   }
@@ -78,17 +83,16 @@ const getButtonVariant = (variant?: string): 'default' | 'destructive' | 'outlin
 
 // Handle action click
 const handleAction = (action: EmptyStateAction) => {
+  if (!action.url.url) return
+
   if (action.url.asDownload) {
-    // For downloads, create a link and click it
     const link = document.createElement('a')
     link.href = action.url.url
     link.download = typeof action.url.asDownload === 'string' ? action.url.asDownload : ''
     link.click()
   } else if (action.url.modal) {
-    // Use visitModal for modal URLs
     visitModal(action.url.url, action.url.modal === true ? {} : action.url.modal)
   } else {
-    // Use visitUrl for navigation
     visitUrl(action.url)
   }
 }

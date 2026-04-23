@@ -9,16 +9,16 @@
     ],
     "license": "MIT",
     "repositories": [
-    {
-        "type": "composer",
-        "url": "https://satis.inertiaui.com"
-    }
-],
+        {
+            "type": "composer",
+            "url": "https://satis.inertiaui.com"
+        }
+    ],
     "require": {
         "php": "^8.2",
         "inertiajs/inertia-laravel": "^2.0",
-        "inertiaui/modal": "^0.21.1",
-        "inertiaui/table": "^3.0",
+        "inertiaui/modal": "^2.0",
+        "inertiaui/table": "^4.0",
         "kirschbaum-development/eloquent-power-joins": "^4.2",
         "lab404/laravel-impersonate": "^1.7",
         "laravel/fortify": "^1.25",

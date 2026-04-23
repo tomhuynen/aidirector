@@ -102,13 +102,13 @@ import { ListFilter, Search, X } from 'lucide-vue-next'
 import type { DateRange } from 'reka-ui'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { FilterState, FilterValue, TableFilterDefinition } from './types'
+import type { FilterValue, FilterValueScalar, TableFilter } from './types'
 
 const props = defineProps<{
-  filter: TableFilterDefinition
+  filter: TableFilter
 }>()
 
-const model = defineModel<FilterState>({ required: true })
+const model = defineModel<FilterValue>({ required: true })
 
 const emit = defineEmits<{
   remove: []
@@ -230,7 +230,7 @@ const betweenValue = computed({
     return [undefined, undefined] as [number | undefined, number | undefined]
   },
   set: (val: [number | undefined, number | undefined]) => {
-    model.value.value = val as FilterValue
+    model.value.value = val as FilterValueScalar
   },
 })
 
@@ -306,7 +306,7 @@ const dateRangeValue = computed<DateRange>({
     if (range.start && range.end) {
       model.value.value = [formatDateValue(range.start), formatDateValue(range.end)]
     } else if (range.start) {
-      model.value.value = [formatDateValue(range.start), null] as unknown as FilterValue
+      model.value.value = [formatDateValue(range.start), null] as unknown as FilterValueScalar
     } else {
       model.value.value = null
     }
