@@ -28,7 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 before: AuthenticatesRequests::class,
                 prepend: IdentifyPublicTenant::class,
             )
-            ->validateCsrfTokens(except: [
+            ->preventRequestForgery(except: [
                 '/auth/logout',
             ])
             ->trustHosts(null, false);
