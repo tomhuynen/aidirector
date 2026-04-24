@@ -11,11 +11,11 @@
     ->withEntryPoints(['resources/public/ts/app.ts'])
     }}
 
-    @inertiaHead
+    <x-inertia::head />
 </head>
 
 <body>
-    @inertia
+    <x-inertia::app />
 </body>
 
 </html>
