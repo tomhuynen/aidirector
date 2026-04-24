@@ -6,14 +6,13 @@
     "guidelines": true,
     "herd_mcp": true,
     "mcp": true,
-    "packages": [
-        "laravel/fortify"
-    ],
     "sail": false,
     "skills": [
+        "developing-with-fortify",
+        "laravel-best-practices",
         "wayfinder-development",
         "pest-testing",
-        "tailwindcss-development",
-        "developing-with-fortify"
+        "inertia-vue-development",
+        "tailwindcss-development"
     ]
 }
