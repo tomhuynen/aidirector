@@ -77,7 +77,9 @@ defineProps<{ canResetPassword: boolean }>()
 
 const passKeysSupported = computed(() => browserSupportsWebAuthn())
 
-const form = useForm<PostRequest<'/auth/login'> & { remember: boolean }>({
+type FormData = Omit<PostRequest<'/auth/login'>, 'remember'> & { remember: boolean }
+
+const form = useForm<FormData>({
   email: '',
   password: '',
   remember: false,
