@@ -45,23 +45,11 @@
       "esbuild",
       "v-code-diff",
       "vue-demi"
-    ],
-    "packageExtensions": {
-      "@inertiaui/table-vue": {
-        "peerDependencies": {
-          "vue": "*",
-          "@inertiaui/vanilla": "*",
-          "@heroicons/vue": "*",
-          "tailwind-merge": "*"
-        }
-      }
-    }
+    ]
   },
   "dependencies": {
-    "@heroicons/vue": "^2.2.0",
     "@inertiaui/modal-vue": "^3.0.0",
-    "@inertiaui/table-vue": "./vendor/inertiaui/table/vue",
-    "@inertiaui/vanilla": "^1.0.2",
+    "@inertiaui/table-vue": "file:vendor/inertiaui/table/vue",
     "@internationalized/date": "^3.11.0",
     "@vueuse/core": "^14.2.0",
     "@vueuse/integrations": "^13.3.0",
