@@ -15,10 +15,13 @@ trait ListsAbilities
      *
      * @return array<string>
      */
-    public static function abilities(): array
+    public static function abilities(string|array $ignore = []): array
     {
+        $ignore = collect()->wrap($ignore);
+
         return collect((new ReflectionClass(static::class))->getConstants())
             ->filter(fn(mixed $value): bool => is_string($value))
+            ->reject(fn(string $value): bool => $ignore->contains($value))
             ->values()
             ->all();
     }
