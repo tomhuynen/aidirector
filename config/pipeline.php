@@ -9,7 +9,7 @@ return [
     | Models
     |--------------------------------------------------------------------------
     |
-    | OpenRouter model slugs used by the AI director pipeline. Text drives the
+    | OpenRouter model slugs used by the generation pipeline. Text drives the
     | director and keyframe planner, image generates assets and keyframes,
     | video turns the keyframe collage into a clip.
     |

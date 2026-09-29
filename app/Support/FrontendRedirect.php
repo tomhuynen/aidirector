@@ -8,20 +8,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
- * Decides whether a request belongs to the admin or the public frontend.
- *
- * Fortify serves both frontends from the same endpoints, so redirects after
- * login and logout look at where the request came from.
+ * The admin (users, Fortify) and the public app (directors) have separate
+ * guards and login pages. Guest and authenticated redirects pick the right
+ * one from the requested path.
  */
 class FrontendRedirect
 {
     public static function isAdmin(Request $request): bool
     {
-        if (Str::startsWith($request->path(), 'admin')) {
-            return true;
-        }
-
-        return Str::startsWith(self::previousPath($request), ['admin', 'auth']);
+        return Str::startsWith($request->path(), ['admin', 'auth']);
     }
 
     public static function homeFor(Request $request): string
@@ -36,12 +31,5 @@ class FrontendRedirect
         return self::isAdmin($request)
             ? route('login')
             : route('public.auth.login');
-    }
-
-    private static function previousPath(Request $request): string
-    {
-        $previous = $request->session()->previousUrl() ?? url()->previous();
-
-        return ltrim((string) parse_url($previous, PHP_URL_PATH), '/');
     }
 }

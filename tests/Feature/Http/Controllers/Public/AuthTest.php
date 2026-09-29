@@ -2,9 +2,13 @@
 
 declare(strict_types=1);
 
-use App\Models\Tenant;
+use App\Models\Director;
 use App\Models\User;
+use App\Notifications\Public\ResetPassword;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 
 use function Pest\Laravel\actingAs;
 use function Pest\Laravel\get;
@@ -25,72 +29,89 @@ describe('public auth pages', function () {
             ->assertInertia(fn($page) => $page->component('auth/register')->where('inviteRequired', true));
     });
 
-    it('redirects authenticated users away from guest pages', function () {
-        actingAs(User::factory()->create())
+    it('redirects authenticated directors away from guest pages', function () {
+        actingAs(Director::factory()->create(), 'director')
             ->get(route('public.auth.login'))
             ->assertRedirect(route('public.projects.index'));
+    });
+
+    it('does not treat an admin session as a director', function () {
+        actingAs(User::factory()->create())
+            ->get(route('public.projects.index'))
+            ->assertRedirect(route('public.auth.login'));
     });
 });
 
 describe('registration', function () {
-    it('creates a user on the current tenant', function () {
+    $payload = fn(array $overrides = []) => [
+        'name' => 'Ada Lovelace',
+        'email' => 'ada@example.com',
+        'password' => 'correct-horse-battery-staple',
+        'password_confirmation' => 'correct-horse-battery-staple',
+        ...$overrides,
+    ];
+
+    it('creates a director and logs them in', function () use ($payload) {
         Config::set('app.invite_code', null);
 
-        post('/auth/register', [
-            'name' => 'Ada Lovelace',
-            'email' => 'ada@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertRedirect(route('public.projects.index'));
+        post(route('public.auth.register.store'), $payload())
+            ->assertRedirect(route('public.projects.index'));
 
-        $user = User::query()->where('email', 'ada@example.com')->firstOrFail();
+        $director = Director::query()->where('email', 'ada@example.com')->firstOrFail();
 
-        expect($user->tenant_id)->toBe(Tenant::current()->id);
-        $this->assertAuthenticatedAs($user);
-    });
-
-    it('requires a valid invite code when one is configured', function () {
-        Config::set('app.invite_code', 'secret');
-
-        post('/auth/register', [
-            'invite_code' => 'wrong',
-            'name' => 'Ada Lovelace',
-            'email' => 'ada@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertSessionHasErrors('invite_code');
-
+        $this->assertAuthenticatedAs($director, 'director');
         expect(User::query()->where('email', 'ada@example.com')->exists())->toBeFalse();
     });
 
-    it('accepts the configured invite code', function () {
+    it('requires a valid invite code when one is configured', function () use ($payload) {
         Config::set('app.invite_code', 'secret');
 
-        post('/auth/register', [
-            'invite_code' => 'secret',
-            'name' => 'Ada Lovelace',
-            'email' => 'ada@example.com',
-            'password' => 'correct-horse-battery-staple',
-            'password_confirmation' => 'correct-horse-battery-staple',
-        ])->assertRedirect(route('public.projects.index'));
+        post(route('public.auth.register.store'), $payload(['invite_code' => 'wrong']))
+            ->assertSessionHasErrors('invite_code');
+
+        expect(Director::query()->count())->toBe(0);
     });
-});
 
-describe('login redirects', function () {
-    it('sends public logins to the projects page', function () {
-        $user = User::factory()->create(['password' => 'correct-horse-battery-staple']);
+    it('accepts the configured invite code', function () use ($payload) {
+        Config::set('app.invite_code', 'secret');
 
-        $this->from(route('public.auth.login'))
-            ->post('/auth/login', ['email' => $user->email, 'password' => 'correct-horse-battery-staple'])
+        post(route('public.auth.register.store'), $payload(['invite_code' => 'secret']))
             ->assertRedirect(route('public.projects.index'));
     });
 
-    it('sends admin logins to the admin dashboard', function () {
-        $user = User::factory()->create(['password' => 'correct-horse-battery-staple']);
+    it('rejects a duplicate email', function () use ($payload) {
+        Config::set('app.invite_code', null);
+        Director::factory()->create(['email' => 'ada@example.com']);
 
-        $this->from('/auth/login')
-            ->post('/auth/login', ['email' => $user->email, 'password' => 'correct-horse-battery-staple'])
-            ->assertRedirect(route('admin.dashboard.index'));
+        post(route('public.auth.register.store'), $payload())->assertSessionHasErrors('email');
+    });
+});
+
+describe('login and logout', function () {
+    it('logs a director in with valid credentials', function () {
+        $director = Director::factory()->create(['password' => 'correct-horse-battery-staple']);
+
+        post(route('public.auth.login.store'), ['email' => $director->email, 'password' => 'correct-horse-battery-staple'])
+            ->assertRedirect(route('public.projects.index'));
+
+        $this->assertAuthenticatedAs($director, 'director');
+    });
+
+    it('rejects invalid credentials', function () {
+        $director = Director::factory()->create();
+
+        post(route('public.auth.login.store'), ['email' => $director->email, 'password' => 'nope'])
+            ->assertSessionHasErrors('email');
+
+        $this->assertGuest('director');
+    });
+
+    it('logs a director out', function () {
+        actingAs(Director::factory()->create(), 'director')
+            ->post(route('public.auth.logout'))
+            ->assertRedirect(route('public.auth.login'));
+
+        $this->assertGuest('director');
     });
 
     it('sends guests on public pages to the public login', function () {
@@ -100,11 +121,44 @@ describe('login redirects', function () {
     it('sends guests on admin pages to the admin login', function () {
         get('/admin')->assertRedirect(route('login'));
     });
+});
 
-    it('sends public logouts to the public login', function () {
-        actingAs(User::factory()->create())
-            ->from(route('public.projects.index'))
-            ->post('/auth/logout')
-            ->assertRedirect(route('public.auth.login'));
+describe('password reset', function () {
+    it('emails a reset link pointing at the public frontend', function () {
+        Notification::fake();
+        $director = Director::factory()->create();
+
+        post(route('public.auth.forgot-password.store'), ['email' => $director->email])->assertRedirect();
+
+        Notification::assertSentTo($director, ResetPassword::class, function (ResetPassword $notification) use ($director) {
+            $mail = $notification->toMail($director);
+
+            return str_contains($mail->actionUrl, route('public.auth.reset-password', $notification->token, false));
+        });
+    });
+
+    it('resets the password with a valid token', function () {
+        $director = Director::factory()->create();
+        $token = Password::broker('directors')->createToken($director);
+
+        post(route('public.auth.reset-password.store'), [
+            'token' => $token,
+            'email' => $director->email,
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertRedirect(route('public.auth.login'));
+
+        expect(Hash::check('correct-horse-battery-staple', $director->fresh()->password))->toBeTrue();
+    });
+
+    it('rejects an invalid token', function () {
+        $director = Director::factory()->create();
+
+        post(route('public.auth.reset-password.store'), [
+            'token' => 'invalid',
+            'email' => $director->email,
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertSessionHasErrors('email');
     });
 });

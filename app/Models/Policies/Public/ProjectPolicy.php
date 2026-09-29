@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Models\Policies;
+namespace App\Models\Policies\Public;
 
+use App\Models\Director;
 use App\Models\Policies\Concerns\ListsAbilities;
 use App\Models\Project;
-use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
 
 class ProjectPolicy
@@ -24,32 +24,32 @@ class ProjectPolicy
 
     public const DESTROY = 'destroy';
 
-    public function index(User $user): bool
+    public function index(Director $director): bool
     {
         return true;
     }
 
-    public function view(User $user, Project $project): bool
+    public function view(Director $director, Project $project): bool
     {
-        return $project->isOwnedBy($user);
+        return $project->isOwnedBy($director);
     }
 
-    public function create(User $user): bool
+    public function create(Director $director): bool
     {
         return true;
     }
 
-    public function update(User $user, Project $project): bool
+    public function update(Director $director, Project $project): bool
     {
         if (! $project->exists) {
-            return $this->create($user);
+            return $this->create($director);
         }
 
-        return $project->isOwnedBy($user);
+        return $project->isOwnedBy($director);
     }
 
-    public function destroy(User $user, Project $project): bool
+    public function destroy(Director $director, Project $project): bool
     {
-        return $project->isOwnedBy($user);
+        return $project->isOwnedBy($director);
     }
 }

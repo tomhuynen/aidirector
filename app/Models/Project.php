@@ -8,6 +8,7 @@ use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
@@ -46,14 +47,20 @@ class Project extends Model
         ];
     }
 
+    /** @return BelongsTo<Director, $this> */
+    public function director(): BelongsTo
+    {
+        return $this->belongsTo(Director::class);
+    }
+
     /** @return HasMany<Shot, $this> */
     public function shots(): HasMany
     {
         return $this->hasMany(Shot::class)->orderBy('position');
     }
 
-    public function isOwnedBy(User $user): bool
+    public function isOwnedBy(Director $director): bool
     {
-        return $this->user_id === $user->id;
+        return $this->director_id === $director->id;
     }
 }

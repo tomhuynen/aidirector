@@ -69,6 +69,7 @@ import { $t } from '@public/ts/shared/i18n'
 import FormInput from '@public:components/Form/Input.vue'
 import TextLink from '@public:components/TextLink.vue'
 import { login } from '@routes/public/auth'
+import { store } from '@routes/public/auth/register'
 import { Button } from '@shared:ui/button'
 import { LoaderCircle } from 'lucide-vue-next'
 import { computed, h } from 'vue'
@@ -94,7 +95,7 @@ const form = useForm({
 })
 
 const submit = () => {
-  form.post('/auth/register', {
+  form.post(store.url(), {
     onFinish: () => form.reset('password', 'password_confirmation'),
   })
 }

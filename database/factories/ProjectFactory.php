@@ -6,7 +6,7 @@ namespace Database\Factories;
 
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
-use App\Models\User;
+use App\Models\Director;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -20,7 +20,7 @@ class ProjectFactory extends Factory
     public function definition(): array
     {
         return [
-            'user_id' => User::factory(),
+            'director_id' => Director::factory(),
             'title' => fake()->sentence(3),
             'purpose' => fake()->randomElement(ProjectPurpose::cases()),
             'description' => fake()->paragraph(),
@@ -36,9 +36,9 @@ class ProjectFactory extends Factory
         ];
     }
 
-    public function ownedBy(User $user): static
+    public function ownedBy(Director $director): static
     {
-        return $this->state(fn(): array => ['user_id' => $user->id]);
+        return $this->state(fn(): array => ['director_id' => $director->id]);
     }
 
     public function archived(): static

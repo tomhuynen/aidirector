@@ -6,7 +6,7 @@ namespace App\Http\Controllers\Public\Projects;
 
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotResource;
-use App\Models\Policies\ProjectPolicy;
+use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;

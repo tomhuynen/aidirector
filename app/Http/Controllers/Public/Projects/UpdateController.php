@@ -8,7 +8,7 @@ use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Http\Requests\Public\ProjectRequest;
 use App\Http\Resources\Public\ProjectResource;
-use App\Models\Policies\ProjectPolicy;
+use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
@@ -40,7 +40,7 @@ class UpdateController
         Gate::authorize(ProjectPolicy::UPDATE, $project);
 
         if (! $project->exists) {
-            $project->user_id = $request->user()->id;
+            $project->director_id = $request->user('director')->id;
         }
 
         $project->fill($request->projectAttributes());

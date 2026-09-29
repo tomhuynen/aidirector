@@ -3,15 +3,15 @@
 declare(strict_types=1);
 
 use App\Enums\ShotStatus;
+use App\Models\Director;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Models\User;
 
 use function Pest\Laravel\actingAs;
 
 beforeEach(function () {
-    $this->user = User::factory()->create();
-    $this->project = Project::factory()->ownedBy($this->user)->create();
+    $this->director = Director::factory()->create();
+    $this->project = Project::factory()->ownedBy($this->director)->create();
 });
 
 function validShot(array $overrides = []): array
@@ -33,7 +33,7 @@ describe('create', function () {
     it('appends a new shot at the end of the sequence', function () {
         Shot::factory()->for($this->project)->create(['position' => 1]);
 
-        $response = actingAs($this->user)->post(route('public.shots.store', $this->project), validShot());
+        $response = actingAs($this->director, 'director')->post(route('public.shots.store', $this->project), validShot());
 
         $shot = Shot::query()->where('title', 'Posting the letter')->firstOrFail();
 
@@ -44,7 +44,7 @@ describe('create', function () {
     });
 
     it('validates the structured intent', function (array $overrides, string $field) {
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->post(route('public.shots.store', $this->project), validShot($overrides))
             ->assertSessionHasErrors($field);
     })->with([
@@ -54,10 +54,10 @@ describe('create', function () {
         'unknown purpose override' => [['purposeOverride' => 'poetry'], 'purposeOverride'],
     ]);
 
-    it('forbids adding shots to another user\'s project', function () {
+    it('forbids adding shots to another director\'s project', function () {
         $other = Project::factory()->create();
 
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->post(route('public.shots.store', $other), validShot())
             ->assertForbidden();
     });
@@ -71,7 +71,7 @@ describe('view and update', function () {
             ['position' => 3],
         )->create();
 
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shots->first()]))
             ->assertSuccessful()
             ->assertInertia(fn($page) => $page->component('shots/view')->has('siblings', 3));
@@ -80,7 +80,7 @@ describe('view and update', function () {
     it('updates an owned shot', function () {
         $shot = Shot::factory()->for($this->project)->create();
 
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->post(route('public.shots.update', [$this->project, $shot]), validShot(['title' => 'Renamed', 'duration' => 8]))
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
@@ -88,10 +88,10 @@ describe('view and update', function () {
     });
 
     it('does not resolve a shot through a project it does not belong to', function () {
-        $otherProject = Project::factory()->ownedBy($this->user)->create();
+        $otherProject = Project::factory()->ownedBy($this->director)->create();
         $shot = Shot::factory()->for($otherProject)->create();
 
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
             ->assertNotFound();
     });
@@ -105,7 +105,7 @@ describe('reorder and destroy', function () {
             ['position' => 3],
         )->create();
 
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->post(route('public.shots.reorder', $this->project), ['shots' => [$third->sqid, $first->sqid, $second->sqid]])
             ->assertRedirect(route('public.projects.view', $this->project));
 
@@ -117,7 +117,7 @@ describe('reorder and destroy', function () {
     it('rejects an order that does not cover every shot', function () {
         [$first] = Shot::factory()->for($this->project)->count(2)->sequence(['position' => 1], ['position' => 2])->create();
 
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->post(route('public.shots.reorder', $this->project), ['shots' => [$first->sqid]])
             ->assertSessionHasErrors('shots');
     });
@@ -129,7 +129,7 @@ describe('reorder and destroy', function () {
             ['position' => 3],
         )->create();
 
-        actingAs($this->user)
+        actingAs($this->director, 'director')
             ->delete(route('public.shots.destroy', [$this->project, $second]))
             ->assertRedirect(route('public.projects.view', $this->project));
 

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Projects;
 
 use App\Http\Resources\Public\ProjectResource;
-use App\Models\Policies\ProjectPolicy;
+use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -20,7 +20,7 @@ class IndexController
         return Inertia::render('projects/index', [
             'projects' => fn() => ProjectResource::collection(
                 Project::query()
-                    ->where('user_id', $request->user()->id)
+                    ->whereBelongsTo($request->user('director'))
                     ->whereNull('archived_at')
                     ->withCount('shots')
                     ->latest('updated_at')

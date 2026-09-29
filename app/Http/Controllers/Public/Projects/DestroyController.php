@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Projects;
 
-use App\Models\Policies\ProjectPolicy;
+use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Support\Facades\Gate;
 

@@ -31,6 +31,7 @@ import { $t } from '@public/ts/shared/i18n'
 import FormInput from '@public:components/Form/Input.vue'
 import TextLink from '@public:components/TextLink.vue'
 import { login } from '@routes/public/auth'
+import { store } from '@routes/public/auth/forgot-password'
 import { Button } from '@shared:ui/button'
 import { LoaderCircle } from 'lucide-vue-next'
 import { h } from 'vue'
@@ -50,7 +51,7 @@ const form = useForm({
 })
 
 const submit = () => {
-  form.post('/auth/forgot-password', {
+  form.post(store.url(), {
     onSuccess: () => {
       toast.success($t('If that address exists, a reset link is on its way.'))
       form.reset()

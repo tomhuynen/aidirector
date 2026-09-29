@@ -53,6 +53,7 @@ import FormCheckbox from '@public:components/Form/Checkbox.vue'
 import FormInput from '@public:components/Form/Input.vue'
 import TextLink from '@public:components/TextLink.vue'
 import { forgotPassword, register } from '@routes/public/auth'
+import { store } from '@routes/public/auth/login'
 import { Button } from '@shared:ui/button'
 import { Label } from '@shared:ui/label'
 import { LoaderCircle } from 'lucide-vue-next'
@@ -72,10 +73,8 @@ const form = useForm({
 })
 
 const submit = () => {
-  form
-    .transform((data) => ({ ...data, remember: data.remember ? 'on' : '' }))
-    .post('/auth/login', {
-      onFinish: () => form.reset('password'),
-    })
+  form.post(store.url(), {
+    onFinish: () => form.reset('password'),
+  })
 }
 </script>

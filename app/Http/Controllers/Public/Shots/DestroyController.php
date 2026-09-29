@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots;
 
-use App\Models\Policies\ShotPolicy;
+use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Facades\Gate;

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Public;
 
 use App\Http\Resources\Concerns\AuthorizesResource;
-use App\Models\Policies\ProjectPolicy;
+use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;

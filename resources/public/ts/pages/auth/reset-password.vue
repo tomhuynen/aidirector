@@ -44,6 +44,7 @@ import { Head, useForm } from '@inertiajs/vue3'
 import AuthLayout from '@public/ts/layouts/Auth.vue'
 import { $t } from '@public/ts/shared/i18n'
 import FormInput from '@public:components/Form/Input.vue'
+import { store } from '@routes/public/auth/reset-password'
 import { Button } from '@shared:ui/button'
 import { LoaderCircle } from 'lucide-vue-next'
 import { computed, h } from 'vue'
@@ -74,7 +75,7 @@ const useSuggestion = () => {
 }
 
 const submit = () => {
-  form.post(`/auth/reset-password/${props.token}`, {
+  form.post(store.url(), {
     onFinish: () => form.reset('password', 'password_confirmation'),
   })
 }

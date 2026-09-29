@@ -19,16 +19,22 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
-Route::middleware('guest')
-    ->name('auth.')
-    ->group(function () {
+Route::name('auth.')->group(function () {
+    Route::middleware('guest:director')->group(function () {
         Route::get('login', [LoginController::class, 'view'])->name('login');
+        Route::post('login', [LoginController::class, 'store'])->middleware('throttle:login')->name('login.store');
         Route::get('register', [RegisterController::class, 'view'])->name('register');
+        Route::post('register', [RegisterController::class, 'store'])->name('register.store');
         Route::get('forgot-password', [ForgotPasswordController::class, 'view'])->name('forgot-password');
+        Route::post('forgot-password', [ForgotPasswordController::class, 'store'])->middleware('throttle:6,1')->name('forgot-password.store');
         Route::get('reset-password/{token}', [ResetPasswordController::class, 'view'])->name('reset-password');
+        Route::post('reset-password', [ResetPasswordController::class, 'store'])->middleware('throttle:6,1')->name('reset-password.store');
     });
 
-Route::middleware('auth')->group(function () {
+    Route::post('logout', [LoginController::class, 'destroy'])->middleware('auth:director')->name('logout');
+});
+
+Route::middleware('auth:director')->group(function () {
     Route::prefix('projects')
         ->name('projects.')
         ->group(function () {

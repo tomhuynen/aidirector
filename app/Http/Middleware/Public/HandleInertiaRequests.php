@@ -57,16 +57,16 @@ class HandleInertiaRequests extends Middleware
      */
     private function account(Request $request): ?array
     {
-        if (! $user = $request->user()) {
+        if (! $director = $request->user('director')) {
             return null;
         }
 
         return [
-            'name' => $user->name,
-            'email' => $user->email,
+            'name' => $director->name,
+            'email' => $director->email,
             'links' => [
                 'projects' => route('public.projects.index'),
-                'logout' => route('logout'),
+                'logout' => route('public.auth.logout'),
             ],
         ];
     }

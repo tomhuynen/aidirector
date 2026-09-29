@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots;
 
 use App\Http\Requests\Public\ReorderShotsRequest;
-use App\Models\Policies\ProjectPolicy;
+use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Facades\Gate;

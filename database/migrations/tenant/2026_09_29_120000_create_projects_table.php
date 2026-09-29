@@ -11,7 +11,7 @@ return new class extends Migration {
     {
         Schema::create('projects', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('user_id')->index();
+            $table->foreignId('director_id')->constrained()->cascadeOnDelete();
             $table->string('title');
             $table->string('purpose', 32);
             $table->text('description')->nullable();
