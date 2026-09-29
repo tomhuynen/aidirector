@@ -3,6 +3,54 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Public\Auth\ForgotPasswordController;
+use App\Http\Controllers\Public\Auth\LoginController;
+use App\Http\Controllers\Public\Auth\RegisterController;
+use App\Http\Controllers\Public\Auth\ResetPasswordController;
+use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
+use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
+use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
+use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
+use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
+use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
+use App\Http\Controllers\Public\Shots\UpdateController as ShotUpdateController;
+use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
+
+Route::middleware('guest')
+    ->name('auth.')
+    ->group(function () {
+        Route::get('login', [LoginController::class, 'view'])->name('login');
+        Route::get('register', [RegisterController::class, 'view'])->name('register');
+        Route::get('forgot-password', [ForgotPasswordController::class, 'view'])->name('forgot-password');
+        Route::get('reset-password/{token}', [ResetPasswordController::class, 'view'])->name('reset-password');
+    });
+
+Route::middleware('auth')->group(function () {
+    Route::prefix('projects')
+        ->name('projects.')
+        ->group(function () {
+            Route::get('/', [ProjectIndexController::class, 'index'])->name('index');
+            Route::get('create', [ProjectUpdateController::class, 'update'])->name('create');
+            Route::post('create', [ProjectUpdateController::class, 'store'])->name('store');
+            Route::get('{project}', [ProjectViewController::class, 'view'])->name('view');
+            Route::get('{project}/update', [ProjectUpdateController::class, 'update'])->name('update');
+            Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
+            Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
+        });
+
+    Route::prefix('projects/{project}/shots')
+        ->name('shots.')
+        ->scopeBindings()
+        ->group(function () {
+            Route::get('create', [ShotUpdateController::class, 'update'])->name('create');
+            Route::post('create', [ShotUpdateController::class, 'store'])->name('store');
+            Route::post('reorder', [ShotReorderController::class, 'store'])->name('reorder');
+            Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
+            Route::get('{shot}/update', [ShotUpdateController::class, 'update'])->name('update');
+            Route::post('{shot}/update', [ShotUpdateController::class, 'store']);
+            Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');
+        });
+});

@@ -21,6 +21,7 @@
         "inertiaui/table": "^4.0",
         "kirschbaum-development/eloquent-power-joins": "^4.2",
         "lab404/laravel-impersonate": "^1.7",
+        "laravel/ai": "^0.11.2",
         "laravel/fortify": "^1.25",
         "laravel/framework": "^13.0",
         "laravel/horizon": "^5.33",

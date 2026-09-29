@@ -3,16 +3,17 @@
         "cursor",
         "claude_code"
     ],
+    "cloud": false,
     "guidelines": true,
     "herd_mcp": true,
     "mcp": true,
     "sail": false,
     "skills": [
-        "developing-with-fortify",
+        "fortify-development",
         "laravel-best-practices",
+        "configuring-horizon",
         "wayfinder-development",
         "pest-testing",
-        "inertia-vue-development",
         "tailwindcss-development"
     ]
 }

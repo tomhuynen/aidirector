@@ -33,3 +33,10 @@ export type PostRequest<T extends keyof paths> = Request<T, 'post'>
 export type PutRequest<T extends keyof paths> = Request<T, 'put'>
 export type PatchRequest<T extends keyof paths> = Request<T, 'patch'>
 export type DeleteRequest<T extends keyof paths> = Request<T, 'delete'>
+
+import type { PageProps as SharedData } from './shared'
+
+/**
+ * Page props without the shared data, which the layout reads from usePage().
+ */
+export type PageProps<T> = Omit<T, keyof SharedData>

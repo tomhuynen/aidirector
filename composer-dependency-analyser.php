@@ -29,6 +29,8 @@ return $config
         'laravel/tinker',
         'kirschbaum-development/eloquent-power-joins',
         'opcodesio/log-viewer',
+        // Wired up in config/ai.php; first code usage lands with the director agents.
+        'laravel/ai',
     ], [ErrorType::UNUSED_DEPENDENCY])
     ->ignoreErrorsOnPackages([
         'guzzlehttp/psr7',

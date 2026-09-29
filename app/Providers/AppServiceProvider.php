@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Models\PersonalAccessToken;
+use App\Models\Project;
+use App\Models\Shot;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\Multitenancy\DatabaseSessionManager;
@@ -70,6 +72,8 @@ class AppServiceProvider extends ServiceProvider
         Relation::enforceMorphMap([
             'user' => User::class,
             'tenant' => Tenant::class,
+            'project' => Project::class,
+            'shot' => Shot::class,
         ]);
 
         Model::preventLazyLoading(! $this->app->isProduction());

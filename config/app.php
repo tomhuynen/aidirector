@@ -32,6 +32,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Invite Code
+    |--------------------------------------------------------------------------
+    |
+    | While the application is in testing, public registration requires this
+    | code. Leave it empty to open registration to everyone.
+    |
+    */
+
+    'invite_code' => env('APP_INVITE_CODE'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Environment
     |--------------------------------------------------------------------------
     |
