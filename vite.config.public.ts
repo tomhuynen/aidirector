@@ -14,6 +14,7 @@ export default defineConfig(({ command }) => {
   const base = command === 'serve' ? undefined : '/assets/public/'
 
   return {
+    cacheDir: 'node_modules/.vite/public',
     plugins: [
       laravel({
         hotFile: 'public/hot-public',
