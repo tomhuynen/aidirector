@@ -18,7 +18,8 @@ const prefixWithHerd = (command) => {
   return envPath.includes('/Herd/') || envPath.includes('/herd/') ? `herd php ${command}` : command
 }
 
-const buildPhpLintCommand = () => prefixWithHerd('./vendor/bin/phplint ./app --no-interaction --no-cache')
+const buildPhpLintCommand = () =>
+  prefixWithHerd('./vendor/bin/phplint ./app --exclude vendor --no-interaction --no-cache')
 const buildPintCommand = () => prefixWithHerd('./vendor/bin/pint')
 const buildPhpStanCommand = () => prefixWithHerd('./vendor/bin/phpstan analyse --memory-limit=2G')
 const buildComposerDepAnalyserCommand = () => prefixWithHerd('./vendor/bin/composer-dependency-analyser')
