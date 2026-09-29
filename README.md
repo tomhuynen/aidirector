@@ -23,33 +23,28 @@ php artisan app:core-init
 1. Disables pushing to `origin` by setting its push URL to `no-pushing`.
 2. Renames `origin` to `blueprint`.
 3. Prompts for the new project's repository URL and adds it as the new `origin` (leave blank to skip).
+4. Creates `.env` from `.env.example`, prompting for the application name, title, URL and landlord database name. Defaults are derived from the folder name.
+5. Generates the application key.
 
-Pass `--force` to skip the confirmation. Afterwards create the repository on GitHub and publish:
+Steps that are already done (an existing `blueprint` remote or `.env` file) are skipped, so the command is safe to re-run. Pass `--force` to skip the confirmation, or `--no-interaction` to accept all defaults.
+
+Afterwards create the repository on GitHub and publish:
 
 ```bash
 git push -u origin main
 ```
 
-### 2. Configure the environment
+### 2. Review the environment
 
-```bash
-cp .env.example .env
-```
+The generated `.env` sets `APP_NAME`, `APP_TITLE`, `APP_URL` and `DB_DATABASE`. Review the rest, such as mail, Redis and AWS settings.
 
-Edit at least:
+`DB_DATABASE` is the **landlord** database. All tenant databases are derived from it. The cache and session stores are SQLite files (`database/cache.sqlite`, `database/sessions.sqlite`) that are created automatically by the migrate command.
 
-- `APP_NAME` and `APP_TITLE`
-- `APP_URL` (for example `https://myproject.test`)
-- `DB_DATABASE` — this is the **landlord** database. All tenant databases are derived from it.
-
-The cache and session stores are SQLite files (`database/cache.sqlite`, `database/sessions.sqlite`) that are created automatically by the migrate command.
-
-### 3. Install dependencies
+### 3. Install frontend dependencies
 
 The project pins pnpm (see `packageManager` in `package.json`) and Node 22 (`.nvmrc`).
 
 ```bash
-php artisan key:generate
 nvm use && pnpm install
 ```
 
