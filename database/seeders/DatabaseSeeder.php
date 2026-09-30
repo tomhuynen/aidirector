@@ -7,6 +7,7 @@ namespace Database\Seeders;
 use App\Models\Tenant;
 use Database\Seeders\Landlord\UserSeeder;
 use Database\Seeders\Tenant\ActivitySeeder;
+use Database\Seeders\Tenant\DamenProjectSeeder;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -25,6 +26,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             ActivitySeeder::class,
+            DamenProjectSeeder::class,
         ]);
     }
 

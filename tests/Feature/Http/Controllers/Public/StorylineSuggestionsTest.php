@@ -132,14 +132,26 @@ describe('jobs', function () {
             && str_contains($prompt->prompt, 'Feedback from the director: Make it funnier'));
     });
 
-    it('asks for a different teaching angle per storyline on e-learning projects', function () {
+    it('asks for different interpretations of the same idea rather than takes of one scene', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        $instructions = (string) (new StorylineOptionsWriter($shot->load('project')))->instructions();
+
+        expect($instructions)
+            ->toContain('different interpretation of the same idea')
+            ->toContain('The takeaway is fixed')
+            ->toContain('not 3 takes of the same scene')
+            ->toContain('Change the situation, not the wording')
+            ->toContain('a different angle on the same scene does not count as a different storyline');
+    });
+
+    it('offers the teaching angles of e-learning projects as inspiration', function () {
         $project = Project::factory()->ownedBy($this->director)->create(['purpose' => ProjectPurpose::E_LEARNING]);
         $shot = Shot::factory()->for($project)->create();
 
         $instructions = (string) (new StorylineOptionsWriter($shot->load('project')))->instructions();
 
         expect($instructions)
-            ->toContain('no two storylines may share an angle')
             ->toContain('Correct behaviour modelled')
             ->toContain('Mistake and correction')
             ->toContain('Consequence first')
