@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Projects;
 
 use App\Ai\Agents\ProjectIntake;
+use App\Enums\AspectRatio;
+use App\Enums\ProjectPurpose;
 use App\Http\Requests\Public\ProjectChatRequest;
 use App\Models\Director;
 use App\Models\Policies\Public\ProjectPolicy;
@@ -20,8 +22,8 @@ use Throwable;
 
 /**
  * One turn of the project intake chat. The agent remembers the conversation
- * in the tenant database; once it has settled a title the project is created
- * and linked to that conversation.
+ * in the tenant database; once it has settled the description, purpose and
+ * title the project is created and linked to that conversation.
  */
 class ChatController
 {
@@ -82,7 +84,7 @@ class ChatController
         /** @var string $conversationId */
         $conversationId = $response->conversationId;
         $data = $response->toArray();
-        $project = $this->projectFor($director, $conversationId, $data['title'] ?? null);
+        $project = $this->projectFor($director, $conversationId, $data);
 
         return response()->json([
             'conversation' => $conversationId,
@@ -97,10 +99,13 @@ class ChatController
     }
 
     /**
-     * Create the project once the agent has settled a title. A conversation
-     * creates at most one project; later turns return that same project.
+     * Create the project once the agent has settled all three fields. A
+     * conversation creates at most one project; later turns return that
+     * same project.
+     *
+     * @param  array<string, mixed>  $data
      */
-    private function projectFor(Director $director, string $conversationId, mixed $title): ?Project
+    private function projectFor(Director $director, string $conversationId, array $data): ?Project
     {
         $existing = Project::query()->where('conversation_id', $conversationId)->first();
 
@@ -108,17 +113,22 @@ class ChatController
             return $existing;
         }
 
-        $title = Str::limit(trim((string) $title), 120, '');
+        $title = Str::limit(trim((string) ($data['title'] ?? '')), 120, '');
+        $description = Str::limit(trim((string) ($data['description'] ?? '')), 2000, '');
+        $purpose = ProjectPurpose::coerce($data['purpose'] ?? null);
 
-        if (mb_strlen($title) < 2) {
+        if (mb_strlen($title) < 2 || $description === '' || $purpose === null) {
             return null;
         }
 
-        return DB::connection((new Project())->getConnectionName())->transaction(function () use ($director, $conversationId, $title) {
+        return DB::connection((new Project())->getConnectionName())->transaction(function () use ($director, $conversationId, $title, $description, $purpose) {
             $project = Project::query()->create([
                 'director_id' => $director->id,
                 'conversation_id' => $conversationId,
                 'title' => $title,
+                'description' => $description,
+                'purpose' => $purpose,
+                'aspect_ratio' => $purpose === ProjectPurpose::SOCIAL_SHORT ? AspectRatio::PORTRAIT : AspectRatio::LANDSCAPE,
             ]);
 
             Conversation::query()->whereKey($conversationId)->update(['title' => $title]);

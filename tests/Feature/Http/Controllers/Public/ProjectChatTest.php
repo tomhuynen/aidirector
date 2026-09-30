@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Ai\Agents\ProjectIntake;
+use App\Enums\AspectRatio;
+use App\Enums\ProjectPurpose;
 use App\Models\Director;
 use App\Models\Generation;
 use App\Models\Project;
@@ -31,13 +33,13 @@ describe('create page', function () {
 describe('chat', function () {
     it('starts a remembered conversation on the first turn', function () {
         ProjectIntake::fake([
-            ['reply' => 'Sounds good. What shall we call it?', 'title' => null],
+            ['reply' => 'Sounds good. Is this an explainer?', 'description' => 'A short film about posting a letter, for first-time senders.', 'purpose' => null, 'title' => null],
         ]);
 
         $response = actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['conversation' => null, 'message' => 'A short film about posting a letter'])
             ->assertSuccessful()
-            ->assertJsonPath('reply', 'Sounds good. What shall we call it?')
+            ->assertJsonPath('reply', 'Sounds good. Is this an explainer?')
             ->assertJsonPath('project', null);
 
         $conversationId = $response->json('conversation');
@@ -62,16 +64,19 @@ describe('chat', function () {
         ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === 'A short film about posting a letter');
     });
 
-    it('creates the project once the agent has settled a title', function () {
+    it('creates the project once description, purpose and title are settled', function () {
         ProjectIntake::fake([
-            ['reply' => 'What shall we call it?', 'title' => null],
-            ['reply' => 'Mailbox explainer it is.', 'title' => '  Mailbox explainer '],
+            ['reply' => 'What shall we call it?', 'description' => 'How to post a letter, for first-time senders.', 'purpose' => 'explainer', 'title' => null],
+            ['reply' => 'Mailbox explainer it is.', 'description' => 'How to post a letter, for first-time senders.', 'purpose' => 'explainer', 'title' => '  Mailbox explainer '],
         ]);
 
         $conversationId = actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['message' => 'A short film'])
             ->assertSuccessful()
+            ->assertJsonPath('project', null)
             ->json('conversation');
+
+        expect(Project::query()->count())->toBe(0);
 
         $response = actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Call it Mailbox explainer'])
@@ -82,6 +87,9 @@ describe('chat', function () {
         $project = Project::query()->firstOrFail();
 
         expect($project->title)->toBe('Mailbox explainer')
+            ->and($project->description)->toBe('How to post a letter, for first-time senders.')
+            ->and($project->purpose)->toBe(ProjectPurpose::EXPLAINER)
+            ->and($project->aspect_ratio)->toBe(AspectRatio::LANDSCAPE)
             ->and($project->director_id)->toBe($this->director->id)
             ->and($project->conversation_id)->toBe($conversationId)
             ->and($project->conversation->title)->toBe('Mailbox explainer')
@@ -92,10 +100,22 @@ describe('chat', function () {
         ProjectIntake::assertPromptedTimes(2);
     });
 
+    it('sets up a social short in portrait', function () {
+        ProjectIntake::fake([
+            ['reply' => 'Ready.', 'description' => 'A ten second gag about a cat and a mailbox.', 'purpose' => 'social-short', 'title' => 'Cat vs Mailbox'],
+        ]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['message' => 'Cat vs Mailbox, a social short'])
+            ->assertSuccessful();
+
+        expect(Project::query()->firstOrFail()->aspect_ratio)->toBe(AspectRatio::PORTRAIT);
+    });
+
     it('returns the existing project instead of creating a second one', function () {
         ProjectIntake::fake([
-            ['reply' => 'Mailbox it is.', 'title' => 'Mailbox'],
-            ['reply' => 'Still Mailbox.', 'title' => 'Mailbox again'],
+            ['reply' => 'Mailbox it is.', 'description' => 'Posting a letter.', 'purpose' => 'explainer', 'title' => 'Mailbox'],
+            ['reply' => 'Still Mailbox.', 'description' => 'Posting a parcel.', 'purpose' => 'commercial', 'title' => 'Mailbox again'],
         ]);
 
         $conversationId = actingAs($this->director, 'director')
@@ -111,13 +131,12 @@ describe('chat', function () {
             ->assertJsonPath('project.id', $project->sqid);
 
         expect(Project::query()->count())->toBe(1)
-            ->and($project->fresh()->title)->toBe('Mailbox');
+            ->and($project->fresh()->title)->toBe('Mailbox')
+            ->and($project->fresh()->purpose)->toBe(ProjectPurpose::EXPLAINER);
     });
 
-    it('ignores titles that are too short', function () {
-        ProjectIntake::fake([
-            ['reply' => 'Hm.', 'title' => 'A'],
-        ]);
+    it('waits until every field is settled and valid', function (array $turn) {
+        ProjectIntake::fake([$turn]);
 
         actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['message' => 'A'])
@@ -125,11 +144,18 @@ describe('chat', function () {
             ->assertJsonPath('project', null);
 
         expect(Project::query()->count())->toBe(0);
-    });
+    })->with([
+        'title too short' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => 'explainer', 'title' => 'A']],
+        'no title yet' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => 'explainer', 'title' => null]],
+        'no description yet' => [['reply' => 'Hm.', 'description' => null, 'purpose' => 'explainer', 'title' => 'Mailbox']],
+        'blank description' => [['reply' => 'Hm.', 'description' => '  ', 'purpose' => 'explainer', 'title' => 'Mailbox']],
+        'no purpose yet' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => null, 'title' => 'Mailbox']],
+        'unknown purpose' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => 'musical', 'title' => 'Mailbox']],
+    ]);
 
     it('refuses to continue another director\'s conversation', function () {
         ProjectIntake::fake([
-            ['reply' => 'Hello.', 'title' => null],
+            ['reply' => 'Hello.', 'description' => null, 'purpose' => null, 'title' => null],
         ]);
 
         $other = Director::factory()->create();

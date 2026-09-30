@@ -2,7 +2,9 @@
   <Page
     :eyebrow="$t('New project')"
     :title="$t('Let’s set up your project')"
-    :description="$t('Your director asks what it needs to know. For now, just the title.')"
+    :description="
+      $t('Your director asks what it needs to know: what the project is about, who it is for, and what to call it.')
+    "
   >
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <Chat
