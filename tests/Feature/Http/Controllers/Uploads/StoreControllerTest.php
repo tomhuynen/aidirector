@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Disk;
+use App\Models\Director;
 use App\Models\Upload;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -11,7 +12,6 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
 use function Pest\Laravel\actingAs;
-use function Pest\Laravel\post;
 use function Pest\Laravel\postJson;
 
 beforeEach(function () {
@@ -20,12 +20,13 @@ beforeEach(function () {
     $this->file = UploadedFile::fake()->image('avatar.png', 400, 400);
 });
 
+/*
+ * In this project the public upload route sits behind the director login
+ * (see UploadsTest for the guard), so these tests act as a director.
+ */
 describe('public route', function () {
-    it('rejects requests without a signature', function () {
-        post(route('public.uploads.store'), ['file' => $this->file])
-            ->assertForbidden();
-
-        expect(Upload::query()->count())->toBe(0);
+    beforeEach(function () {
+        actingAs(Director::factory()->create(), 'director');
     });
 
     it('stores a file on the configured disk and returns the upload', function () {

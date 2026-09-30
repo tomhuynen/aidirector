@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Disk;
+use App\Models\Director;
 use App\Models\Upload;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -12,10 +13,16 @@ use Illuminate\Support\Facades\URL;
 use function Pest\Laravel\actingAs;
 use function Pest\Laravel\get;
 
+/*
+ * In this project the public upload routes sit behind the director login,
+ * so the public cases act as a director.
+ */
 beforeEach(function () {
     Storage::fake(Disk::TENANT->value);
 
     $this->upload = Upload::fromFile(UploadedFile::fake()->image('photo.png', 20, 20));
+
+    actingAs(Director::factory()->create(), 'director');
 });
 
 it('streams the file from a signed public link', function () {

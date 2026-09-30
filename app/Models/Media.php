@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -12,5 +13,6 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
  */
 class Media extends BaseMedia
 {
+    use HasSqids;
     use UsesTenantConnection;
 }

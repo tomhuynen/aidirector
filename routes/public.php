@@ -71,15 +71,15 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/update', [ShotUpdateController::class, 'store']);
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');
         });
-});
 
-/*
- * Uploads: storing needs a signed URL or an authorised user (see StoreRequest),
- * viewing needs the signed link from the upload resource.
- */
-Route::prefix('uploads')
-    ->name('uploads.')
-    ->group(function () {
-        Route::post('/', [UploadStoreController::class, 'store'])->name('store');
-        Route::get('{upload}', [UploadViewController::class, 'view'])->middleware('signed')->name('view');
-    });
+    /*
+     * Staging uploads for chats and forms. Directors store them through the
+     * upload policy; viewing needs the signed link from the upload resource.
+     */
+    Route::prefix('uploads')
+        ->name('uploads.')
+        ->group(function () {
+            Route::post('/', [UploadStoreController::class, 'store'])->name('store');
+            Route::get('{upload}', [UploadViewController::class, 'view'])->middleware('signed')->name('view');
+        });
+});

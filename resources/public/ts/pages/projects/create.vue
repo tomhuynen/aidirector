@@ -12,16 +12,18 @@
         :messages="messages"
         :busy="busy"
         :error="error"
-        :disabled="created"
+        :disabled="done"
         :user-initial="userInitial"
         :label="$t('Project setup')"
+        :upload-url="uploadUrl"
+        :hint="hint"
         @send="send"
       />
 
       <div class="flex items-center justify-between gap-3">
-        <p v-if="created" class="flex items-center gap-2 text-sm text-muted-foreground">
+        <p v-if="done" class="flex items-center gap-2 text-sm text-muted-foreground">
           <LoaderCircle class="size-4 animate-spin" />
-          {{ $t('Project created. Opening it…') }}
+          {{ $t('Project ready. Opening it…') }}
         </p>
         <span v-else />
         <Button as-child variant="ghost">
@@ -56,11 +58,15 @@ type ChatTurn = PostResponse<'/projects/create/chat'>
 const { account } = usePage()
 const userInitial = computed(() => account.value?.name.trim().charAt(0).toUpperCase() ?? '')
 
-const created = ref(false)
+const done = ref(false)
+const ask = ref<ChatTurn['ask']>(null)
 
-const http = useHttp<{ conversation: string | null; message: string }, ChatTurn>({
+const hint = computed(() => (ask.value === 'photos' ? $t('Add photos with the + button, or say you have none.') : null))
+
+const http = useHttp<{ conversation: string | null; message: string; uploads: string[] }, ChatTurn>({
   conversation: null,
   message: '',
+  uploads: [],
 })
 
 const unavailable = () => $t('The director is unavailable right now. Please try again.')
@@ -79,21 +85,23 @@ const messageFrom = (caught: unknown): string => {
 
 const { messages, busy, error, send } = useChat({
   initial: [{ role: 'assistant', content: props.greeting }],
-  send: async (text) => {
+  send: async (text, attachments) => {
     http.message = text
+    http.uploads = attachments.map((attachment) => attachment.id)
 
     let turn: ChatTurn
 
     try {
       turn = await http.post(props.chatUrl)
     } catch (caught) {
-      throw new Error(http.errors.message ?? messageFrom(caught))
+      throw new Error(http.errors.message ?? http.errors.uploads ?? messageFrom(caught))
     }
 
     http.conversation = turn.conversation
+    ask.value = turn.ask
 
-    if (turn.project) {
-      created.value = true
+    if (turn.done && turn.project) {
+      done.value = true
       router.visit(turn.project.url)
     }
 

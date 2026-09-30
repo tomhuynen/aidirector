@@ -24,6 +24,7 @@ class CreateController
             /** @var string */
             'greeting' => ProjectIntake::greeting(),
             'chatUrl' => route('public.projects.chat'),
+            'uploadUrl' => route('public.uploads.store'),
         ]);
     }
 }

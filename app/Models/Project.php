@@ -12,14 +12,45 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Laravel\Ai\Models\Conversation;
 use RedExplosion\Sqids\Concerns\HasSqids;
+use Spatie\Image\Enums\Fit;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
-class Project extends Model
+class Project extends Model implements HasMedia
 {
     /** @use HasFactory<\Database\Factories\ProjectFactory> */
     use HasFactory;
     use HasSqids;
+    use InteractsWithMedia;
     use UsesTenantConnection;
+
+    /**
+     * Photos of the real things that must be recognisable in the shots:
+     * products, vessels, sites, people. Content, not style.
+     */
+    public const CONTENT_REFERENCES = 'content_references';
+
+    /**
+     * Images that show how the shots should look. Style, not content.
+     */
+    public const STYLE_REFERENCES = 'style_references';
+
+    /**
+     * The size every reference is sent to the models at, whatever arrived.
+     */
+    public const REFERENCE = 'reference';
+
+    public const REFERENCE_MAX_EDGE = 1536;
+
+    /**
+     * The custom property holding a reference's one-line description.
+     */
+    public const CAPTION = 'caption';
+
+    /** @var list<string> */
+    public const REFERENCE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
     protected $guarded = [];
 
@@ -73,5 +104,25 @@ class Project extends Model
     public function isOwnedBy(Director $director): bool
     {
         return $this->director_id === $director->id;
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(self::CONTENT_REFERENCES)->acceptsMimeTypes(self::REFERENCE_MIME_TYPES);
+        $this->addMediaCollection(self::STYLE_REFERENCES)->acceptsMimeTypes(self::REFERENCE_MIME_TYPES);
+    }
+
+    /**
+     * The reference conversion is made on upload rather than queued, so the
+     * models can look at it in the same request that added it.
+     */
+    public function registerMediaConversions(?BaseMedia $media = null): void
+    {
+        $this->addMediaConversion(self::REFERENCE)
+            ->performOnCollections(self::CONTENT_REFERENCES, self::STYLE_REFERENCES)
+            ->nonQueued()
+            ->fit(Fit::Max, self::REFERENCE_MAX_EDGE, self::REFERENCE_MAX_EDGE)
+            ->format('jpg')
+            ->quality(80);
     }
 }

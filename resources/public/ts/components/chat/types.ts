@@ -6,9 +6,17 @@ export type ChatRole = 'user' | 'assistant'
  */
 export type ChatMessageKind = 'text'
 
+export type ChatAttachment = {
+  /** The staging upload's id, what the server claims. */
+  id: string
+  name: string
+  previewUrl: string | null
+}
+
 export type ChatMessage = {
   id: string
   role: ChatRole
   kind: ChatMessageKind
   content: string
+  attachments?: ChatAttachment[]
 }
