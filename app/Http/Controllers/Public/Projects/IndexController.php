@@ -22,6 +22,7 @@ class IndexController
                 Project::query()
                     ->whereBelongsTo($request->user('director'))
                     ->whereNull('archived_at')
+                    ->with('media')
                     ->withCount('shots')
                     ->latest('updated_at')
                     ->get()

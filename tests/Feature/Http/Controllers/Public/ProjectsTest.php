@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use App\Enums\AspectRatio;
+use App\Enums\Disk;
 use App\Enums\ProjectPurpose;
 use App\Models\Director;
 use App\Models\Project;
 use App\Models\Shot;
+use Illuminate\Support\Facades\Storage;
 
 use function Pest\Laravel\actingAs;
 
@@ -43,6 +45,31 @@ describe('index', function () {
             ->get(route('public.projects.index'))
             ->assertSuccessful()
             ->assertInertia(fn($page) => $page->component('projects/index')->has('projects', 2));
+    });
+
+    it('shows the pinned style sheet on the project card', function () {
+        Storage::fake(Disk::TENANT->value);
+
+        $styled = Project::factory()->ownedBy($this->director)->create(['updated_at' => now()->addMinute()]);
+        Project::factory()->ownedBy($this->director)->create();
+
+        $image = imagecreatetruecolor(16, 9);
+        ob_start();
+        imagepng($image);
+
+        $styled->addMediaFromString((string) ob_get_clean())
+            ->usingFileName('style-sheet.png')
+            ->toMediaCollection(Project::STYLE_REFERENCES);
+
+        $response = actingAs($this->director, 'director')
+            ->get(route('public.projects.index'))
+            ->assertInertia(fn($page) => $page
+                ->where('projects.0.styleReferenceUrl', fn(string $url) => str_contains($url, '/media/') && str_contains($url, 'signature='))
+                ->where('projects.1.styleReferenceUrl', null));
+
+        actingAs($this->director, 'director')
+            ->get($response->viewData('page')['props']['projects'][0]['styleReferenceUrl'])
+            ->assertSuccessful();
     });
 });
 

@@ -9,6 +9,7 @@ use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\URL;
 
 /** @mixin Project */
 class ProjectResource extends JsonResource
@@ -35,6 +36,8 @@ class ProjectResource extends JsonResource
                 'mood' => $this->style['mood'] ?? null,
                 'references' => $this->style['references'] ?? [],
             ],
+            /** @var string|null */
+            'styleReferenceUrl' => $this->styleReferenceUrl(),
             'aspectRatio' => $this->aspect_ratio,
             /** @var int */
             'defaultDuration' => $this->default_duration,
@@ -53,5 +56,22 @@ class ProjectResource extends JsonResource
             /** @var array<string, bool> */
             'can' => $this->when(! is_null($request->user()), fn() => $this->authorizations($request, ProjectPolicy::abilities()), []),
         ];
+    }
+
+    /**
+     * A signed link to the pinned style sheet, at the resized reference size when available.
+     */
+    private function styleReferenceUrl(): ?string
+    {
+        $sheet = $this->styleReference();
+
+        if ($sheet === null) {
+            return null;
+        }
+
+        return URL::temporarySignedRoute('public.media.view', now()->addHours(2), array_filter([
+            'media' => $sheet,
+            'conversion' => $sheet->hasGeneratedConversion(Project::REFERENCE) ? Project::REFERENCE : null,
+        ]));
     }
 }

@@ -27,27 +27,42 @@
       <li v-for="project in projects" :key="project.id" class="bg-card">
         <Link
           :href="project.links?.view ?? '#'"
-          class="group flex h-full flex-col justify-between gap-8 p-6 transition-colors hover:bg-paper-deep/70"
+          class="group flex h-full flex-col transition-colors hover:bg-paper-deep/70"
         >
-          <div class="space-y-3">
-            <p class="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
-              {{ project.purposeLabel }}
-            </p>
-            <h2 class="font-display text-2xl leading-tight font-medium text-balance">{{ project.title }}</h2>
-            <p v-if="project.description" class="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
-              {{ project.description }}
-            </p>
+          <div class="aspect-[16/9] overflow-hidden border-b border-border bg-paper-deep">
+            <img
+              v-if="project.styleReferenceUrl"
+              :src="project.styleReferenceUrl"
+              :alt="$t('Style reference for :title', { title: project.title })"
+              class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+            />
+            <Placeholder v-else class="size-full rounded-none border-0 bg-paper-deep">
+              <span class="rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground">
+                {{ $t('No style chosen yet') }}
+              </span>
+            </Placeholder>
           </div>
-          <dl class="flex items-center gap-6 text-xs text-muted-foreground">
-            <div class="flex items-center gap-1.5">
-              <dt class="sr-only">{{ $t('Shots') }}</dt>
-              <dd>{{ $t(':count shots', { count: String(project.shotsCount ?? 0) }) }}</dd>
+          <div class="flex flex-1 flex-col justify-between gap-8 p-6">
+            <div class="space-y-3">
+              <p class="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
+                {{ project.purposeLabel }}
+              </p>
+              <h2 class="font-display text-2xl leading-tight font-medium text-balance">{{ project.title }}</h2>
+              <p v-if="project.description" class="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+                {{ project.description }}
+              </p>
             </div>
-            <div class="flex items-center gap-1.5">
-              <dt class="sr-only">{{ $t('Aspect ratio') }}</dt>
-              <dd>{{ project.aspectRatio }}</dd>
-            </div>
-          </dl>
+            <dl class="flex items-center gap-6 text-xs text-muted-foreground">
+              <div class="flex items-center gap-1.5">
+                <dt class="sr-only">{{ $t('Shots') }}</dt>
+                <dd>{{ $t(':count shots', { count: String(project.shotsCount ?? 0) }) }}</dd>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <dt class="sr-only">{{ $t('Aspect ratio') }}</dt>
+                <dd>{{ project.aspectRatio }}</dd>
+              </div>
+            </dl>
+          </div>
         </Link>
       </li>
     </ul>
@@ -58,6 +73,7 @@ import { Link } from '@inertiajs/vue3'
 import AppLayout from '@public/ts/layouts/App.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
+import Placeholder from '@public:components/editor/Placeholder.vue'
 import EmptyState from '@public:components/EmptyState.vue'
 import Page from '@public:components/Page.vue'
 import { create } from '@routes/public/projects'
