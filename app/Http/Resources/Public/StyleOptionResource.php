@@ -8,7 +8,6 @@ use App\Models\Project;
 use App\Models\StyleOption;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\URL;
 
 /** @mixin StyleOption */
 class StyleOptionResource extends JsonResource
@@ -40,18 +39,13 @@ class StyleOptionResource extends JsonResource
             /** @var bool */
             'pinned' => $this->isPinned(),
             /** @var string|null */
-            'thumbnailUrl' => $render === null ? null : $this->mediaUrl($render->sqid, StyleOption::THUMBNAIL),
+            'thumbnailUrl' => $render?->signedUrl(StyleOption::THUMBNAIL),
             /** @var string|null */
-            'imageUrl' => $render === null ? null : $this->mediaUrl($render->sqid),
+            'imageUrl' => $render?->signedUrl(),
             'links' => [
                 'more' => route('public.projects.style.round', ['project' => $project, 'parent' => $this->resource]),
                 'pin' => route('public.projects.style.pin', ['project' => $project, 'styleOption' => $this->resource]),
             ],
         ];
-    }
-
-    private function mediaUrl(string $media, ?string $conversion = null): string
-    {
-        return URL::temporarySignedRoute('public.media.view', now()->addHours(2), array_filter(['media' => $media, 'conversion' => $conversion]));
     }
 }

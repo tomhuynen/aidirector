@@ -6,7 +6,8 @@
     <Chat
       class="min-h-0 flex-1"
       :messages="messages"
-      :busy="busy"
+      :busy="busy || styleActivity !== null"
+      :busy-label="styleActivity"
       :error="error"
       :disabled="done"
       :user-initial="userInitial"
@@ -16,7 +17,7 @@
       @send="send"
     >
       <template #style-options="{ message }">
-        <StyleOptionsGrid :message="message" :disabled="done || styleBusy" @more="moreLike" @pin="pin" />
+        <StyleOptionsGrid :message="message" :disabled="done || styleActivity !== null" @more="moreLike" @pin="pin" />
       </template>
     </Chat>
 
@@ -34,16 +35,17 @@ import { $t } from '@public/ts/shared/i18n'
 import type { Inertia, PostResponse } from '@public/ts/types/utils'
 import Chat from '@public:components/chat/Chat.vue'
 import StyleOptionsGrid from '@public:components/chat/StyleOptionsGrid.vue'
-import type { ChatMessage, StyleOptionTile } from '@public:components/chat/types'
+import type { ChatMessage, NewChatMessage, StyleOptionTile } from '@public:components/chat/types'
 import { useChat } from '@public:components/chat/useChat'
 import { LoaderCircle } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 defineOptions({
   layout: AppLayout,
 })
 
-const props = defineProps<Inertia.Pages.Projects.Create>()
+// The setup route renders this page too; its props are the superset (resume may be null).
+const props = defineProps<Inertia.Pages.Projects.Setup>()
 
 type ChatTurn = PostResponse<'/projects/create/chat'>
 type StyleRound = PostResponse<'/projects/{project}/style/rounds'>
@@ -53,9 +55,10 @@ const { account } = usePage()
 const userInitial = computed(() => account.value?.name.trim().charAt(0).toUpperCase() ?? '')
 
 const done = ref(false)
-const ask = ref<ChatTurn['ask']>(null)
-const project = ref<ChatTurn['project']>(null)
-const styleBusy = ref(false)
+const ask = ref<ChatTurn['ask']>(props.resume?.ask ?? null)
+const project = ref<ChatTurn['project']>(props.resume?.project ?? null)
+/** What the style exploration is doing right now, shown in the chat; null when idle. */
+const styleActivity = ref<string | null>(null)
 
 const hint = computed(() => {
   switch (ask.value) {
@@ -69,7 +72,7 @@ const hint = computed(() => {
 })
 
 const http = useHttp<{ conversation: string | null; message: string; uploads: string[] }, ChatTurn>({
-  conversation: null,
+  conversation: props.resume?.conversation ?? null,
   message: '',
   uploads: [],
 })
@@ -89,7 +92,10 @@ const messageFrom = (caught: unknown): string => {
 }
 
 const { messages, busy, error, send, push } = useChat({
-  initial: [{ role: 'assistant', content: props.greeting }],
+  // A resumed thread is rebuilt on the server in the same shape the chat keeps.
+  initial: props.resume
+    ? (props.resume.messages as unknown as NewChatMessage[])
+    : [{ kind: 'text', role: 'assistant', content: props.greeting }],
   send: async (text, attachments) => {
     http.message = text
     http.uploads = attachments.map((attachment) => attachment.id)
@@ -155,11 +161,13 @@ const poll = (message: StyleOptionsMessage) => {
 }
 
 const startRound = async (parent: StyleOptionTile | null = null) => {
-  if (!project.value || styleBusy.value) {
+  if (!project.value || styleActivity.value !== null) {
     return
   }
 
-  styleBusy.value = true
+  styleActivity.value = parent
+    ? $t('Preparing more like “:name”…', { name: parent.name })
+    : $t('Preparing style directions…')
   error.value = null
   rounds.parent = parent?.id ?? null
 
@@ -182,18 +190,18 @@ const startRound = async (parent: StyleOptionTile | null = null) => {
   } catch (caught) {
     error.value = rounds.errors.parent ?? messageFrom(caught)
   } finally {
-    styleBusy.value = false
+    styleActivity.value = null
   }
 }
 
 const moreLike = (option: StyleOptionTile) => startRound(option)
 
 const pin = async (option: StyleOptionTile) => {
-  if (styleBusy.value) {
+  if (styleActivity.value !== null) {
     return
   }
 
-  styleBusy.value = true
+  styleActivity.value = $t('Saving your style…')
 
   try {
     const result = await pinning.post(option.links.pin)
@@ -204,13 +212,31 @@ const pin = async (option: StyleOptionTile) => {
       }
     }
 
+    // Hand over to the chat's own typing indicator while the director replies.
+    styleActivity.value = null
     await send($t('Style chosen: :name. :look', { name: option.name, look: option.look }))
   } catch (caught) {
     error.value = messageFrom(caught)
   } finally {
-    styleBusy.value = false
+    styleActivity.value = null
   }
 }
+
+/*
+ * On resume, keep polling rounds that were still rendering, and start the
+ * first round if the director was asked for a style but none exists yet.
+ */
+onMounted(() => {
+  for (const message of messages.value) {
+    if (message.kind === 'style-options' && message.options.some((option) => option.status === 'pending')) {
+      poll(message)
+    }
+  }
+
+  if (ask.value === 'style' && !hasStyleRound.value) {
+    void startRound()
+  }
+})
 
 onBeforeUnmount(() => polls.forEach((timer) => clearInterval(timer)))
 </script>

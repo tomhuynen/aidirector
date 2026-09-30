@@ -32,7 +32,8 @@ describe('create page', function () {
                 ->component('projects/create')
                 ->where('greeting', ProjectIntake::greeting())
                 ->where('chatUrl', route('public.projects.chat'))
-                ->where('uploadUrl', route('public.uploads.store')));
+                ->where('uploadUrl', route('public.uploads.store'))
+                ->where('resume', null));
     });
 });
 

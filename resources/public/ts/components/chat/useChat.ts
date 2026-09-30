@@ -3,8 +3,8 @@ import { ref } from 'vue'
 import type { ChatAttachment, ChatMessage, ChatRole, NewChatMessage } from './types'
 
 type UseChatOptions = {
-  /** Messages shown before the user says anything, such as a greeting. */
-  initial?: { role: ChatRole; content: string }[]
+  /** Messages shown before the user says anything: a greeting, or a resumed thread. */
+  initial?: NewChatMessage[]
   /** Sends the user's text and attachments and resolves with the assistant's reply. */
   send: (text: string, attachments: ChatAttachment[]) => Promise<string | null>
 }
