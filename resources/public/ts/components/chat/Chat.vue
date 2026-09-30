@@ -61,7 +61,12 @@
           </slot>
         </div>
 
-        <div v-if="busy" class="flex items-start gap-3" :aria-label="$t('The director is typing')">
+        <div
+          v-if="busy"
+          class="flex items-start gap-3"
+          role="status"
+          :aria-label="busyLabel ?? $t('The director is typing')"
+        >
           <Avatar class="size-8 shrink-0">
             <AvatarFallback class="bg-signal-soft text-signal"><Clapperboard class="size-4" /></AvatarFallback>
           </Avatar>
@@ -69,6 +74,7 @@
             <Skeleton class="size-2 rounded-full bg-signal/60" />
             <Skeleton class="size-2 rounded-full bg-signal/60 [animation-delay:150ms]" />
             <Skeleton class="size-2 rounded-full bg-signal/60 [animation-delay:300ms]" />
+            <span v-if="busyLabel" class="ml-2 text-sm text-muted-foreground">{{ busyLabel }}</span>
           </div>
         </div>
 
@@ -185,6 +191,8 @@ const props = withDefaults(
   defineProps<{
     messages: ChatMessage[]
     busy?: boolean
+    /** What the director is doing while busy, shown next to the typing dots. */
+    busyLabel?: string | null
     error?: string | null
     placeholder?: string
     disabled?: boolean
@@ -204,6 +212,7 @@ const props = withDefaults(
   }>(),
   {
     busy: false,
+    busyLabel: null,
     error: null,
     placeholder: undefined,
     disabled: false,

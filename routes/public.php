@@ -60,6 +60,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('create', [ProjectUpdateController::class, 'store'])->name('store');
             Route::post('create/chat', [ProjectChatController::class, 'store'])->name('chat');
             Route::get('{project}', [ProjectViewController::class, 'view'])->name('view');
+            Route::get('{project}/setup', [ProjectCreateController::class, 'resume'])->name('setup');
             Route::get('{project}/update', [ProjectUpdateController::class, 'update'])->name('update');
             Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');

@@ -141,6 +141,15 @@ class Project extends Model implements HasMedia
         return $this->getFirstMedia(self::STYLE_REFERENCES);
     }
 
+    /**
+     * A project started in the intake chat stays in setup until a style is
+     * pinned; opening it resumes the conversation.
+     */
+    public function needsSetup(): bool
+    {
+        return $this->conversation_id !== null && ! $this->hasMedia(self::STYLE_REFERENCES);
+    }
+
     public function isOwnedBy(Director $director): bool
     {
         return $this->director_id === $director->id;
