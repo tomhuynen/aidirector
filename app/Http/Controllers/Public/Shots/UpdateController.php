@@ -28,7 +28,7 @@ class UpdateController
             'project' => fn() => ProjectResource::make($project),
             'shot' => fn() => ShotResource::make($shot),
             'siblings' => fn() => ShotListItemResource::collection(
-                $project->shots()->with('project')->withCount('keyframes')->get()
+                $project->shots()->with(['project', 'keyframes.media'])->withCount('keyframes')->get()
             ),
         ]);
     }

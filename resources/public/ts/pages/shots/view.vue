@@ -33,11 +33,12 @@
       <template v-else-if="state === 'keyframes'">
         <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" />
         <KeyframesPanel
-          :keyframes="shot.storyline?.keyframes ?? []"
+          :keyframes="panelKeyframes"
           :aspect-ratio="aspectRatio"
           :duration="duration"
+          :generating="shot.status === 'keyframes-pending'"
           :error="shot.storylineError"
-          :generate-url="shot.links?.storylineGenerate ?? '#'"
+          :images-url="shot.links?.keyframesGenerate ?? '#'"
         />
       </template>
       <BriefForm v-else :project="project" :shot="shot" />
@@ -50,7 +51,7 @@ import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import BriefForm from '@public:components/editor/BriefForm.vue'
-import KeyframesPanel from '@public:components/editor/KeyframesPanel.vue'
+import KeyframesPanel, { type PanelKeyframe } from '@public:components/editor/KeyframesPanel.vue'
 import Pending from '@public:components/editor/Pending.vue'
 import { shotCode } from '@public:components/editor/shotCode'
 import ShotDetails from '@public:components/editor/ShotDetails.vue'
@@ -81,6 +82,7 @@ const state = computed<State>(() => {
     case 'storyline-pending':
       return 'planning'
     case 'storyline-ready':
+    case 'keyframes-pending':
     case 'keyframes-ready':
     case 'video-ready':
       return props.shot.storyline ? 'keyframes' : 'options'
@@ -89,12 +91,54 @@ const state = computed<State>(() => {
   }
 })
 
-const { start, stop } = usePoll(3000, { only: ['shot', 'siblings'] }, { autoStart: false })
+/**
+ * While images are being generated the rendered keyframes are shown as they
+ * arrive; before that the panel shows the plan with empty frames.
+ */
+const panelKeyframes = computed<PanelKeyframe[]>(() =>
+  props.keyframes.length > 0
+    ? props.keyframes.map((keyframe) => ({
+        id: keyframe.id,
+        title: keyframe.title,
+        description: keyframe.description,
+        imageUrl: keyframe.imageUrl,
+        thumbnailUrl: keyframe.thumbnailUrl,
+        rendering: keyframe.rendering,
+        renderError: keyframe.renderError,
+        renders: keyframe.renders,
+        updateUrl: keyframe.links.update,
+        tweakUrl: keyframe.links.tweak,
+        chooseRenderUrl: keyframe.links.chooseRender,
+      }))
+    : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
+        id: String(i),
+        title: keyframe.title,
+        description: keyframe.description,
+        imageUrl: null,
+        thumbnailUrl: null,
+        rendering: props.shot.status === 'keyframes-pending',
+        renderError: null,
+        renders: [],
+        updateUrl: null,
+        tweakUrl: null,
+        chooseRenderUrl: null,
+      })),
+)
+
+const busy = computed(
+  () =>
+    state.value === 'suggesting' ||
+    state.value === 'planning' ||
+    props.shot.status === 'keyframes-pending' ||
+    props.keyframes.some((keyframe) => keyframe.rendering),
+)
+
+const { start, stop } = usePoll(3000, { only: ['shot', 'keyframes', 'siblings'] }, { autoStart: false })
 
 watch(
-  state,
+  busy,
   (current) => {
-    if (current === 'suggesting' || current === 'planning') {
+    if (current) {
       start()
     } else {
       stop()
@@ -111,6 +155,7 @@ const shotList = computed(() =>
     statusLabel: sibling.statusLabel,
     duration: sibling.duration,
     keyframesCount: sibling.keyframesCount,
+    thumbnailUrl: sibling.thumbnailUrl,
     url: sibling.url,
   })),
 )

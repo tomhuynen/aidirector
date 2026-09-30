@@ -42,7 +42,7 @@ class ShotResource extends JsonResource
             'storylineOptions' => $this->storyline_options,
             /** @var array{title: string, storyline: string}|null */
             'chosenStoryline' => $this->chosen_storyline,
-            /** @var array{keyframes: array<int, array{title: string, description: string}>}|null */
+            /** @var array{keyframes: array<int, array{title: string, description: string, prompt?: string}>}|null */
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
@@ -56,6 +56,7 @@ class ShotResource extends JsonResource
                 'storylineChoose' => route('public.shots.storyline.choose', [$this->project, $this->resource]),
                 'storylineGenerate' => route('public.shots.storyline.generate', [$this->project, $this->resource]),
                 'storylineReopen' => route('public.shots.storyline.reopen', [$this->project, $this->resource]),
+                'keyframesGenerate' => route('public.shots.keyframes.generate', [$this->project, $this->resource]),
             ]),
             /** @var array<string, bool> */
             'can' => $this->when(! is_null($request->user()), fn() => $this->authorizations($request, ShotPolicy::abilities(ShotPolicy::CREATE)), []),

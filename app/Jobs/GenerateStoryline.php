@@ -15,7 +15,8 @@ use Laravel\Ai\Responses\StructuredAgentResponse;
 use Throwable;
 
 /**
- * Plans the keyframes for a shot from its chosen storyline.
+ * Plans the keyframes for a shot from its chosen storyline, then hands the
+ * plan to the job that renders them.
  */
 #[DeleteWhenMissingModels]
 class GenerateStoryline implements ShouldQueue
@@ -55,11 +56,15 @@ class GenerateStoryline implements ShouldQueue
             'usage' => $response->usage->toArray(),
         ]);
 
+        $shot->forgetKeyframes();
+
         $shot->forceFill([
             'storyline' => ['keyframes' => array_values($response['keyframes'])],
             'storyline_error' => null,
-            'status' => ShotStatus::STORYLINE_READY,
+            'status' => ShotStatus::KEYFRAMES_PENDING,
         ])->save();
+
+        GenerateKeyframes::dispatch($shot);
     }
 
     public function failed(?Throwable $exception): void

@@ -16,6 +16,9 @@ return new class extends Migration {
             $table->string('title');
             $table->text('description');
             $table->text('prompt')->nullable();
+            $table->unsignedBigInteger('render_id')->nullable();
+            $table->boolean('rendering')->default(false);
+            $table->text('render_error')->nullable();
             $table->timestamps();
 
             $table->index(['shot_id', 'position']);

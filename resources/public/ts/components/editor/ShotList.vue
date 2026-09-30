@@ -52,7 +52,21 @@
             )
           "
         >
-          <Placeholder :class="cn('h-11 w-[72px] shrink-0 bg-background', shot.id === currentId && 'border-signal')" />
+          <img
+            v-if="shot.thumbnailUrl"
+            :src="shot.thumbnailUrl"
+            :alt="shot.title"
+            :class="
+              cn(
+                'h-11 w-[72px] shrink-0 rounded-md border border-border object-cover',
+                shot.id === currentId && 'border-signal',
+              )
+            "
+          />
+          <Placeholder
+            v-else
+            :class="cn('h-11 w-[72px] shrink-0 bg-background', shot.id === currentId && 'border-signal')"
+          />
           <div class="min-w-0">
             <p :class="cn('text-[15px] font-semibold', shot.id === currentId && 'text-signal')">
               {{ shot.code }}
@@ -89,6 +103,7 @@ export type ShotListItem = {
   statusLabel: string
   duration: number
   keyframesCount: number
+  thumbnailUrl: string | null
   url: string
 }
 

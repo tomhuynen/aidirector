@@ -22,6 +22,8 @@ enum ShotStatus: string
 
     case STORYLINE_CHOSEN = 'storyline-chosen';
 
+    case KEYFRAMES_PENDING = 'keyframes-pending';
+
     case KEYFRAMES_READY = 'keyframes-ready';
 
     case VIDEO_READY = 'video-ready';
@@ -35,6 +37,7 @@ enum ShotStatus: string
             self::STORYLINE_PENDING => 'Writing storyline',
             self::STORYLINE_READY => 'Storyline ready',
             self::STORYLINE_CHOSEN => 'Storyline chosen',
+            self::KEYFRAMES_PENDING => 'Generating keyframes',
             self::KEYFRAMES_READY => 'Keyframes ready',
             self::VIDEO_READY => 'Video ready',
         };

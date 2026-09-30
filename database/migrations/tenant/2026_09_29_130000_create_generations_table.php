@@ -19,6 +19,7 @@ return new class extends Migration {
             $table->string('kind', 16);
             $table->string('provider', 64);
             $table->string('model', 128);
+            $table->text('prompt')->nullable();
             $table->decimal('cost', 10, 6)->nullable();
             $table->unsignedInteger('duration_ms')->nullable();
             $table->json('usage')->nullable();

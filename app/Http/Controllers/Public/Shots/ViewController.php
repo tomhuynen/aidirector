@@ -25,9 +25,11 @@ class ViewController
         return Inertia::render('shots/view', [
             'project' => fn() => ProjectResource::make($project),
             'shot' => fn() => ShotResource::make($shot),
-            'keyframes' => fn() => KeyframeResource::collection($shot->keyframes()->get()),
+            'keyframes' => fn() => KeyframeResource::collection(
+                $shot->keyframes()->with('media')->get()->each->setRelation('shot', $shot)
+            ),
             'siblings' => fn() => ShotListItemResource::collection(
-                $project->shots()->with('project')->withCount('keyframes')->get()
+                $project->shots()->with(['project', 'keyframes.media'])->withCount('keyframes')->get()
             ),
         ]);
     }

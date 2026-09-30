@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Public;
 
+use App\Models\Keyframe;
 use App\Models\Shot;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -31,7 +32,25 @@ class ShotListItemResource extends JsonResource
             'duration' => $this->duration ?? $this->project->default_duration,
             /** @var int */
             'keyframesCount' => $this->keyframes_count ?? 0,
+            /** @var string|null */
+            'thumbnailUrl' => $this->thumbnailUrl(),
             'url' => route('public.shots.view', [$this->project, $this->resource]),
         ];
+    }
+
+    /**
+     * The thumbnail of the first rendered keyframe, when the relation is loaded.
+     */
+    private function thumbnailUrl(): ?string
+    {
+        if (! $this->relationLoaded('keyframes')) {
+            return null;
+        }
+
+        $keyframe = $this->keyframes->first(fn(Keyframe $keyframe) => $keyframe->render() !== null);
+
+        return $keyframe === null
+            ? null
+            : route('public.shots.keyframes.image', [$this->project, $this->resource, $keyframe, Keyframe::THUMBNAIL, 'render' => $keyframe->render()->id]);
     }
 }

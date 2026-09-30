@@ -14,12 +14,18 @@ use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexControll
 use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
+use App\Http\Controllers\Public\Shots\Keyframes\GenerateController as KeyframesGenerateController;
+use App\Http\Controllers\Public\Shots\Keyframes\ImageController as KeyframeImageController;
+use App\Http\Controllers\Public\Shots\Keyframes\RenderController as KeyframeRenderController;
+use App\Http\Controllers\Public\Shots\Keyframes\TweakController as KeyframeTweakController;
+use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpdateController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
 use App\Http\Controllers\Public\Shots\Storyline\ChooseController as StorylineChooseController;
 use App\Http\Controllers\Public\Shots\Storyline\GenerateController as StorylineGenerateController;
 use App\Http\Controllers\Public\Shots\Storyline\SuggestController as StorylineSuggestController;
 use App\Http\Controllers\Public\Shots\UpdateController as ShotUpdateController;
 use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
+use App\Models\Keyframe;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -65,6 +71,13 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/storyline/choose', [StorylineChooseController::class, 'store'])->name('storyline.choose');
             Route::post('{shot}/storyline/generate', [StorylineGenerateController::class, 'store'])->name('storyline.generate');
             Route::delete('{shot}/storyline/choose', [StorylineChooseController::class, 'destroy'])->name('storyline.reopen');
+            Route::post('{shot}/keyframes/generate', [KeyframesGenerateController::class, 'store'])->name('keyframes.generate');
+            Route::post('{shot}/keyframes/{keyframe}/update', [KeyframeUpdateController::class, 'store'])->name('keyframes.update');
+            Route::post('{shot}/keyframes/{keyframe}/tweak', [KeyframeTweakController::class, 'store'])->name('keyframes.tweak');
+            Route::post('{shot}/keyframes/{keyframe}/render', [KeyframeRenderController::class, 'store'])->name('keyframes.render');
+            Route::get('{shot}/keyframes/{keyframe}/image/{conversion?}', [KeyframeImageController::class, 'view'])
+                ->whereIn('conversion', [Keyframe::THUMBNAIL])
+                ->name('keyframes.image');
             Route::get('{shot}/update', [ShotUpdateController::class, 'update'])->name('update');
             Route::post('{shot}/update', [ShotUpdateController::class, 'store']);
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');

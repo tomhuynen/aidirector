@@ -49,6 +49,7 @@ class StorylineWriter implements Agent, HasStructuredOutput
             - Produce between {$min} and {$max} keyframes. Use the fewest that tell the story clearly.
             - Title: two to four words naming the moment.
             - Description: one or two sentences describing exactly what is visible, in present tense. Name the subject, the pose, the key object and its state.
+            - Prompt: a self-contained brief for an image model that renders this keyframe on its own, 50 to 90 words. Describe the subject's appearance in full (age, build, hair, clothing) and repeat that wording in every keyframe, then the environment, the pose, the expression and the state of the key objects. Present tense, concrete nouns, no style words: the visual style is added separately.
             - Keep the same subject, environment and objects across all keyframes. Do not introduce new characters or props that the storyline does not imply.
             - No camera language, no text or captions in frame, no sound.
             - Write in English.
@@ -65,6 +66,7 @@ class StorylineWriter implements Agent, HasStructuredOutput
                 ->items($schema->object([
                     'title' => $schema->string()->required(),
                     'description' => $schema->string()->required(),
+                    'prompt' => $schema->string()->required(),
                 ]))
                 ->min(Config::get('pipeline.keyframes.min'))
                 ->max(Config::get('pipeline.keyframes.max'))

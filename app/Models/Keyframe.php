@@ -7,6 +7,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Collection;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
@@ -22,7 +24,7 @@ class Keyframe extends Model implements HasMedia
     use UsesTenantConnection;
 
     /**
-     * Every generated image for this keyframe. The first one is the chosen version.
+     * Every generated image for this keyframe, so a tweak can be undone by picking an earlier one.
      */
     public const RENDERS = 'renders';
 
@@ -30,10 +32,48 @@ class Keyframe extends Model implements HasMedia
 
     protected $guarded = [];
 
+    /**
+     * @return array{
+     *  rendering: 'boolean',
+     * }
+     */
+    protected function casts(): array
+    {
+        return [
+            'rendering' => 'boolean',
+        ];
+    }
+
     /** @return BelongsTo<Shot, $this> */
     public function shot(): BelongsTo
     {
         return $this->belongsTo(Shot::class);
+    }
+
+    /** @return MorphMany<Generation, $this> */
+    public function generations(): MorphMany
+    {
+        return $this->morphMany(Generation::class, 'generatable');
+    }
+
+    /**
+     * Every render of this keyframe, oldest first.
+     *
+     * @return \Illuminate\Support\Collection<int, Media>
+     */
+    public function renders(): Collection
+    {
+        return $this->getMedia(self::RENDERS);
+    }
+
+    /**
+     * The chosen render of this keyframe: the one the director picked, or else the newest.
+     */
+    public function render(): ?Media
+    {
+        $renders = $this->renders();
+
+        return $renders->firstWhere('id', $this->render_id) ?? $renders->last();
     }
 
     public function registerMediaCollections(): void

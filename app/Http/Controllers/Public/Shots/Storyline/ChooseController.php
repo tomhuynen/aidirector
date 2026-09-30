@@ -40,6 +40,8 @@ class ChooseController
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
+        $shot->forgetKeyframes();
+
         $shot->forceFill([
             'chosen_storyline' => null,
             'storyline' => null,

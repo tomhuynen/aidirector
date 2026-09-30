@@ -85,11 +85,20 @@ class Shot extends Model
     /**
      * The keyframes planned for the chosen storyline.
      *
-     * @return list<array{title: string, description: string}>
+     * @return list<array{title: string, description: string, prompt?: string}>
      */
     public function storylineKeyframes(): array
     {
         return array_values($this->storyline['keyframes'] ?? []);
+    }
+
+    /**
+     * Remove the rendered keyframes and their images, for example when the plan changes.
+     */
+    public function forgetKeyframes(): void
+    {
+        $this->keyframes()->get()->each->delete();
+        $this->unsetRelation('keyframes');
     }
 
     /** @return BelongsTo<Project, $this> */

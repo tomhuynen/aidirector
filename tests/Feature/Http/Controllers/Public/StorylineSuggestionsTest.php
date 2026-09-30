@@ -6,9 +6,11 @@ use App\Ai\Agents\StorylineOptionsWriter;
 use App\Ai\Agents\StorylineWriter;
 use App\Enums\ProjectPurpose;
 use App\Enums\ShotStatus;
+use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateStoryline;
 use App\Jobs\GenerateStorylineOptions;
 use App\Models\Director;
+use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Facades\Queue;
@@ -170,22 +172,36 @@ describe('jobs', function () {
             ->and($shot->generations()->whereNotNull('error')->count())->toBe(1);
     });
 
-    it('passes the chosen storyline on to the keyframe writer', function () {
+    it('passes the chosen storyline on to the keyframe writer and starts rendering', function () {
         StorylineWriter::fake([['keyframes' => [
-            ['title' => 'At the mailbox', 'description' => 'The man stands at the mailbox holding the envelope.'],
-            ['title' => 'Posting', 'description' => 'The envelope slides into the slot.'],
-            ['title' => 'Thumbs up', 'description' => 'The man gives a thumbs up.'],
+            ['title' => 'At the mailbox', 'description' => 'The man stands at the mailbox holding the envelope.', 'prompt' => 'A man in a navy suit stands at a red mailbox.'],
+            ['title' => 'Posting', 'description' => 'The envelope slides into the slot.', 'prompt' => 'A man in a navy suit posts a white envelope.'],
+            ['title' => 'Thumbs up', 'description' => 'The man gives a thumbs up.', 'prompt' => 'A man in a navy suit gives a thumbs up.'],
         ]]]);
 
         $shot = Shot::factory()->for($this->project)->create([
             'status' => ShotStatus::STORYLINE_PENDING,
             'chosen_storyline' => suggestedStorylines()[2],
         ]);
+        $stale = Keyframe::factory()->for($shot)->create();
 
         (new GenerateStoryline($shot))->handle();
 
         StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Chosen storyline (Relief): The man posts the envelope and exhales'));
 
-        expect($shot->fresh()->status)->toBe(ShotStatus::STORYLINE_READY);
+        $shot->refresh();
+
+        expect($shot->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
+            ->and($shot->storylineKeyframes()[0]['prompt'])->toBe('A man in a navy suit stands at a red mailbox.')
+            ->and(Keyframe::query()->whereKey($stale->id)->exists())->toBeFalse();
+
+        Queue::assertPushed(GenerateKeyframes::class, fn(GenerateKeyframes $job) => $job->shot->is($shot));
+    });
+
+    it('asks the keyframe writer for an image prompt per keyframe', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        expect((string) (new StorylineWriter($shot->load('project')))->instructions())
+            ->toContain('Prompt: a self-contained brief for an image model');
     });
 });
