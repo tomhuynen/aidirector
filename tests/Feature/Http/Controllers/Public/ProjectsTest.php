@@ -6,6 +6,7 @@ use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Models\Director;
 use App\Models\Project;
+use App\Models\Shot;
 
 use function Pest\Laravel\actingAs;
 
@@ -46,11 +47,11 @@ describe('index', function () {
 });
 
 describe('create and update', function () {
-    it('shows the create form', function () {
+    it('shows the intake chat instead of a form for new projects', function () {
         actingAs($this->director, 'director')
             ->get(route('public.projects.create'))
             ->assertSuccessful()
-            ->assertInertia(fn($page) => $page->component('projects/update')->has('purposes', 6)->has('aspectRatios', 3));
+            ->assertInertia(fn($page) => $page->component('projects/create')->has('greeting')->has('chatUrl'));
     });
 
     it('creates a project owned by the current user', function () {
@@ -101,13 +102,22 @@ describe('create and update', function () {
 });
 
 describe('view and destroy', function () {
-    it('shows an owned project with its shots', function () {
-        $project = Project::factory()->ownedBy($this->director)->hasShots(3)->create();
+    it('opens the editor on the first shot of an owned project', function () {
+        $project = Project::factory()->ownedBy($this->director)->create();
+        $shots = Shot::factory()->for($project)->count(2)->sequence(['position' => 1], ['position' => 2])->create();
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.view', $project))
+            ->assertRedirect(route('public.shots.view', [$project, $shots->first()]));
+    });
+
+    it('shows the empty editor for a project without shots', function () {
+        $project = Project::factory()->ownedBy($this->director)->create();
 
         actingAs($this->director, 'director')
             ->get(route('public.projects.view', $project))
             ->assertSuccessful()
-            ->assertInertia(fn($page) => $page->component('projects/view')->has('shots', 3));
+            ->assertInertia(fn($page) => $page->component('projects/view')->where('project.id', $project->sqid));
     });
 
     it('forbids viewing another director\'s project', function () {

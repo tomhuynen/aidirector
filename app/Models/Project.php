@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Laravel\Ai\Models\Conversation;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -51,6 +52,16 @@ class Project extends Model
     public function director(): BelongsTo
     {
         return $this->belongsTo(Director::class);
+    }
+
+    /**
+     * The intake conversation this project was created from, if any.
+     *
+     * @return BelongsTo<Conversation, $this>
+     */
+    public function conversation(): BelongsTo
+    {
+        return $this->belongsTo(Conversation::class);
     }
 
     /** @return HasMany<Shot, $this> */

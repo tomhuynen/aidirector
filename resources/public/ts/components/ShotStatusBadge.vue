@@ -19,8 +19,12 @@ const tone = computed(() => {
       return 'border-emerald-200 text-emerald-700'
     case 'keyframes-ready':
     case 'planned':
+    case 'storyline-ready':
     case 'options-ready':
       return 'border-signal/40 text-signal'
+    case 'storyline-pending':
+    case 'options-pending':
+      return 'border-signal/40 text-signal animate-pulse'
     default:
       return 'text-muted-foreground'
   }

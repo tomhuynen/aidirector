@@ -28,19 +28,29 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
       const apiName = options.apiName || 'api'
       const inertiaPath = resolve(dirname(options.outputPath), 'inertia.d.ts')
 
+      // A failing fetch (for example a 500 from a half-edited route file) must
+      // not take the dev server down; the previous schema stays in place.
       const fetchSchema = async () => {
-        const { stdout, stderr } = await execAsync(
-          `npx openapi-typescript ${appUrl}/docs/${apiName}.json -o ${options.outputPath}`,
-          { env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' } },
-        )
+        try {
+          const { stdout, stderr } = await execAsync(
+            `npx openapi-typescript ${appUrl}/docs/${apiName}.json -o ${options.outputPath}`,
+            { env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' } },
+          )
 
-        if (stdout) {
+          if (stdout) {
+            // eslint-disable-next-line no-console
+            console.log(stdout)
+          }
+          if (stderr) {
+            // eslint-disable-next-line no-console
+            console.error(stderr)
+          }
+        } catch (error) {
           // eslint-disable-next-line no-console
-          console.log(stdout)
-        }
-        if (stderr) {
-          // eslint-disable-next-line no-console
-          console.error(stderr)
+          console.warn(
+            `[type-generator] Could not fetch /docs/${apiName}.json, keeping existing schema:`,
+            (error as Error).message,
+          )
         }
       }
 
@@ -54,12 +64,18 @@ export function typeGenerator(options: TypeGeneratorOptions): Plugin {
         await generateInertiaTypes(options.outputPath, inertiaPath, apiName, options.typeImports)
       }
 
-      // Re-generate inertia.d.ts when schema.d.ts changes
+      // Re-generate inertia.d.ts when schema.d.ts changes. The write by
+      // openapi-typescript can trigger several change events while the file
+      // is still partial, so wait for the writes to settle first.
+      let schemaTimer: ReturnType<typeof setTimeout>
       server.watcher.add(options.outputPath)
-      server.watcher.on('change', async (changedPath) => {
-        if (changedPath === options.outputPath) {
+      server.watcher.on('change', (changedPath) => {
+        if (changedPath !== options.outputPath) return
+
+        clearTimeout(schemaTimer)
+        schemaTimer = setTimeout(async () => {
           await generateInertiaTypes(options.outputPath, inertiaPath, apiName, options.typeImports)
-        }
+        }, 300)
       })
 
       // Re-fetch schema when PHP files change
@@ -94,6 +110,15 @@ async function generateInertiaTypes(
     ])
 
     const operations = parseOperations(schema)
+
+    // A schema without operations is a partial or failed write; keep the
+    // previous inertia.d.ts instead of replacing it with an empty one.
+    if (operations.size === 0) {
+      // eslint-disable-next-line no-console
+      console.warn('[type-generator] Schema has no operations, keeping existing types')
+      return
+    }
+
     const prefix = apiName + '.'
     const pages = new Map<string, string>()
     const requests = new Map<string, string>()

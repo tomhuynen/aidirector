@@ -7,12 +7,17 @@ use App\Http\Controllers\Public\Auth\ForgotPasswordController;
 use App\Http\Controllers\Public\Auth\LoginController;
 use App\Http\Controllers\Public\Auth\RegisterController;
 use App\Http\Controllers\Public\Auth\ResetPasswordController;
+use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
+use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
 use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
+use App\Http\Controllers\Public\Shots\Storyline\ChooseController as StorylineChooseController;
+use App\Http\Controllers\Public\Shots\Storyline\GenerateController as StorylineGenerateController;
+use App\Http\Controllers\Public\Shots\Storyline\SuggestController as StorylineSuggestController;
 use App\Http\Controllers\Public\Shots\UpdateController as ShotUpdateController;
 use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
 use Illuminate\Support\Facades\Route;
@@ -39,8 +44,9 @@ Route::middleware('auth:director')->group(function () {
         ->name('projects.')
         ->group(function () {
             Route::get('/', [ProjectIndexController::class, 'index'])->name('index');
-            Route::get('create', [ProjectUpdateController::class, 'update'])->name('create');
+            Route::get('create', [ProjectCreateController::class, 'view'])->name('create');
             Route::post('create', [ProjectUpdateController::class, 'store'])->name('store');
+            Route::post('create/chat', [ProjectChatController::class, 'store'])->name('chat');
             Route::get('{project}', [ProjectViewController::class, 'view'])->name('view');
             Route::get('{project}/update', [ProjectUpdateController::class, 'update'])->name('update');
             Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
@@ -55,6 +61,10 @@ Route::middleware('auth:director')->group(function () {
             Route::post('create', [ShotUpdateController::class, 'store'])->name('store');
             Route::post('reorder', [ShotReorderController::class, 'store'])->name('reorder');
             Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
+            Route::post('{shot}/storyline/suggest', [StorylineSuggestController::class, 'store'])->name('storyline.suggest');
+            Route::post('{shot}/storyline/choose', [StorylineChooseController::class, 'store'])->name('storyline.choose');
+            Route::post('{shot}/storyline/generate', [StorylineGenerateController::class, 'store'])->name('storyline.generate');
+            Route::delete('{shot}/storyline/choose', [StorylineChooseController::class, 'destroy'])->name('storyline.reopen');
             Route::get('{shot}/update', [ShotUpdateController::class, 'update'])->name('update');
             Route::post('{shot}/update', [ShotUpdateController::class, 'store']);
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');

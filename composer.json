@@ -35,6 +35,7 @@
         "red-explosion/laravel-sqids": "^2.1",
         "spatie/laravel-activitylog": "^4.10",
         "spatie/laravel-backup": "^10.1",
+        "spatie/laravel-medialibrary": "^11.23",
         "spatie/laravel-multitenancy": "^4.0",
         "spatie/laravel-notification-log": "^1.3",
         "spatie/laravel-passkeys": "^1.0",

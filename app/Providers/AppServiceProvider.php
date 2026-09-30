@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Models\Director;
+use App\Models\Generation;
+use App\Models\Keyframe;
+use App\Models\Media;
 use App\Models\PersonalAccessToken;
 use App\Models\Project;
 use App\Models\Shot;
@@ -78,6 +81,9 @@ class AppServiceProvider extends ServiceProvider
             'director' => Director::class,
             'project' => Project::class,
             'shot' => Shot::class,
+            'keyframe' => Keyframe::class,
+            'generation' => Generation::class,
+            'media' => Media::class,
         ]);
 
         Model::preventLazyLoading(! $this->app->isProduction());

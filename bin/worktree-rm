@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+#
+# Remove a git worktree created by ./bin/worktree, unlink it from Herd AND drop its MySQL databases.
+#
+# Usage:  ./bin/worktree-rm [branch-name] [--force]
+#
+#   ./bin/worktree-rm                              # lists worktrees, you pick one to remove
+#   ./bin/worktree-rm add-storyline-options        # confirms, then removes worktree + site + DBs
+#   ./bin/worktree-rm add-storyline-options --force # skip the prompt, force-remove a dirty worktree
+#
+# The git BRANCH is intentionally left alone (removing it could lose unpushed work).
+
+set -eo pipefail
+
+# --- Args ---------------------------------------------------------------------
+
+FORCE=""        # becomes "--force" if the user asks to skip the prompt / force removal.
+BRANCH_NAME=""  # the first non-flag argument we see (optional — omit it to pick from a list).
+
+# Loop over every argument so the flag can come before OR after the branch name.
+for arg in "$@"; do
+    case "$arg" in
+        -f|--force) FORCE="--force" ;;
+        *) [ -z "$BRANCH_NAME" ] && BRANCH_NAME="$arg" ;;
+    esac
+done
+
+# --- Where are we ------------------------------------------------------------
+
+SOURCE_DIR="$(pwd)"                          # the main repo you're running this from
+PROJECT_NAME="$(basename "$SOURCE_DIR")"     # e.g. "aidirector"
+PARENT_DIR="$(dirname "$SOURCE_DIR")"        # where the worktrees live (one level up)
+
+# Helper: derive WORKTREE_NAME / SLUG / DB_NAME from a worktree FOLDER path.
+# Folders are always "<project>--<slug>", so stripping "<project>--" gives the slug back.
+names_from_folder() {
+    WORKTREE_NAME="$(basename "$1")"             # e.g. aidirector--feature-add-storyline
+    SLUG="${WORKTREE_NAME#"${PROJECT_NAME}--"}"  # strip leading "aidirector--" -> feature-add-storyline
+    DB_NAME="${PROJECT_NAME}_${SLUG//-/_}"       # dashes -> underscores for MySQL
+}
+
+# --- Figure out which worktree to remove -------------------------------------
+
+if [ -n "$BRANCH_NAME" ]; then
+    # ----- You named a branch: compute the paths from it (same rules as ./bin/worktree) -----
+
+    case "$BRANCH_NAME" in
+        */*) ;;
+        *)   BRANCH_NAME="feature/${BRANCH_NAME}" ;;
+    esac
+
+    # Recreate the exact same slug the create script produced (lowercase, safe characters).
+    SLUG="$(printf '%s' "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9]+#-#g; s#^-+##; s#-+$##')"
+
+    # ...and apply the SAME length cap + hash suffix as ./bin/worktree, or long branch names would
+    # derive a folder/DB that never existed and this script would silently remove nothing.
+    # Keep this block in sync with ./bin/worktree.
+    MAX_SLUG=$(( 36 - ${#PROJECT_NAME} ))
+    if [ "${#SLUG}" -gt "$MAX_SLUG" ]; then
+        HASH="$(printf '%s' "$BRANCH_NAME" | shasum | cut -c1-4)"
+        SLUG="$(printf '%s' "${SLUG:0:$(( MAX_SLUG - 5 ))}" | sed -E 's#-+$##')-${HASH}"
+    fi
+
+    WORKTREE_NAME="${PROJECT_NAME}--${SLUG}"
+    WORKTREE_PATH="${PARENT_DIR}/${WORKTREE_NAME}"
+    DB_NAME="${PROJECT_NAME}_${SLUG//-/_}"
+else
+    # ----- No branch given: list the other worktrees and let you pick one -----
+
+    wt_paths=()      # full paths to selectable worktrees
+    wt_branches=()   # branch checked out in each (for display + the delete hint)
+    cur_path=""; cur_branch=""; first=1
+
+    add_record() {
+        [ -z "$cur_path" ] && return                          # ignore empty records
+        if [ "$first" = 1 ]; then first=0; return; fi         # the main worktree is listed first -> skip it
+        [ "$cur_path" = "$SOURCE_DIR" ] && return             # never offer the worktree you're standing in
+        wt_paths+=("$cur_path")
+        wt_branches+=("$cur_branch")
+    }
+
+    # Parse `git worktree list --porcelain`, one record per worktree, records split by blank lines.
+    # `< <(...)` (process substitution) feeds the output in WITHOUT a subshell, so the arrays persist.
+    while IFS= read -r line; do
+        case "$line" in
+            "worktree "*) cur_path="${line#worktree }" ;;
+            "branch "*)   cur_branch="${line#branch refs/heads/}" ;;
+            "detached")   cur_branch="(detached)" ;;
+            "")           add_record; cur_path=""; cur_branch="" ;;
+        esac
+    done < <(git worktree list --porcelain)
+    add_record   # flush the last record in case there was no trailing blank line
+
+    if [ "${#wt_paths[@]}" -eq 0 ]; then
+        echo "No worktrees to remove."
+        exit 0
+    fi
+
+    labels=()
+    for i in "${!wt_paths[@]}"; do
+        labels+=("${wt_branches[$i]}  —  $(basename "${wt_paths[$i]}")")
+    done
+
+    # `select` prints a numbered menu and loops until we `break`.
+    echo "Select a worktree to remove:"
+    select label in "${labels[@]}"; do
+        if [ -n "$label" ]; then
+            idx=$((REPLY - 1))
+            WORKTREE_PATH="${wt_paths[$idx]}"
+            BRANCH_NAME="${wt_branches[$idx]}"
+            names_from_folder "$WORKTREE_PATH"
+            break
+        fi
+        echo "Invalid selection, try again."
+    done
+fi
+
+# If nothing got selected (e.g. you pressed Ctrl-D at the menu), stop before doing any damage.
+if [ -z "$WORKTREE_PATH" ]; then
+    echo "No worktree selected. Aborting."
+    exit 1
+fi
+
+# --- Confirm (unless --force) -------------------------------------------------
+
+echo "About to remove:"
+echo "  Worktree:  ${WORKTREE_PATH}"
+echo "  Herd site: ${WORKTREE_NAME}.test"
+echo "  Databases: ${DB_NAME} (+ its tenant DBs, its -testing DB and parallel _test_* DBs)"
+echo "  Branch:    ${BRANCH_NAME} (kept — delete manually if you want it gone)"
+
+if [ -z "$FORCE" ]; then
+    read -r -p "Continue? [y/N] " REPLY
+    case "$REPLY" in
+        y|Y|yes|YES) ;;
+        *) echo "Aborted."; exit 0 ;;
+    esac
+fi
+
+# --- Decide how to remove (the dirty check happens BEFORE anything is touched) --
+#
+# `git worktree remove` refuses a worktree with modified or untracked files (ignored files such
+# as .env, node_modules or the generated phpunit.xml are fine). Ask about that NOW, so the Herd
+# unlink below never runs for a worktree you then decide to keep. (Commits on the branch are kept.)
+REMOVE_FORCE=""
+if [ -d "$WORKTREE_PATH" ]; then
+    if [ -n "$FORCE" ]; then
+        REMOVE_FORCE="--force"
+    elif [ -n "$(git -C "$WORKTREE_PATH" status --porcelain 2>/dev/null)" ]; then
+        echo "Worktree has uncommitted or untracked changes:"
+        git -C "$WORKTREE_PATH" status --short
+        read -r -p "Force-remove and discard these changes? [y/N] " REPLY
+        case "$REPLY" in
+            y|Y|yes|YES) REMOVE_FORCE="--force" ;;
+            *) echo "Aborted — worktree, Herd site and databases left untouched."; exit 1 ;;
+        esac
+    fi
+fi
+
+# --- Unlink the site from Herd (BEFORE the folder disappears) -----------------
+#
+# ./bin/worktree linked the site (isolating PHP/Node, and securing it when the main site is
+# secured). `herd unlink` undoes the link AND the PHP isolation itself — but only while the
+# folder still exists: once the symlink dangles, Herd drops the site from its list and every
+# site-scoped command fails with "could not be found in Valet's site list", leaving a stale
+# isolation entry behind. So unlink first; if the folder was already deleted by hand, recreate
+# an empty one just long enough for Herd to find the site. Non-fatal: a missing site is fine.
+
+if command -v herd >/dev/null 2>&1; then
+    # Herd keeps its symlinks in the first parked path it reports (…/Herd/config/valet/Sites).
+    HERD_SITES_DIR="$(herd paths 2>/dev/null | grep -oE '"[^"]*/Herd/config/valet/Sites"' | head -n1 | tr -d '"')"
+    HERD_SITES_DIR="${HERD_SITES_DIR:-$HOME/Library/Application Support/Herd/config/valet/Sites}"
+
+    if [ -L "${HERD_SITES_DIR}/${WORKTREE_NAME}" ]; then
+        echo "Unlinking ${WORKTREE_NAME}.test from Herd..."
+        RECREATED_DIR=0
+        if [ ! -d "$WORKTREE_PATH" ]; then
+            mkdir -p "$WORKTREE_PATH"
+            RECREATED_DIR=1
+        fi
+        if herd secured 2>/dev/null | grep -qF "| ${WORKTREE_NAME}.test "; then
+            herd unsecure "$WORKTREE_NAME" >/dev/null 2>&1 || echo "  Warning: herd unsecure failed."
+        fi
+        if herd isolated-node 2>/dev/null | grep -qF "| ${WORKTREE_PATH} "; then
+            herd unisolate-node --site="$WORKTREE_NAME" >/dev/null 2>&1 || echo "  Warning: herd unisolate-node failed."
+            # `herd unisolate-node` DELETES the tracked .nvmrc, which would make git refuse the
+            # removal below as "modified or untracked files". Put it back; the folder goes anyway.
+            [ "$RECREATED_DIR" -eq 0 ] && git -C "$WORKTREE_PATH" checkout --quiet -- .nvmrc 2>/dev/null || true
+        fi
+        herd unlink "$WORKTREE_NAME" >/dev/null 2>&1 || echo "  Warning: herd unlink failed; run 'herd unlink ${WORKTREE_NAME}' yourself."
+        [ "$RECREATED_DIR" -eq 1 ] && rmdir "$WORKTREE_PATH" 2>/dev/null
+    else
+        echo "Note: ${WORKTREE_NAME} is not linked in Herd; nothing to unlink."
+    fi
+fi
+
+# --- Remove the worktree (BEFORE dropping the DB) -----------------------------
+
+if [ -d "$WORKTREE_PATH" ]; then
+    echo "Removing worktree: ${WORKTREE_PATH}"
+    # shellcheck disable=SC2086 — $REMOVE_FORCE is intentionally empty or "--force".
+    git worktree remove $REMOVE_FORCE "$WORKTREE_PATH"
+else
+    echo "Worktree folder already gone; cleaning up git's records."
+    git worktree prune
+fi
+
+# --- Drop the databases -------------------------------------------------------
+
+# Read DB connection settings from the MAIN repo's .env (always present, same creds for every worktree).
+ENV_FILE="$SOURCE_DIR/.env"
+env_get() { grep -E "^$1=" "$ENV_FILE" | head -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' || true; }
+
+DB_HOST="$(env_get DB_HOST)"; DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_PORT="$(env_get DB_PORT)"; DB_PORT="${DB_PORT:-3306}"
+DB_USER="$(env_get DB_USERNAME)"; DB_USER="${DB_USER:-root}"
+DB_PASS="$(env_get DB_PASSWORD)"
+
+mysql_opts=(--host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER")
+[ -n "$DB_PASS" ] && mysql_opts+=(--password="$DB_PASS")
+
+# Drop the landlord DB AND everything derived from it. The app names every derived database
+# "<landlord>-<something>" (Tenant::getDatabaseName uses a dash), so one prefix covers:
+#   <db>                        the landlord (dev) database
+#   <db>-<tenant>               each tenant's database (e.g. <db>-root)
+#   <db>-testing                the test landlord database (generated phpunit.xml)
+#   <db>-testing_test_<n>       paratest's per-worker landlord DBs (`php artisan test --parallel`)
+#   <db>-testing…-testing-<n>   the tenant databases the test suite creates
+# Slugs only ever contain underscores, so "<db>-" can never be the start of ANOTHER worktree's
+# landlord DB. We list the server's databases and match in bash — NOT a SQL `LIKE`, whose "_"
+# is a single-char wildcard that would over-match our underscore-heavy names.
+echo "Dropping databases for ${DB_NAME}:"
+DROP_SQL=""
+while IFS= read -r d; do
+    case "$d" in
+        "$DB_NAME"|"${DB_NAME}-"*)
+            echo "  - ${d}"
+            DROP_SQL+="DROP DATABASE IF EXISTS \`${d}\`; "
+            ;;
+    esac
+done < <(mysql "${mysql_opts[@]}" -N -B -e "SHOW DATABASES;")
+if [ -n "$DROP_SQL" ]; then
+    mysql "${mysql_opts[@]}" -e "$DROP_SQL"
+else
+    echo "  (none found)"
+fi
+
+# --- Done ---------------------------------------------------------------------
+
+echo ""
+echo "✓ Removed worktree, Herd site and databases for ${BRANCH_NAME}"
+echo "  To delete the branch too: git branch -D ${BRANCH_NAME}"

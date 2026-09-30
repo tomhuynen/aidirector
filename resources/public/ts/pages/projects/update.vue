@@ -111,6 +111,20 @@
             <Link :href="project.links?.view ?? index.url()">{{ $t('Cancel') }}</Link>
           </Button>
         </div>
+
+        <ConfirmDelete
+          v-if="project.id && project.can.destroy"
+          :action="project.links?.destroy ?? '#'"
+          :title="$t('Delete this project?')"
+          :description="$t('All shots in this project are deleted with it. This cannot be undone.')"
+        >
+          <template #trigger>
+            <Button type="button" variant="ghost" class="text-destructive hover:text-destructive">
+              <Trash2 class="size-4" />
+              {{ $t('Delete project') }}
+            </Button>
+          </template>
+        </ConfirmDelete>
       </aside>
     </form>
   </Page>
@@ -120,6 +134,7 @@ import { Link, useForm } from '@inertiajs/vue3'
 import AppLayout from '@public/ts/layouts/App.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
+import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import FormInput from '@public:components/Form/Input.vue'
 import InputError from '@public:components/Form/InputError.vue'
 import FormSelect from '@public:components/Form/Select.vue'
@@ -128,7 +143,7 @@ import Page from '@public:components/Page.vue'
 import SectionHeading from '@public:components/SectionHeading.vue'
 import { index, store } from '@routes/public/projects'
 import { Button } from '@shared:ui/button'
-import { LoaderCircle } from 'lucide-vue-next'
+import { LoaderCircle, Trash2 } from 'lucide-vue-next'
 
 defineOptions({
   layout: AppLayout,

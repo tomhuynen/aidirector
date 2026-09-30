@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots;
 
-use App\Enums\AspectRatio;
-use App\Enums\ProjectPurpose;
+use App\Enums\ShotStatus;
 use App\Http\Requests\Public\ShotRequest;
 use App\Http\Resources\Public\ProjectResource;
+use App\Http\Resources\Public\ShotListItemResource;
 use App\Http\Resources\Public\ShotResource;
+use App\Jobs\GenerateStorylineOptions;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
@@ -26,16 +27,9 @@ class UpdateController
         return Inertia::render('shots/update', [
             'project' => fn() => ProjectResource::make($project),
             'shot' => fn() => ShotResource::make($shot),
-            /** @var array<int, array{value: string, label: string}> */
-            'purposes' => fn() => ProjectPurpose::collect()->map(fn(ProjectPurpose $purpose) => [
-                'value' => $purpose->value,
-                'label' => $purpose->description(),
-            ])->all(),
-            /** @var array<int, array{value: string, label: string}> */
-            'aspectRatios' => fn() => AspectRatio::collect()->map(fn(AspectRatio $ratio) => [
-                'value' => $ratio->value,
-                'label' => $ratio->description(),
-            ])->all(),
+            'siblings' => fn() => ShotListItemResource::collection(
+                $project->shots()->with('project')->withCount('keyframes')->get()
+            ),
         ]);
     }
 
@@ -49,7 +43,13 @@ class UpdateController
         }
 
         $shot->fill($request->shotAttributes());
+        $shot->status = ShotStatus::OPTIONS_PENDING;
+        $shot->storyline_options = null;
+        $shot->chosen_storyline = null;
+        $shot->storyline_error = null;
         $shot->save();
+
+        GenerateStorylineOptions::dispatch($shot);
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

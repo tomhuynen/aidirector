@@ -38,12 +38,24 @@ class ShotResource extends JsonResource
             'aspectRatioOverride' => $this->aspect_ratio_override,
             /** @var int|null */
             'duration' => $this->duration,
+            /** @var array<int, array{title: string, storyline: string}>|null */
+            'storylineOptions' => $this->storyline_options,
+            /** @var array{title: string, storyline: string}|null */
+            'chosenStoryline' => $this->chosen_storyline,
+            /** @var array{keyframes: array<int, array{title: string, description: string}>}|null */
+            'storyline' => $this->storyline,
+            /** @var string|null */
+            'storylineError' => $this->storyline_error,
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,
             'links' => $this->when($this->resource->exists, fn() => [
                 'view' => route('public.shots.view', [$this->project, $this->resource]),
                 'update' => route('public.shots.update', [$this->project, $this->resource]),
                 'destroy' => route('public.shots.destroy', [$this->project, $this->resource]),
+                'storylineSuggest' => route('public.shots.storyline.suggest', [$this->project, $this->resource]),
+                'storylineChoose' => route('public.shots.storyline.choose', [$this->project, $this->resource]),
+                'storylineGenerate' => route('public.shots.storyline.generate', [$this->project, $this->resource]),
+                'storylineReopen' => route('public.shots.storyline.reopen', [$this->project, $this->resource]),
             ]),
             /** @var array<string, bool> */
             'can' => $this->when(! is_null($request->user()), fn() => $this->authorizations($request, ShotPolicy::abilities(ShotPolicy::CREATE)), []),

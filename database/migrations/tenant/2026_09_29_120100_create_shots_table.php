@@ -23,6 +23,10 @@ return new class extends Migration {
             $table->string('aspect_ratio_override', 8)->nullable();
             $table->unsignedSmallInteger('duration')->nullable();
             $table->unsignedBigInteger('chosen_option_id')->nullable();
+            $table->json('storyline_options')->nullable();
+            $table->json('chosen_storyline')->nullable();
+            $table->json('storyline')->nullable();
+            $table->text('storyline_error')->nullable();
             $table->timestamps();
 
             $table->index(['project_id', 'position']);

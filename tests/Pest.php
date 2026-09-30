@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 use Tests\TenantTestCase;
 use Tests\TestCase;
 
@@ -21,6 +22,8 @@ pest()
     ->in('Feature')
     ->beforeEach(function () {
         Config::set('scope-groups.enabled', false);
+
+        Http::preventStrayRequests();
 
         $this->withoutVite();
     });

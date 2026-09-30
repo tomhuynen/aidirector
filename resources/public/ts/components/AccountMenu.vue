@@ -1,10 +1,13 @@
 <template>
   <DropdownMenu>
     <DropdownMenuTrigger as-child>
-      <Button variant="ghost" size="sm" class="gap-2 font-normal">
-        <span class="hidden sm:inline">{{ account.name }}</span>
-        <ChevronDown class="size-4 text-muted-foreground" />
-      </Button>
+      <button
+        type="button"
+        class="flex size-9 items-center justify-center rounded-full bg-signal text-sm font-semibold text-primary-foreground ring-offset-background outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        :aria-label="account.name"
+      >
+        {{ initials }}
+      </button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" class="w-56">
       <DropdownMenuLabel class="font-normal">
@@ -26,7 +29,6 @@
 import { Link } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import type { Account } from '@public:types/shared'
-import { Button } from '@shared:ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,9 +37,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@shared:ui/dropdown-menu'
-import { ChevronDown } from 'lucide-vue-next'
+import { computed } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   account: Account
 }>()
+
+const initials = computed(() =>
+  props.account.name
+    .split(' ')
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase(),
+)
 </script>

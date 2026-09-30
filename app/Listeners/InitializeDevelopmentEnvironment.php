@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Listeners;
 
+use App\Models\Director;
 use App\Models\Tenant;
 use App\Models\User;
 use GuzzleHttp\Psr7\Uri;
@@ -24,6 +25,11 @@ class InitializeDevelopmentEnvironment
     public function handle(MigrationsEnded $event)
     {
         if (! App::isLocal()) {
+            return;
+        }
+
+        // Only after migrating up: a rollback may already have dropped the tenant databases.
+        if ($event->method !== 'up') {
             return;
         }
 
@@ -49,6 +55,25 @@ class InitializeDevelopmentEnvironment
         ]);
 
         $user->assignRole('admin', 'tech-admin', 'user');
+
+        $this->createDirector($tenant, $user);
+    }
+
+    /**
+     * Give the public app a login as well: a director in the Root tenant's
+     * database with the same email and password as the landlord user.
+     */
+    private function createDirector(Tenant $tenant, User $user): void
+    {
+        $tenant->execute(function () use ($user) {
+            Director::firstOrCreate([
+                'email' => $user->email,
+            ], [
+                'name' => $user->name,
+                'password' => 'aabbccdd',
+                'email_verified_at' => now(),
+            ]);
+        });
     }
 
     private function getGitConfig(string $key)

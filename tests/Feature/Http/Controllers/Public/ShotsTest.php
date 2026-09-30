@@ -3,13 +3,17 @@
 declare(strict_types=1);
 
 use App\Enums\ShotStatus;
+use App\Jobs\GenerateStorylineOptions;
 use App\Models\Director;
 use App\Models\Project;
 use App\Models\Shot;
+use Illuminate\Support\Facades\Queue;
 
 use function Pest\Laravel\actingAs;
 
 beforeEach(function () {
+    Queue::fake();
+
     $this->director = Director::factory()->create();
     $this->project = Project::factory()->ownedBy($this->director)->create();
 });
@@ -40,7 +44,9 @@ describe('create', function () {
         $response->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
         expect($shot->position)->toBe(2)
-            ->and($shot->status)->toBe(ShotStatus::DRAFT);
+            ->and($shot->status)->toBe(ShotStatus::OPTIONS_PENDING);
+
+        Queue::assertPushed(GenerateStorylineOptions::class, fn(GenerateStorylineOptions $job) => $job->shot->is($shot));
     });
 
     it('validates the structured intent', function (array $overrides, string $field) {
@@ -74,7 +80,7 @@ describe('view and update', function () {
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shots->first()]))
             ->assertSuccessful()
-            ->assertInertia(fn($page) => $page->component('shots/view')->has('siblings', 3));
+            ->assertInertia(fn($page) => $page->component('shots/view')->has('siblings', 3)->where('siblings.0.duration', 5));
     });
 
     it('updates an owned shot', function () {

@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+#
+# Create a new git worktree for this Laravel app and fully configure it.
+#
+# Usage:  ./bin/worktree <branch-name>
+#         ./bin/worktree Add storyline options   # -> feature/add-storyline-options
+#
+# - If origin already has a branch with the same name (case-insensitive), that branch is checked
+#   out under its exact remote name instead of creating a new one.
+# - Otherwise the worktree is created at ../<project>--<slug>, branched from origin/develop.
+# - Copies the gitignored .env (MySQL creds + APP_KEY) in and repoints it at this worktree.
+# - Gives the worktree its own landlord MySQL database (tenant databases derive from it), its own
+#   test database, its own Redis/Horizon namespace and its own Herd .test domain (the parent
+#   folder is not parked in Herd, so the site is linked and isolated like the main site).
+# - Installs dependencies, migrates + seeds, and builds both frontends (public + admin).
+
+# `set -e`        -> exit immediately if any command returns a non-zero (error) status.
+# `set -o pipefail` -> in a pipeline (a | b | c), fail if ANY part fails, not just the last.
+set -eo pipefail
+
+# --- Args ---------------------------------------------------------------------
+
+if [ -z "$1" ]; then
+    echo "Error: Branch name is required"
+    echo "Usage: ./bin/worktree <branch-name>"
+    exit 1
+fi
+
+# Capture EVERY argument as the branch name, so a name pasted with spaces survives in full.
+# Lowercase everything so the branch, folder, URL and DB all share one casing, collapse
+# whitespace into dashes (git branch names can't contain spaces) and strip leading/trailing dashes.
+BRANCH_NAME="$(printf '%s' "$*" | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+/-/g; s/^-+//; s/-+$//')"
+
+# Default to a feature/ branch so you don't have to type the prefix every time.
+# "bugfix/foo" (already namespaced) is left alone.
+case "$BRANCH_NAME" in
+    */*) ;;
+    *)   BRANCH_NAME="feature/${BRANCH_NAME}" ;;
+esac
+
+# --- Reuse an existing remote branch with the same name -----------------------
+#
+# `git ls-remote --heads origin` asks the remote directly for its branch list (no fetch needed).
+# If a branch with the same name exists on origin (ignoring case), adopt its exact spelling so the
+# worktree checks out the pushed work instead of forking a same-named branch off develop.
+# `|| true` stops `set -e` aborting when there is no match (or we're offline).
+IS_REMOTE_MATCH=0
+REMOTE_MATCH="$(git ls-remote --heads origin 2>/dev/null \
+    | sed -E 's#^[0-9a-f]+[[:space:]]+refs/heads/##' \
+    | grep -ixF "$BRANCH_NAME" || true)"
+if [ "$(printf '%s' "$REMOTE_MATCH" | grep -c . || true)" -eq 1 ]; then
+    BRANCH_NAME="$REMOTE_MATCH"
+    IS_REMOTE_MATCH=1
+    echo "Found existing remote branch '${BRANCH_NAME}'; checking it out instead of creating a new branch."
+fi
+
+# --- Paths & names ------------------------------------------------------------
+
+SOURCE_DIR="$(pwd)"                        # the main repo you're running this from
+PROJECT_NAME="$(basename "$SOURCE_DIR")"   # e.g. "aidirector"
+PARENT_DIR="$(dirname "$SOURCE_DIR")"      # where the sibling worktree goes
+
+# Turn the branch name into a safe slug for folders, URLs and database names.
+# Example: "feature/Add_Storyline" becomes "feature-add-storyline".
+SLUG="$(printf '%s' "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9]+#-#g; s#^-+##; s#-+$##')"
+
+# Keep the folder/URL/DBs within hard length limits — WITHOUT shortening the git branch.
+# Limits: a hostname label (the bit before ".test") maxes at 63 chars, MySQL identifiers at 64.
+# The TIGHTEST bound is a tenant database of a parallel test worker. Tenant databases are named
+# "<landlord>-<tenant-slug>" (see Tenant::getDatabaseName). The test landlord DB is
+# "<db>-testing"; `php artisan test --parallel` renames it "<db>-testing_test_<token>" and the
+# test suite then creates tenant "Testing-<token>" -> "<db>-testing_test_NN-testing-NN".
+# That is len(db) + 27, so len(db) <= 37; db = "<project>_<slug>" -> slug <= 36 - len(project).
+MAX_SLUG=$(( 36 - ${#PROJECT_NAME} ))
+if [ "${#SLUG}" -gt "$MAX_SLUG" ]; then
+    # Trim the slug, but append a short hash of the branch name so two long branches that share a
+    # prefix don't collapse onto the same folder/URL/DB. The 5-char suffix is "-" + 4 hex digits.
+    HASH="$(printf '%s' "$BRANCH_NAME" | shasum | cut -c1-4)"
+    SLUG="$(printf '%s' "${SLUG:0:$(( MAX_SLUG - 5 ))}" | sed -E 's#-+$##')-${HASH}"
+    echo "Note: branch name is long; shortened the folder/URL/DB slug to '${SLUG}' (the git branch keeps its full name)."
+fi
+
+# The worktree folder name, e.g. "aidirector--feature-add-storyline". Also the Herd site name.
+WORKTREE_NAME="${PROJECT_NAME}--${SLUG}"
+WORKTREE_PATH="${PARENT_DIR}/${WORKTREE_NAME}"
+
+# MySQL database names: the landlord DB for this worktree. MySQL identifiers can't sensibly
+# contain dashes, so `${SLUG//-/_}` replaces every "-" with "_". Tenant DBs derive from it as
+# "<landlord>-<tenant-slug>" (the app uses a dash there; MySQL allows it in backticks).
+DB_NAME="${PROJECT_NAME}_${SLUG//-/_}"
+
+# A SEPARATE landlord database for the test suite. RefreshMultitenantDatabase runs migrate:fresh
+# on the landlord connection, which DROPS every table — so it MUST point at its own DB, never the
+# dev DB above. Same "-testing" suffix convention as phpunit.xml.dist ("blueprint-testing").
+TEST_DB_NAME="${DB_NAME}-testing"
+
+# --- Pre-flight checks --------------------------------------------------------
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: not inside a git repository"; exit 1; }
+
+# .env is gitignored, so a fresh worktree won't have one — bail early if the source lacks it.
+[ -f "$SOURCE_DIR/.env" ] || { echo "Error: $SOURCE_DIR/.env not found"; exit 1; }
+
+# Refuse to clobber an existing folder.
+[ -e "$WORKTREE_PATH" ] && { echo "Error: $WORKTREE_PATH already exists"; exit 1; }
+
+command -v mysql >/dev/null 2>&1 || { echo "Error: mysql client not found in PATH"; exit 1; }
+command -v pnpm  >/dev/null 2>&1 || { echo "Error: pnpm not found in PATH"; exit 1; }
+
+# Herd serves this project as a LINKED site (~/Sites/vagebond is not a parked path), so the
+# worktree must be linked too. Without the herd CLI we can still build the worktree, it just
+# won't have a .test domain until you link it yourself.
+HAS_HERD=0
+command -v herd >/dev/null 2>&1 && HAS_HERD=1
+
+# Helper to read a value out of an env file. $1 = key, $2 = file (default .env in cwd).
+# `cut -d= -f2-` takes everything after the first "=", `sed` strips surrounding double-quotes.
+env_get() { grep -E "^$1=" "${2:-.env}" | head -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' || true; }
+
+# The main site's host (e.g. "aidirector.test"), used to mirror its Herd settings below.
+SOURCE_URL="$(env_get APP_URL "$SOURCE_DIR/.env")"
+SOURCE_HOST="$(printf '%s' "$SOURCE_URL" | sed -E 's#^[a-z]+://##; s#/.*$##')"
+
+# --- Mirror the main site's Herd settings -------------------------------------
+#
+# The main site is isolated to a specific PHP (and Node) version and may be secured (https).
+# Detect those up front so the worktree gets the same treatment and the same URL scheme.
+SITE_PHP=""; SITE_NODE=""; SITE_SECURED=0
+if [ "$HAS_HERD" -eq 1 ]; then
+    # `herd isolated` prints "| <host> | <php> |" rows; pick the one for the main host.
+    SITE_PHP="$(herd isolated 2>/dev/null | grep -F "| ${SOURCE_HOST} " | awk -F'|' '{gsub(/ /, "", $3); print $3}' || true)"
+    # `herd isolated-node` prints "| <path> | <node> |" rows, keyed by directory.
+    SITE_NODE="$(herd isolated-node 2>/dev/null | grep -F "| ${SOURCE_DIR} " | awk -F'|' '{gsub(/ /, "", $3); print $3}' || true)"
+    herd secured 2>/dev/null | grep -qF "| ${SOURCE_HOST} " && SITE_SECURED=1
+fi
+SCHEME="http"; [ "$SITE_SECURED" -eq 1 ] && SCHEME="https"
+APP_URL="${SCHEME}://${WORKTREE_NAME}.test"
+
+# --- Create the worktree from develop -----------------------------------------
+
+echo "Fetching latest origin/develop..."
+git fetch origin develop || echo "Warning: fetch failed, using local origin/develop ref"
+
+# Also fetch the branch itself, so a branch that only exists on origin gets a local
+# origin/<branch> ref to check out from. The explicit refspec writes that tracking ref no matter
+# how remote.origin.fetch is configured. When the branch was picked from origin above, the fetch
+# MUST succeed or we'd create a same-named branch off develop; otherwise a failed fetch just
+# means the branch is new (or we're offline). IS_REMOTE_BRANCH_FETCHED records whether THIS run
+# confirmed the branch on origin, so a stale refs/remotes/origin/<name> never gets used.
+BRANCH_REFSPEC="+refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}"
+IS_REMOTE_BRANCH_FETCHED=0
+if [ "$IS_REMOTE_MATCH" -eq 1 ]; then
+    git fetch origin "$BRANCH_REFSPEC" || { echo "Error: could not fetch '${BRANCH_NAME}' from origin"; exit 1; }
+    IS_REMOTE_BRANCH_FETCHED=1
+elif git fetch origin "$BRANCH_REFSPEC" >/dev/null 2>&1; then
+    IS_REMOTE_BRANCH_FETCHED=1
+fi
+
+# Drop stale worktree records (e.g. a folder that was deleted by hand, not via git worktree remove).
+git worktree prune
+
+echo "Creating worktree: ${WORKTREE_NAME}"
+if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
+    echo "Branch '${BRANCH_NAME}' already exists, checking it out."
+    git worktree add "$WORKTREE_PATH" "$BRANCH_NAME"
+elif [ "$IS_REMOTE_BRANCH_FETCHED" -eq 1 ]; then
+    echo "Branch '${BRANCH_NAME}' exists on origin, checking it out."
+    # `--track` sets the upstream to the remote branch right away, so it starts on the pushed work.
+    git worktree add --track -b "$BRANCH_NAME" "$WORKTREE_PATH" "origin/${BRANCH_NAME}"
+else
+    git worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" origin/develop
+fi
+
+# --- Publish the branch so its upstream is itself, never develop ---------------
+#
+# Creating a branch FROM origin/develop makes git set its upstream to origin/develop. Until the
+# first `git push -u`, pull/status compare against develop and a bare push could land feature
+# commits on develop. Publishing to ITS OWN name right away rebinds the upstream. If the push
+# fails (offline, no permission), warn and continue: run `git push -u origin HEAD` yourself.
+echo "Publishing branch '${BRANCH_NAME}' to origin (sets upstream to itself, not develop)..."
+git push -u origin "$BRANCH_NAME" \
+    || echo "Warning: could not publish '${BRANCH_NAME}'; run 'git push -u origin HEAD' in the worktree before using a bare 'git push'."
+
+# Move into the new worktree; every command after this runs there.
+cd "$WORKTREE_PATH"
+
+# --- Link the worktree in Herd ------------------------------------------------
+#
+# Link first, so `herd php` / `herd composer` below already run under the isolated PHP version
+# (Herd resolves the site from the working directory).
+if [ "$HAS_HERD" -eq 1 ]; then
+    echo "Linking ${WORKTREE_NAME}.test in Herd..."
+    herd_link_opts=()
+    [ -n "$SITE_PHP" ] && herd_link_opts+=(--isolate="$SITE_PHP")
+    [ "$SITE_SECURED" -eq 1 ] && herd_link_opts+=(--secure)
+    herd link "${herd_link_opts[@]}" "$WORKTREE_NAME" \
+        || echo "Warning: herd link failed; link the site yourself with 'herd link' in the worktree."
+    if [ -n "$SITE_NODE" ]; then
+        herd isolate-node "$SITE_NODE" >/dev/null \
+            || echo "Warning: could not isolate Node ${SITE_NODE} for this worktree."
+        # `herd isolate-node` also rewrites the TRACKED .nvmrc, which would leave the fresh
+        # worktree dirty (and risk a stray .nvmrc change in your first commit). The isolation is
+        # registered by path in Herd's own config, so restoring the file loses nothing.
+        git checkout --quiet -- .nvmrc 2>/dev/null || true
+    fi
+    PHP_CMD=(herd php)
+    COMPOSER_CMD=(herd composer)
+else
+    echo "Note: herd CLI not found; skipping Herd link (no ${WORKTREE_NAME}.test domain)."
+    PHP_CMD=(php)
+    COMPOSER_CMD=(composer)
+fi
+
+# --- Copy gitignored files the worktree needs ---------------------------------
+
+echo "Copying .env..."
+# The real MySQL .env (correct credentials + APP_KEY) — the .env.example defaults are for Blueprint.
+cp "$SOURCE_DIR/.env" .env
+
+# --- Point this worktree at its own DB and URL --------------------------------
+
+# A small helper to set a key in an env file. $1 = file, $2 = key, $3 = value.
+set_env() {
+    local file="$1" key="$2" val="$3"
+    if grep -qE "^${key}=" "$file"; then
+        # `sed -i ''` edits the file in place (macOS needs the ''); `#` delimiter so URLs need no escaping.
+        sed -i '' -E "s#^${key}=.*#${key}=${val}#" "$file"
+    else
+        printf '%s=%s\n' "$key" "$val" >>"$file"
+    fi
+}
+
+# Own landlord database and own URL. Tenant databases derive from DB_DATABASE, the Root tenant's
+# domain (created by InitializeDevelopmentEnvironment on migrate) derives from APP_URL, and
+# VITE_APP_URL in .env expands "${APP_URL}" so the Vite dev server follows automatically.
+set_env .env DB_DATABASE "$DB_NAME"
+set_env .env APP_URL "$APP_URL"
+
+# --- Give this worktree its own Redis namespace -------------------------------
+#
+# Cache and sessions are SQLite files inside the worktree, so they are isolated already. The
+# QUEUE (and Horizon) run on the SAME Redis server for every worktree, and both prefixes default
+# to a value derived only from APP_NAME (config/database.php + config/horizon.php) — identical
+# in every worktree. A Horizon worker in worktree B would then pop a job enqueued by worktree A
+# and load its model IDs against B's OWN databases -> ModelNotFoundException. Namespacing Redis
+# per worktree (reusing the already-unique DB name as the token) keeps each queue separate.
+set_env .env REDIS_PREFIX "${DB_NAME}_database_"
+set_env .env HORIZON_PREFIX "${DB_NAME}_horizon:"
+
+# --- Give the test suite its own isolated database ----------------------------
+#
+# phpunit.xml.dist pins DB_DATABASE for the test suite, and `php artisan test` deliberately
+# clears the .env values before launching PHPUnit, so neither .env nor .env.testing can override
+# it. PHPUnit prefers phpunit.xml over phpunit.xml.dist, so we generate a gitignored phpunit.xml
+# from the dist file with only the test DB swapped. Keep it in sync by re-running this step if
+# phpunit.xml.dist changes (delete phpunit.xml to fall back to the shared dist config).
+if [ -f phpunit.xml.dist ]; then
+    echo "Generating phpunit.xml with test database ${TEST_DB_NAME}..."
+    sed -E "s#(<env name=\"DB_DATABASE\" value=\")[^\"]*#\1${TEST_DB_NAME}#" phpunit.xml.dist >phpunit.xml
+else
+    echo "Warning: phpunit.xml.dist not found on this branch; the test suite will use the SHARED test database from phpunit.xml."
+fi
+
+# --- Create the per-worktree MySQL databases ----------------------------------
+
+DB_HOST="$(env_get DB_HOST)"; DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_PORT="$(env_get DB_PORT)"; DB_PORT="${DB_PORT:-3306}"
+DB_USER="$(env_get DB_USERNAME)"; DB_USER="${DB_USER:-root}"
+DB_PASS="$(env_get DB_PASSWORD)"   # may legitimately be empty on a local machine
+
+echo "Creating databases: ${DB_NAME} (landlord) and ${TEST_DB_NAME} (test landlord)"
+# Build the mysql arguments as an array so values with special chars stay intact.
+# `--host` forces TCP: Herd's MySQL has no /tmp/mysql.sock, so a bare `mysql` can't connect.
+mysql_opts=(--host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER")
+[ -n "$DB_PASS" ] && mysql_opts+=(--password="$DB_PASS")
+# Tenant databases are created by the app itself (PrepareNewTenant) as tenants get created.
+mysql "${mysql_opts[@]}" -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE IF NOT EXISTS \`${TEST_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+# --- Install & migrate --------------------------------------------------------
+
+echo "Running composer install..."
+# Composer credentials for satis.inertiaui.com live in the global ~/.composer/auth.json.
+# Must run BEFORE pnpm install: package.json links @inertiaui/table-vue from vendor/.
+"${COMPOSER_CMD[@]}" install
+
+echo "Running pnpm install..."
+# `--frozen-lockfile` installs exactly what's pinned and never rewrites pnpm-lock.yaml, so the
+# fresh worktree stays clean. The `prepare` script runs husky, which creates the .husky/_ hook
+# shims that core.hooksPath (in the SHARED .git/config) points at.
+pnpm install --frozen-lockfile
+# Belt and braces: without .husky/_ git silently runs NO hooks (no lint-staged on commit).
+[ -d .husky/_ ] || pnpm exec husky
+
+echo "Running migrations..."
+# app:migrate runs the cache, sessions (SQLite, created on the fly), landlord and tenant
+# migrations. On a fresh local DB the MigrationsEnded listeners create the Root tenant (domain =
+# this worktree's host, its own "<db>-root" database), a landlord user (admin) AND a director
+# (public app) for your git email, both with password "aabbccdd". `--seed` then adds factory
+# users per tenant. `--force` skips prompts.
+"${PHP_CMD[@]}" artisan app:migrate --seed --force
+
+# --- Seed the generated TypeScript schema files ---------------------------------
+#
+# resources/*/ts/types/{schema,inertia,schema-bridge}.d.ts are gitignored: the type-generator
+# Vite plugin writes them, but ONLY while the dev server runs (it fetches /docs/<api>.json and
+# derives the Inertia page types from it). A production build never generates them, yet the
+# tracked utils.d.ts imports "./inertia" — so a fresh worktree fails to build with
+# "Failed to resolve import source ./inertia". Copy the main repo's copies in as a starting
+# point; the first `pnpm public:watch` / `pnpm admin:watch` regenerates them for this branch.
+echo "Copying generated TypeScript schema files from the main repo..."
+COPIED_TYPES=0
+while IFS= read -r src; do
+    rel="${src#"$SOURCE_DIR"/}"
+    # Never clobber a file the branch actually tracks (the ignore rules could change later).
+    [ -e "$rel" ] && continue
+    mkdir -p "$(dirname "$rel")"
+    cp "$src" "$rel"
+    COPIED_TYPES=$(( COPIED_TYPES + 1 ))
+done < <(find "$SOURCE_DIR/resources" -path '*/types/*' \( -name 'schema.d.ts' -o -name 'inertia.d.ts' -o -name 'schema-bridge.d.ts' \) 2>/dev/null)
+[ "$COPIED_TYPES" -gt 0 ] || echo "  Warning: no generated type files found in ${SOURCE_DIR}; run the watchers there first or the build below may fail."
+
+echo "Building frontends (public + admin)..."
+# Both Vite configs write into public/assets/<name>/ (gitignored) with their own manifest, so
+# the URL works straight away. For live development run `pnpm public:watch` / `pnpm admin:watch`.
+pnpm public:build
+pnpm admin:build
+
+# --- Done ---------------------------------------------------------------------
+
+DEV_EMAIL="$(git config --get user.email || true)"
+echo ""
+echo "✓ Worktree ready at: ${WORKTREE_PATH}"
+echo "  Branch:   ${BRANCH_NAME}"
+echo "  URL:      ${APP_URL}"
+echo "  Database: ${DB_NAME} (tenants: ${DB_NAME}-<tenant>)"
+echo "  Test DB:  ${TEST_DB_NAME}"
+echo "  Login:    ${DEV_EMAIL:-<git user.email>} / aabbccdd  (admin user AND public director)"
+echo "  Start:    cd ${WORKTREE_PATH}"
+echo "  Dev:      pnpm public:watch | pnpm admin:watch | php artisan horizon"

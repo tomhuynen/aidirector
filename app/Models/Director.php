@@ -8,8 +8,10 @@ use App\Notifications\Public\ResetPassword;
 use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Ai\Concerns\HasConversations;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -19,6 +21,7 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
  */
 class Director extends Authenticatable implements CanResetPasswordContract
 {
+    use HasConversations;
     /** @use HasFactory<\Database\Factories\DirectorFactory> */
     use HasFactory;
     use HasSqids;
@@ -53,6 +56,16 @@ class Director extends Authenticatable implements CanResetPasswordContract
     public function projects(): HasMany
     {
         return $this->hasMany(Project::class);
+    }
+
+    /**
+     * AI calls made for the director outside a project, such as intake chat turns.
+     *
+     * @return MorphMany<Generation, $this>
+     */
+    public function generations(): MorphMany
+    {
+        return $this->morphMany(Generation::class, 'generatable');
     }
 
     public function sendPasswordResetNotification($token): void

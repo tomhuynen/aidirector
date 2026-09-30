@@ -1,146 +1,70 @@
 <template>
-  <Page :eyebrow="project.purposeLabel" :title="project.title" :description="project.description ?? undefined">
-    <template #actions>
-      <Button as-child variant="outline">
-        <Link :href="project.links?.update ?? '#'">{{ $t('Edit project') }}</Link>
-      </Button>
-      <Button as-child>
-        <Link :href="project.links?.shotsCreate ?? '#'">{{ $t('Add shot') }}</Link>
-      </Button>
-    </template>
+  <Head :title="project.title" />
 
-    <div class="grid gap-12 lg:grid-cols-[1fr_300px]">
-      <section class="space-y-6">
-        <SectionHeading
-          :title="$t('Shots')"
-          :description="$t('In order. The director reads neighbouring shots for continuity.')"
-        />
+  <TopBar :crumbs="crumbs" />
 
-        <EmptyState
-          v-if="shots.length === 0"
-          :title="$t('No shots yet')"
-          :description="
-            $t('A shot is one idea: who or what we see, what happens, and what the viewer should take away.')
-          "
-        >
-          <Button as-child>
-            <Link :href="project.links?.shotsCreate ?? '#'">{{ $t('Add the first shot') }}</Link>
-          </Button>
-        </EmptyState>
+  <div class="flex min-h-0 flex-1">
+    <ShotList :shots="[]" :create-url="project.links?.shotsCreate ?? '#'" />
 
-        <ol v-else class="divide-y divide-border rounded-lg border border-border bg-card">
-          <li v-for="(shot, i) in shots" :key="shot.id" class="flex items-start gap-5 p-5">
-            <span class="font-display w-8 shrink-0 pt-0.5 text-2xl text-muted-foreground tabular-nums">{{
-              String(shot.position).padStart(2, '0')
-            }}</span>
-            <div class="min-w-0 flex-1 space-y-2">
-              <div class="flex flex-wrap items-center gap-3">
-                <Link :href="shot.links?.view ?? '#'" class="font-medium hover:underline">{{ shot.title }}</Link>
-                <ShotStatusBadge :status="shot.status" :label="shot.statusLabel" />
-              </div>
-              <p class="text-sm leading-relaxed text-muted-foreground">
-                <span class="text-foreground">{{ shot.subject }}</span> · {{ shot.action }}
-              </p>
-              <p class="text-sm text-muted-foreground italic">{{ shot.takeaway }}</p>
-            </div>
-            <div class="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                :disabled="i === 0 || reordering"
-                :aria-label="$t('Move up')"
-                @click="move(i, -1)"
-              >
-                <ArrowUp class="size-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                :disabled="i === shots.length - 1 || reordering"
-                :aria-label="$t('Move down')"
-                @click="move(i, 1)"
-              >
-                <ArrowDown class="size-4" />
-              </Button>
-              <Button as-child variant="ghost" size="icon-sm" :aria-label="$t('Edit shot')">
-                <Link :href="shot.links?.update ?? '#'"><Pencil class="size-4" /></Link>
-              </Button>
-            </div>
-          </li>
-        </ol>
-      </section>
+    <main class="flex min-w-0 flex-1 flex-col items-center justify-center p-8">
+      <div class="max-w-md space-y-5 text-center">
+        <p class="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">{{ project.purposeLabel }}</p>
+        <h1 class="font-display text-4xl font-medium text-balance">{{ project.title }}</h1>
+        <p v-if="project.description" class="text-sm leading-relaxed text-muted-foreground">
+          {{ project.description }}
+        </p>
+        <p class="text-sm leading-relaxed text-muted-foreground">
+          {{ $t('A shot is one idea: who or what we see, what happens, and what the viewer should take away.') }}
+        </p>
+        <Button as-child size="lg">
+          <Link :href="project.links?.shotsCreate ?? '#'">
+            <Plus class="size-4" />
+            {{ $t('Add the first shot') }}
+          </Link>
+        </Button>
+      </div>
+    </main>
 
-      <aside class="space-y-8">
-        <section class="space-y-4 rounded-lg border border-border bg-card p-6">
-          <SectionHeading :title="$t('Style guide')" />
-          <dl class="space-y-4 text-sm">
-            <StyleRow :label="$t('Look')" :value="project.style.look" />
-            <StyleRow :label="$t('Medium')" :value="project.style.medium" />
-            <StyleRow :label="$t('Mood')" :value="project.style.mood" />
-            <StyleRow :label="$t('Palette')" :value="project.style.palette" />
-            <StyleRow :label="$t('Output')" :value="`${project.aspectRatio} · ${project.defaultDuration}s`" />
-          </dl>
-        </section>
-
-        <ConfirmDelete
-          v-if="project.can.destroy"
-          :action="project.links?.destroy ?? '#'"
-          :title="$t('Delete this project?')"
-          :description="$t('All shots in this project are deleted with it. This cannot be undone.')"
-        >
-          <template #trigger>
-            <Button type="button" variant="ghost" class="text-destructive hover:text-destructive">
-              <Trash2 class="size-4" />
-              {{ $t('Delete project') }}
-            </Button>
-          </template>
-        </ConfirmDelete>
-      </aside>
-    </div>
-  </Page>
+    <aside class="flex w-[22rem] shrink-0 flex-col border-l border-border bg-background">
+      <div class="flex h-14 shrink-0 items-center border-b border-border px-5">
+        <h2 class="text-[15px] font-semibold">{{ $t('Style guide') }}</h2>
+      </div>
+      <div class="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+        <Field :label="$t('Look')" :value="project.style.look" />
+        <Field :label="$t('Medium')" :value="project.style.medium" />
+        <Field :label="$t('Mood')" :value="project.style.mood" />
+        <Field :label="$t('Palette')" :value="project.style.palette" />
+        <div class="grid grid-cols-2 gap-4">
+          <Field :label="$t('Aspect ratio')" :value="project.aspectRatio" />
+          <Field :label="$t('Shot length')" :value="`${project.defaultDuration} s`" />
+        </div>
+      </div>
+      <div class="flex shrink-0 items-center border-t border-border px-5 py-4">
+        <Button as-child variant="secondary">
+          <Link :href="project.links?.update ?? '#'">{{ $t('Edit project') }}</Link>
+        </Button>
+      </div>
+    </aside>
+  </div>
 </template>
 <script setup lang="ts">
-import { Link, router } from '@inertiajs/vue3'
-import AppLayout from '@public/ts/layouts/App.vue'
+import { Head, Link } from '@inertiajs/vue3'
+import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
-import ConfirmDelete from '@public:components/ConfirmDelete.vue'
-import EmptyState from '@public:components/EmptyState.vue'
-import Page from '@public:components/Page.vue'
-import SectionHeading from '@public:components/SectionHeading.vue'
-import ShotStatusBadge from '@public:components/ShotStatusBadge.vue'
-import StyleRow from '@public:components/StyleRow.vue'
+import Field from '@public:components/editor/Field.vue'
+import ShotList from '@public:components/editor/ShotList.vue'
+import TopBar from '@public:components/editor/TopBar.vue'
+import { index as projectsIndex } from '@routes/public/projects'
 import { Button } from '@shared:ui/button'
-import { ArrowDown, ArrowUp, Pencil, Trash2 } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { Plus } from 'lucide-vue-next'
+import { computed } from 'vue'
 
 defineOptions({
-  layout: AppLayout,
+  layout: EditorLayout,
 })
 
 const props = defineProps<Inertia.Pages.Projects.View>()
 
-const reordering = ref(false)
-
-const move = (index: number, delta: number) => {
-  const order = props.shots.map((shot) => shot.id)
-  const [moved] = order.splice(index, 1)
-  order.splice(index + delta, 0, moved)
-
-  reordering.value = true
-
-  router.post(
-    props.project.links?.shotsReorder ?? '#',
-    { shots: order },
-    {
-      preserveScroll: true,
-      only: ['shots'],
-      onFinish: () => {
-        reordering.value = false
-      },
-    },
-  )
-}
+const crumbs = computed(() => [{ title: $t('Projects'), href: projectsIndex.url() }, { title: props.project.title }])
 </script>

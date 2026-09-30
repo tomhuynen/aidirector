@@ -34,6 +34,8 @@ return [
 
     'conversations' => [
         'connection' => 'tenant',
+        // Titles come from the intake controller, not an extra model call.
+        'generate_title' => false,
     ],
 
     /*

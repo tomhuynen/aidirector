@@ -1,121 +1,123 @@
 <template>
-  <Page :eyebrow="`${project.title} · ${$t('Shot :n', { n: String(shot.position) })}`" :title="shot.title">
-    <template #actions>
-      <ShotStatusBadge :status="shot.status" :label="shot.statusLabel" />
-      <Button as-child variant="outline">
-        <Link :href="shot.links?.update ?? '#'">{{ $t('Edit intent') }}</Link>
-      </Button>
-    </template>
+  <Head :title="`${code} · ${project.title}`" />
 
-    <nav class="flex items-center justify-between text-sm">
-      <Link
-        v-if="previous"
-        :href="previous.url"
-        class="flex items-center gap-2 text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft class="size-4" />
-        {{ $t('Shot :n', { n: String(previous.position) }) }}
-      </Link>
-      <span v-else />
-      <Link :href="project.links?.view ?? '#'" class="text-muted-foreground hover:text-foreground">{{
-        $t('All shots')
-      }}</Link>
-      <Link v-if="next" :href="next.url" class="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-        {{ $t('Shot :n', { n: String(next.position) }) }}
-        <ArrowRight class="size-4" />
-      </Link>
-      <span v-else />
-    </nav>
+  <TopBar :crumbs="crumbs" />
 
-    <div class="grid gap-12 lg:grid-cols-[300px_1fr]">
-      <aside class="space-y-6">
-        <section class="space-y-4 rounded-lg border border-border bg-card p-6">
-          <SectionHeading :title="$t('Intent')" />
-          <dl class="space-y-4 text-sm">
-            <StyleRow :label="$t('Subject')" :value="shot.subject" />
-            <StyleRow :label="$t('Action')" :value="shot.action" />
-            <StyleRow :label="$t('Takeaway')" :value="shot.takeaway" />
-            <StyleRow v-if="shot.notes" :label="$t('Notes')" :value="shot.notes" />
-            <StyleRow
-              :label="$t('Output')"
-              :value="`${shot.aspectRatioOverride ?? project.aspectRatio} · ${shot.duration ?? project.defaultDuration}s`"
-            />
-          </dl>
-        </section>
+  <div class="flex min-h-0 flex-1">
+    <ShotList
+      :shots="shotList"
+      :current-id="shot.id"
+      :create-url="project.links?.shotsCreate ?? '#'"
+      :reorder-url="project.links?.shotsReorder"
+    />
 
-        <ConfirmDelete
-          :action="shot.links?.destroy ?? '#'"
-          :title="$t('Delete this shot?')"
-          :description="$t('The remaining shots close the gap in the sequence.')"
-        >
-          <template #trigger>
-            <Button type="button" variant="ghost" class="text-destructive hover:text-destructive">
-              <Trash2 class="size-4" />
-              {{ $t('Delete shot') }}
-            </Button>
-          </template>
-        </ConfirmDelete>
-      </aside>
-
-      <section class="space-y-6">
-        <SectionHeading :title="$t('Pipeline')" :description="$t('Each stage builds on the one before it.')" />
-        <ol class="grid gap-px overflow-hidden rounded-lg border border-border bg-border">
-          <li v-for="(stage, i) in stages" :key="stage.title" class="flex items-start gap-5 bg-card p-6">
-            <span class="font-display pt-0.5 text-2xl text-muted-foreground tabular-nums">{{ i + 1 }}</span>
-            <div class="flex-1 space-y-2">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <h3 class="font-medium">{{ stage.title }}</h3>
-                <Badge variant="outline" class="font-normal text-muted-foreground">{{ $t('Coming next') }}</Badge>
-              </div>
-              <p class="text-sm leading-relaxed text-muted-foreground">{{ stage.description }}</p>
-            </div>
-          </li>
-        </ol>
-      </section>
-    </div>
-  </Page>
+    <main class="flex min-w-0 flex-1">
+      <Pending
+        v-if="state === 'suggesting'"
+        :title="$t('Suggesting storylines')"
+        :description="$t('The director is reading your brief and writing three possible storylines.')"
+      />
+      <Storylines
+        v-else-if="state === 'options'"
+        :options="shot.storylineOptions ?? []"
+        :error="shot.storylineError"
+        :edit-url="shot.links?.update ?? '#'"
+        :suggest-url="shot.links?.storylineSuggest ?? '#'"
+        :choose-url="shot.links?.storylineChoose ?? '#'"
+      />
+      <Pending
+        v-else-if="state === 'planning'"
+        :title="$t('Planning keyframes')"
+        :description="$t('The director is breaking the chosen storyline into keyframes.')"
+      />
+      <template v-else-if="state === 'keyframes'">
+        <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" />
+        <KeyframesPanel
+          :keyframes="shot.storyline?.keyframes ?? []"
+          :aspect-ratio="aspectRatio"
+          :duration="duration"
+          :error="shot.storylineError"
+          :generate-url="shot.links?.storylineGenerate ?? '#'"
+        />
+      </template>
+      <BriefForm v-else :project="project" :shot="shot" />
+    </main>
+  </div>
 </template>
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3'
-import AppLayout from '@public/ts/layouts/App.vue'
+import { Head, usePoll } from '@inertiajs/vue3'
+import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
-import ConfirmDelete from '@public:components/ConfirmDelete.vue'
-import Page from '@public:components/Page.vue'
-import SectionHeading from '@public:components/SectionHeading.vue'
-import ShotStatusBadge from '@public:components/ShotStatusBadge.vue'
-import StyleRow from '@public:components/StyleRow.vue'
-import { Badge } from '@shared:ui/badge'
-import { Button } from '@shared:ui/button'
-import { ArrowLeft, ArrowRight, Trash2 } from 'lucide-vue-next'
-import { computed } from 'vue'
+import BriefForm from '@public:components/editor/BriefForm.vue'
+import KeyframesPanel from '@public:components/editor/KeyframesPanel.vue'
+import Pending from '@public:components/editor/Pending.vue'
+import { shotCode } from '@public:components/editor/shotCode'
+import ShotDetails from '@public:components/editor/ShotDetails.vue'
+import ShotList from '@public:components/editor/ShotList.vue'
+import Storylines from '@public:components/editor/Storylines.vue'
+import TopBar from '@public:components/editor/TopBar.vue'
+import { index as projectsIndex } from '@routes/public/projects'
+import { computed, watch } from 'vue'
 
 defineOptions({
-  layout: AppLayout,
+  layout: EditorLayout,
 })
 
 const props = defineProps<Inertia.Pages.Shots.View>()
 
-const currentIndex = computed(() => props.siblings.findIndex((sibling) => sibling.id === props.shot.id))
-const previous = computed(() => props.siblings[currentIndex.value - 1])
-const next = computed(() => props.siblings[currentIndex.value + 1])
+const code = computed(() => shotCode(props.shot.position))
+const aspectRatio = computed(() => props.shot.aspectRatioOverride ?? props.project.aspectRatio)
+const duration = computed(() => props.shot.duration ?? props.project.defaultDuration)
 
-const stages = computed(() => [
-  {
-    title: $t('Camera options'),
-    description: $t(
-      'The director proposes a recommended way to film this shot plus alternatives, judged by the project purpose.',
-    ),
+type State = 'brief' | 'suggesting' | 'options' | 'planning' | 'keyframes'
+
+const state = computed<State>(() => {
+  switch (props.shot.status) {
+    case 'options-pending':
+      return 'suggesting'
+    case 'options-ready':
+      return 'options'
+    case 'storyline-pending':
+      return 'planning'
+    case 'storyline-ready':
+    case 'keyframes-ready':
+    case 'video-ready':
+      return props.shot.storyline ? 'keyframes' : 'options'
+    default:
+      return 'brief'
+  }
+})
+
+const { start, stop } = usePoll(3000, { only: ['shot', 'siblings'] }, { autoStart: false })
+
+watch(
+  state,
+  (current) => {
+    if (current === 'suggesting' || current === 'planning') {
+      start()
+    } else {
+      stop()
+    }
   },
-  {
-    title: $t('Keyframes'),
-    description: $t('The chosen option is broken into keyframes. Each keyframe becomes an image you can iterate on.'),
-  },
-  {
-    title: $t('Video'),
-    description: $t(
-      'The keyframes are numbered into a storyboard and handed to the video model with a locked-down prompt.',
-    ),
-  },
+  { immediate: true },
+)
+
+const shotList = computed(() =>
+  props.siblings.map((sibling) => ({
+    id: sibling.id,
+    code: shotCode(sibling.position),
+    title: sibling.title,
+    statusLabel: sibling.statusLabel,
+    duration: sibling.duration,
+    keyframesCount: sibling.keyframesCount,
+    url: sibling.url,
+  })),
+)
+
+const crumbs = computed(() => [
+  { title: $t('Projects'), href: projectsIndex.url() },
+  { title: props.project.title, href: props.project.links?.view },
+  { title: code.value },
 ])
 </script>
