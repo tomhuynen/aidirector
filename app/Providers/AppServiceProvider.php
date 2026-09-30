@@ -6,6 +6,7 @@ namespace App\Providers;
 
 use App\Models\PersonalAccessToken;
 use App\Models\Tenant;
+use App\Models\Upload;
 use App\Models\User;
 use App\Support\Multitenancy\DatabaseSessionManager;
 use Carbon\CarbonImmutable;
@@ -70,6 +71,7 @@ class AppServiceProvider extends ServiceProvider
         Relation::enforceMorphMap([
             'user' => User::class,
             'tenant' => Tenant::class,
+            'upload' => Upload::class,
         ]);
 
         Model::preventLazyLoading(! $this->app->isProduction());
