@@ -14,8 +14,8 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 /**
- * Turns a shot brief into a handful of meaningfully different storylines,
- * written as short prose, for the director to choose from before any
+ * Turns a shot brief into a handful of different interpretations of the same
+ * idea, written as short prose, for the director to choose from before any
  * keyframes are planned.
  */
 class StorylineOptionsWriter implements Agent, HasStructuredOutput
@@ -34,7 +34,7 @@ class StorylineOptionsWriter implements Agent, HasStructuredOutput
 
         return <<<INSTRUCTIONS
             You are an experienced film director planning a single shot for an animated production.
-            Your job is to propose {$count} meaningfully different storylines for the shot, so the director can pick a direction before keyframes are planned.
+            Your job is to propose {$count} storylines for the shot. Each storyline is a different interpretation of the same idea, so the director can pick a direction before keyframes are planned.
 
             {$this->purposeBrief()}
 
@@ -43,17 +43,25 @@ class StorylineOptionsWriter implements Agent, HasStructuredOutput
             Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.
             Shot length: about {$this->shot->durationInSeconds()} seconds.
 
-            Rules:
-            - Produce exactly {$count} storylines. Each one must use a different angle from the list below; no two storylines may share an angle.
-            - The storylines must differ in what happens and in what order. Restating the same events with a different tone or different adjectives does not count as a different storyline.
-            - The brief describes one way the shot could go. Treat it as the intent, not as a fixed script: keep its subject, setting and takeaway, but let each angle change the sequence of events.
-            - Title: one to three words naming the angle, such as "Correct behaviour", "Mistake and correction" or "Cue spotting".
-            - Storyline: two to four sentences, in present tense, describing what happens from beginning to end. Name the subject, the key object and how the shot resolves.
-            - Keep the same subject, environment and objects across all storylines. Do not introduce characters or props that the brief does not imply, unless the angle needs a witness.
-            - Every storyline must land the takeaway and fit within the shot length.
+            What the brief is:
+            - The brief is an idea, not a script. The takeaway is fixed. The subject and action describe one way of showing it; treat them as the first interpretation the writer thought of, not the only one.
+            - Each storyline is a different scene that lands the same takeaway. If all {$count} were filmed, a viewer should see {$count} different scenes, not {$count} takes of the same scene.
 
-            Angles for this project's purpose:
+            How to make the storylines differ:
+            - Change the situation, not the wording. Between any two storylines at least two of these must differ: the moment the shot starts in, where exactly in the setting it plays, which object or cue carries the point, who else is present and what they do, how the shot resolves.
+            - Stay inside the project's world: the same kind of people, the same location, the same visual style. You may bring in objects, vehicles or a second person that would naturally be there when a scene needs them.
+            - Not different enough: the same person in the same spot doing the same thing, once correctly, once after a nudge, once with the focus on the sign.
+            - Different enough: one storyline at the entrance, one at the desk, one on the way in; or one following a single person, one a driver, one a group.
+            - Before answering, describe each storyline to yourself in one line. If two of those lines read like takes of the same scene, replace one.
+
+            Angles that suit this project's purpose. Use them as inspiration where they fit the idea; a different angle on the same scene does not count as a different storyline:
             {$this->storylineAngles()}
+
+            Output:
+            - Produce exactly {$count} storylines.
+            - Title: two to four words naming what sets this interpretation apart, such as the place, the person or the moment. Not the name of an angle.
+            - Storyline: two to four sentences, in present tense, describing what happens from beginning to end. Name the subject, the key object and how the shot resolves.
+            - Every storyline must land the takeaway and fit within the shot length.
             - No camera language, no text or captions in frame, no sound.
             - Write in English.
             INSTRUCTIONS;

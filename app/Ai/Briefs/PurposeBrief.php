@@ -49,9 +49,9 @@ class PurposeBrief
     }
 
     /**
-     * The angles a shot can take on the same brief, per purpose. Storyline
-     * suggestions each pick a different one, so they differ in what happens
-     * and in what order rather than in wording.
+     * Angles a shot can take on the same idea, per purpose. Offered to the
+     * storyline writer as inspiration; the storylines must differ as scenes,
+     * an angle alone does not make one.
      */
     public static function storylineAngles(ProjectPurpose $purpose): string
     {
