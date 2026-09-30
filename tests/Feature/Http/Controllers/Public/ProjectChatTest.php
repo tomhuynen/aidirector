@@ -2,10 +2,17 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\PhotoCaptioner;
 use App\Ai\Agents\ProjectIntake;
+use App\Enums\AspectRatio;
+use App\Enums\Disk;
+use App\Enums\ProjectPurpose;
 use App\Models\Director;
 use App\Models\Generation;
 use App\Models\Project;
+use App\Models\Upload;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Ai\Models\Conversation;
 use Laravel\Ai\Models\ConversationMessage;
 use Laravel\Ai\Prompts\AgentPrompt;
@@ -24,20 +31,21 @@ describe('create page', function () {
             ->assertInertia(fn($page) => $page
                 ->component('projects/create')
                 ->where('greeting', ProjectIntake::greeting())
-                ->where('chatUrl', route('public.projects.chat')));
+                ->where('chatUrl', route('public.projects.chat'))
+                ->where('uploadUrl', route('public.uploads.store')));
     });
 });
 
 describe('chat', function () {
     it('starts a remembered conversation on the first turn', function () {
         ProjectIntake::fake([
-            ['reply' => 'Sounds good. What shall we call it?', 'title' => null],
+            ['reply' => 'Sounds good. Is this an explainer?', 'description' => 'A short film about posting a letter, for first-time senders.', 'purpose' => null, 'title' => null, 'ask' => null, 'done' => false],
         ]);
 
         $response = actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['conversation' => null, 'message' => 'A short film about posting a letter'])
             ->assertSuccessful()
-            ->assertJsonPath('reply', 'Sounds good. What shall we call it?')
+            ->assertJsonPath('reply', 'Sounds good. Is this an explainer?')
             ->assertJsonPath('project', null);
 
         $conversationId = $response->json('conversation');
@@ -62,40 +70,62 @@ describe('chat', function () {
         ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === 'A short film about posting a letter');
     });
 
-    it('creates the project once the agent has settled a title', function () {
+    it('creates the project once description, purpose and title are settled', function () {
         ProjectIntake::fake([
-            ['reply' => 'What shall we call it?', 'title' => null],
-            ['reply' => 'Mailbox explainer it is.', 'title' => '  Mailbox explainer '],
+            ['reply' => 'What shall we call it?', 'description' => 'How to post a letter, for first-time senders.', 'purpose' => 'explainer', 'title' => null, 'ask' => null, 'done' => false],
+            ['reply' => 'Mailbox explainer it is.', 'description' => 'How to post a letter, for first-time senders.', 'purpose' => 'explainer', 'title' => '  Mailbox explainer ', 'ask' => 'photos', 'done' => false],
         ]);
 
         $conversationId = actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['message' => 'A short film'])
             ->assertSuccessful()
+            ->assertJsonPath('project', null)
             ->json('conversation');
+
+        expect(Project::query()->count())->toBe(0);
 
         $response = actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Call it Mailbox explainer'])
             ->assertSuccessful()
             ->assertJsonPath('conversation', $conversationId)
-            ->assertJsonPath('reply', 'Mailbox explainer it is.');
+            ->assertJsonPath('reply', 'Mailbox explainer it is.')
+            ->assertJsonPath('ask', 'photos')
+            ->assertJsonPath('done', false)
+            ->assertJsonPath('photos', []);
 
         $project = Project::query()->firstOrFail();
 
         expect($project->title)->toBe('Mailbox explainer')
+            ->and($project->description)->toBe('How to post a letter, for first-time senders.')
+            ->and($project->purpose)->toBe(ProjectPurpose::EXPLAINER)
+            ->and($project->aspect_ratio)->toBe(AspectRatio::LANDSCAPE)
             ->and($project->director_id)->toBe($this->director->id)
             ->and($project->conversation_id)->toBe($conversationId)
             ->and($project->conversation->title)->toBe('Mailbox explainer')
             ->and($response->json('project.id'))->toBe($project->sqid)
             ->and($response->json('project.url'))->toBe(route('public.projects.view', $project))
+            ->and($response->json('project.styleRoundsUrl'))->toBe(route('public.projects.style.round', $project))
             ->and(ConversationMessage::query()->where('conversation_id', $conversationId)->count())->toBe(4);
 
         ProjectIntake::assertPromptedTimes(2);
     });
 
+    it('sets up a social short in portrait', function () {
+        ProjectIntake::fake([
+            ['reply' => 'Ready.', 'description' => 'A ten second gag about a cat and a mailbox.', 'purpose' => 'social-short', 'title' => 'Cat vs Mailbox', 'ask' => 'photos', 'done' => false],
+        ]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['message' => 'Cat vs Mailbox, a social short'])
+            ->assertSuccessful();
+
+        expect(Project::query()->firstOrFail()->aspect_ratio)->toBe(AspectRatio::PORTRAIT);
+    });
+
     it('returns the existing project instead of creating a second one', function () {
         ProjectIntake::fake([
-            ['reply' => 'Mailbox it is.', 'title' => 'Mailbox'],
-            ['reply' => 'Still Mailbox.', 'title' => 'Mailbox again'],
+            ['reply' => 'Mailbox it is.', 'description' => 'Posting a letter.', 'purpose' => 'explainer', 'title' => 'Mailbox', 'ask' => 'photos', 'done' => false],
+            ['reply' => 'Still Mailbox.', 'description' => 'Posting a parcel.', 'purpose' => 'commercial', 'title' => 'Mailbox again', 'ask' => null, 'done' => true],
         ]);
 
         $conversationId = actingAs($this->director, 'director')
@@ -108,16 +138,16 @@ describe('chat', function () {
         actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Thanks'])
             ->assertSuccessful()
-            ->assertJsonPath('project.id', $project->sqid);
+            ->assertJsonPath('project.id', $project->sqid)
+            ->assertJsonPath('done', true);
 
         expect(Project::query()->count())->toBe(1)
-            ->and($project->fresh()->title)->toBe('Mailbox');
+            ->and($project->fresh()->title)->toBe('Mailbox')
+            ->and($project->fresh()->purpose)->toBe(ProjectPurpose::EXPLAINER);
     });
 
-    it('ignores titles that are too short', function () {
-        ProjectIntake::fake([
-            ['reply' => 'Hm.', 'title' => 'A'],
-        ]);
+    it('waits until every field is settled and valid', function (array $turn) {
+        ProjectIntake::fake([$turn]);
 
         actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['message' => 'A'])
@@ -125,11 +155,18 @@ describe('chat', function () {
             ->assertJsonPath('project', null);
 
         expect(Project::query()->count())->toBe(0);
-    });
+    })->with([
+        'title too short' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => 'explainer', 'title' => 'A', 'ask' => null, 'done' => false]],
+        'no title yet' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => 'explainer', 'title' => null, 'ask' => null, 'done' => false]],
+        'no description yet' => [['reply' => 'Hm.', 'description' => null, 'purpose' => 'explainer', 'title' => 'Mailbox', 'ask' => null, 'done' => false]],
+        'blank description' => [['reply' => 'Hm.', 'description' => '  ', 'purpose' => 'explainer', 'title' => 'Mailbox', 'ask' => null, 'done' => false]],
+        'no purpose yet' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => null, 'title' => 'Mailbox', 'ask' => null, 'done' => false]],
+        'unknown purpose' => [['reply' => 'Hm.', 'description' => 'Posting a letter.', 'purpose' => 'musical', 'title' => 'Mailbox', 'ask' => null, 'done' => false]],
+    ]);
 
     it('refuses to continue another director\'s conversation', function () {
         ProjectIntake::fake([
-            ['reply' => 'Hello.', 'title' => null],
+            ['reply' => 'Hello.', 'description' => null, 'purpose' => null, 'title' => null, 'ask' => null, 'done' => false],
         ]);
 
         $other = Director::factory()->create();
@@ -140,6 +177,113 @@ describe('chat', function () {
             ->assertForbidden();
 
         ProjectIntake::assertPromptedTimes(1);
+    });
+
+    describe('photos', function () {
+        beforeEach(function () {
+            Storage::fake(Disk::TENANT->value);
+            ProjectIntake::fake([
+                ['reply' => 'Hi.', 'description' => 'd', 'purpose' => 'explainer', 'title' => 't', 'ask' => 'photos', 'done' => false],
+            ]);
+
+            $this->project = Project::factory()->ownedBy($this->director)->create();
+            $this->conversationId = (new ProjectIntake())->forUser($this->director)->prompt('hi', provider: 'openrouter', model: 'test')->conversationId;
+            $this->project->update(['conversation_id' => $this->conversationId]);
+
+            $this->uploads = [
+                Upload::fromFile(UploadedFile::fake()->image('tug.jpg', 2400, 1600)),
+                Upload::fromFile(UploadedFile::fake()->image('yard.png', 800, 600)),
+            ];
+        });
+
+        it('claims uploads as content references, captions them and tells the agent', function () {
+            ProjectIntake::fake([
+                ['reply' => 'Got the tug and the yard. More?', 'description' => 'd', 'purpose' => 'explainer', 'title' => 't', 'ask' => 'photos', 'done' => false],
+            ]);
+            PhotoCaptioner::fake([
+                ['photos' => [['caption' => 'A grey harbour tug with a red hull stripe.'], ['caption' => 'A shipyard hall with a blue gantry crane.']]],
+            ]);
+
+            $response = actingAs($this->director, 'director')
+                ->postJson(route('public.projects.chat'), [
+                    'conversation' => $this->conversationId,
+                    'message' => 'Here are two',
+                    'uploads' => [$this->uploads[0]->sqid, $this->uploads[1]->sqid],
+                ])
+                ->assertSuccessful()
+                ->assertJsonPath('reply', 'Got the tug and the yard. More?')
+                ->assertJsonPath('photos.0.caption', 'A grey harbour tug with a red hull stripe.')
+                ->assertJsonPath('photos.1.caption', 'A shipyard hall with a blue gantry crane.');
+
+            $media = $this->project->fresh()->getMedia(Project::CONTENT_REFERENCES);
+
+            expect($media)->toHaveCount(2)
+                ->and($media[0]->file_name)->toBe('tug.jpg')
+                ->and($media[0]->getCustomProperty(Project::CAPTION))->toBe('A grey harbour tug with a red hull stripe.')
+                ->and($media[1]->file_name)->toBe('yard.png')
+                ->and($media[0]->sqid)->toBe($response->json('photos.0.id'))
+                ->and(Upload::query()->count())->toBe(0);
+
+            Storage::disk(Disk::TENANT->value)->assertExists($media[0]->getPathRelativeToRoot(Project::REFERENCE));
+
+            [$width, $height] = getimagesize(Storage::disk(Disk::TENANT->value)->path($media[0]->getPathRelativeToRoot(Project::REFERENCE)));
+
+            expect(max($width, $height))->toBe(Project::REFERENCE_MAX_EDGE);
+
+            PhotoCaptioner::assertPrompted(fn(AgentPrompt $prompt) => $prompt->attachments->count() === 2);
+            ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === "Here are two\n\nThe director added 2 photos:\n1. A grey harbour tug with a red hull stripe.\n2. A shipyard hall with a blue gantry crane.");
+
+            expect(Generation::query()->where('kind', 'caption')->count())->toBe(1);
+        });
+
+        it('keeps the photos when the captioner fails', function () {
+            ProjectIntake::fake([
+                ['reply' => 'Thanks.', 'description' => 'd', 'purpose' => 'explainer', 'title' => 't', 'ask' => 'photos', 'done' => false],
+            ]);
+            PhotoCaptioner::fake(function () {
+                throw new RuntimeException('Vision down');
+            });
+
+            actingAs($this->director, 'director')
+                ->postJson(route('public.projects.chat'), [
+                    'conversation' => $this->conversationId,
+                    'message' => '',
+                    'uploads' => [$this->uploads[0]->sqid],
+                ])
+                ->assertSuccessful()
+                ->assertJsonPath('photos.0.caption', null);
+
+            expect($this->project->fresh()->getMedia(Project::CONTENT_REFERENCES))->toHaveCount(1)
+                ->and(Generation::query()->where('kind', 'caption')->firstOrFail()->error)->toBe('Vision down');
+
+            ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === "The director added 1 photo:\n1. (no description available)");
+        });
+
+        it('refuses photos before the project exists', function () {
+            ProjectIntake::fake();
+            PhotoCaptioner::fake();
+
+            actingAs($this->director, 'director')
+                ->postJson(route('public.projects.chat'), ['message' => 'Look', 'uploads' => [$this->uploads[0]->sqid]])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('uploads');
+
+            expect(Upload::query()->count())->toBe(2);
+
+            ProjectIntake::assertPromptedTimes(1);
+        });
+
+        it('rejects unknown uploads and non-images', function () {
+            ProjectIntake::fake();
+            $pdf = Upload::fromFile(UploadedFile::fake()->create('brief.pdf', 10, 'application/pdf'));
+
+            actingAs($this->director, 'director')
+                ->postJson(route('public.projects.chat'), ['conversation' => $this->conversationId, 'message' => 'Look', 'uploads' => ['nope', $pdf->sqid]])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors(['uploads.0', 'uploads.1']);
+
+            ProjectIntake::assertPromptedTimes(1);
+        });
     });
 
     it('validates the input', function (array $payload, string $field) {
@@ -153,6 +297,7 @@ describe('chat', function () {
         ProjectIntake::assertNeverPrompted();
     })->with([
         'missing message' => [['message' => ''], 'message'],
+        'too many uploads' => [['message' => 'hi', 'uploads' => array_fill(0, 15, 'x')], 'uploads'],
         'message too long' => [['message' => str_repeat('a', 2001)], 'message'],
         'malformed conversation' => [['conversation' => 'not-a-uuid', 'message' => 'hi'], 'conversation'],
     ]);

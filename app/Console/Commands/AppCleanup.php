@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Events\AppCleaningUp;
 use App\Models\Login;
 use App\Models\Tenant;
+use App\Models\Upload;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
@@ -37,6 +38,7 @@ class AppCleanup extends Command
     {
         $this->purgeExpiredPasswordResets();
         $this->cleanUserLogins();
+        $this->deleteExpiredUploads();
         $this->cleanTmpDir();
         $this->cleanLogsDir();
         $this->removeEmptyStorageDirs();
@@ -85,6 +87,18 @@ class AppCleanup extends Command
             Login::query()
                 ->where('created_at', '<', Date::parse('12 months ago'))
                 ->delete();
+        });
+    }
+
+    /**
+     * Uploads that no form or chat turn claimed within the configured window.
+     */
+    private function deleteExpiredUploads()
+    {
+        Tenant::all()->eachCurrent(function (Tenant $tenant) {
+            Upload::expired()
+                ->cursor()
+                ->each(fn(Upload $upload) => $upload->delete());
         });
     }
 

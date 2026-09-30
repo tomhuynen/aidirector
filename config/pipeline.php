@@ -29,6 +29,11 @@ return [
 
     'options_count' => 3,
 
+    /*
+     * Tiles per round of the style exploration.
+     */
+    'style_options_count' => 4,
+
     'keyframes' => [
         'min' => 3,
         'max' => 6,

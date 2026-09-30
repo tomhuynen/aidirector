@@ -7,10 +7,13 @@ use App\Http\Controllers\Public\Auth\ForgotPasswordController;
 use App\Http\Controllers\Public\Auth\LoginController;
 use App\Http\Controllers\Public\Auth\RegisterController;
 use App\Http\Controllers\Public\Auth\ResetPasswordController;
+use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
+use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
+use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
 use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
@@ -25,6 +28,8 @@ use App\Http\Controllers\Public\Shots\Storyline\GenerateController as StorylineG
 use App\Http\Controllers\Public\Shots\Storyline\SuggestController as StorylineSuggestController;
 use App\Http\Controllers\Public\Shots\UpdateController as ShotUpdateController;
 use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
+use App\Http\Controllers\Uploads\StoreController as UploadStoreController;
+use App\Http\Controllers\Uploads\ViewController as UploadViewController;
 use App\Models\Keyframe;
 use Illuminate\Support\Facades\Route;
 
@@ -59,6 +64,17 @@ Route::middleware('auth:director')->group(function () {
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
 
+    Route::prefix('projects/{project}/style')
+        ->name('projects.style.')
+        ->scopeBindings()
+        ->group(function () {
+            Route::post('rounds', [StyleRoundController::class, 'store'])->name('round');
+            Route::get('rounds/{round}', [StyleRoundController::class, 'index'])->whereNumber('round')->name('options');
+            Route::post('{styleOption}/pin', [StylePinController::class, 'store'])->name('pin');
+        });
+
+    Route::get('media/{media}/{conversion?}', [MediaViewController::class, 'view'])->middleware('signed')->name('media.view');
+
     Route::prefix('projects/{project}/shots')
         ->name('shots.')
         ->scopeBindings()
@@ -81,5 +97,16 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{shot}/update', [ShotUpdateController::class, 'update'])->name('update');
             Route::post('{shot}/update', [ShotUpdateController::class, 'store']);
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');
+        });
+
+    /*
+     * Staging uploads for chats and forms. Directors store them through the
+     * upload policy; viewing needs the signed link from the upload resource.
+     */
+    Route::prefix('uploads')
+        ->name('uploads.')
+        ->group(function () {
+            Route::post('/', [UploadStoreController::class, 'store'])->name('store');
+            Route::get('{upload}', [UploadViewController::class, 'view'])->middleware('signed')->name('view');
         });
 });

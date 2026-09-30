@@ -38,3 +38,4 @@
     Can manage their own settings.
   permissions:
     - admin.dashboard.view
+    - admin.uploads.store
