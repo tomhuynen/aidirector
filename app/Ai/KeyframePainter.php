@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai;
 
 use App\Models\Keyframe;
+use App\Models\Project;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Files\StoredImage;
@@ -83,5 +84,21 @@ class KeyframePainter
     public function referenceFor(Media $render): StoredImage
     {
         return ImageFile::fromStorage($render->getPathRelativeToRoot(), $render->disk);
+    }
+
+    /**
+     * The project's pinned style sheet as a reference image, when there is one.
+     */
+    public function styleReferenceFor(Project $project): ?StoredImage
+    {
+        $sheet = $project->styleReference();
+
+        if ($sheet === null) {
+            return null;
+        }
+
+        return $sheet->hasGeneratedConversion(Project::REFERENCE)
+            ? ImageFile::fromStorage($sheet->getPathRelativeToRoot(Project::REFERENCE), $sheet->conversions_disk ?? $sheet->disk)
+            : ImageFile::fromStorage($sheet->getPathRelativeToRoot(), $sheet->disk);
     }
 }

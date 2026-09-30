@@ -39,12 +39,13 @@ class GenerateKeyframes implements ShouldQueue
     public function handle(KeyframePainter $painter): void
     {
         $shot = $this->shot->load('project');
-        $reference = null;
+        $style = $painter->styleReferenceFor($shot->project);
+        $first = null;
 
-        foreach ($this->replaceKeyframes($shot) as $keyframe) {
-            $render = $painter->paint($keyframe, $keyframe->prompt, $reference ? [$reference] : []);
+        foreach ($this->replaceKeyframes($shot, $style !== null) as $keyframe) {
+            $render = $painter->paint($keyframe, $keyframe->prompt, array_values(array_filter([$style, $first])));
 
-            $reference ??= $painter->referenceFor($render);
+            $first ??= $painter->referenceFor($render);
         }
 
         $shot->forceFill([
@@ -71,7 +72,7 @@ class GenerateKeyframes implements ShouldQueue
      *
      * @return Collection<int, Keyframe>
      */
-    private function replaceKeyframes(Shot $shot): Collection
+    private function replaceKeyframes(Shot $shot, bool $withStyleReference): Collection
     {
         $shot->forgetKeyframes();
 
@@ -80,7 +81,7 @@ class GenerateKeyframes implements ShouldQueue
                 'position' => $index + 1,
                 'title' => $keyframe['title'],
                 'description' => $keyframe['description'],
-                'prompt' => KeyframeImageBrief::for($shot, $keyframe, withReference: $index > 0),
+                'prompt' => KeyframeImageBrief::for($shot, $keyframe, $withStyleReference, withFirstKeyframe: $index > 0),
                 'rendering' => true,
             ])->setRelation('shot', $shot));
     }

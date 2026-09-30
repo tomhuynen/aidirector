@@ -98,7 +98,36 @@ describe('job', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox') && $prompt->attachments->isEmpty());
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope') && $prompt->attachments->count() === 1);
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('gives a thumbs up') && $prompt->attachments->count() === 1);
-        Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox') && $prompt->contains('previous keyframe'));
+        Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox') && $prompt->contains('earlier keyframe'));
+    });
+
+    it('attaches the pinned style sheet ahead of the first keyframe', function () {
+        Image::fake(fn() => fakePng());
+
+        $this->project
+            ->addMediaFromString(base64_decode(fakePng()))
+            ->usingFileName('style-sheet.png')
+            ->toMediaCollection(Project::STYLE_REFERENCES);
+
+        $shot = plannedShot($this->project);
+
+        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox')
+            && $prompt->contains('first attached image is the project\'s style reference sheet')
+            && ! $prompt->contains('earlier keyframe')
+            && $prompt->attachments->count() === 1);
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
+            && $prompt->contains('first attached image is the project\'s style reference sheet')
+            && $prompt->contains('second attached image is an earlier keyframe')
+            && $prompt->attachments->count() === 2);
+
+        $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
+
+        (new GenerateKeyframeImage($keyframe))->handle(app(KeyframePainter::class));
+
+        expect($keyframe->renders())->toHaveCount(2);
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope') && $prompt->attachments->count() === 2);
     });
 
     it('replaces the keyframes of an earlier render', function () {
@@ -149,7 +178,7 @@ describe('update', function () {
 
         expect($keyframe->description)->toBe('He drops the envelope in the slot and smiles.')
             ->and($keyframe->prompt)->toContain('He drops the envelope in the slot and smiles.')
-            ->and($keyframe->prompt)->toContain('previous keyframe')
+            ->and($keyframe->prompt)->toContain('an earlier keyframe of the same shot')
             ->and($keyframe->rendering)->toBeTrue()
             ->and($keyframe->render_error)->toBeNull()
             ->and($shot->fresh()->storylineKeyframes()[1])->toEqual(['title' => 'Posting', 'description' => 'He drops the envelope in the slot and smiles.', 'prompt' => 'He drops the envelope in the slot and smiles.']);

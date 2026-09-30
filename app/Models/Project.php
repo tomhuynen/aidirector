@@ -131,6 +131,16 @@ class Project extends Model implements HasMedia
             ->values();
     }
 
+    /**
+     * The pinned style sheet, which image generations attach so every render
+     * matches the look the director chose.
+     */
+    public function styleReference(): ?BaseMedia
+    {
+        /** @var BaseMedia|null */
+        return $this->getFirstMedia(self::STYLE_REFERENCES);
+    }
+
     public function isOwnedBy(Director $director): bool
     {
         return $this->director_id === $director->id;

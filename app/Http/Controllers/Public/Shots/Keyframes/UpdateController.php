@@ -29,7 +29,12 @@ class UpdateController
 
         $keyframe->forceFill([
             'description' => $description,
-            'prompt' => KeyframeImageBrief::for($shot, $plan, withReference: $keyframe->position > 1),
+            'prompt' => KeyframeImageBrief::for(
+                $shot,
+                $plan,
+                withStyleReference: $project->styleReference() !== null,
+                withFirstKeyframe: $keyframe->position > 1,
+            ),
             'rendering' => true,
             'render_error' => null,
         ])->save();

@@ -14,8 +14,8 @@ use Throwable;
 
 /**
  * Renders a single keyframe again, for example after the director changed
- * its description. Keyframes after the first one use the first render as
- * their reference, like the full render does.
+ * its description. Like the full render it attaches the project's style
+ * sheet and, for keyframes after the first, the first keyframe's render.
  */
 #[DeleteWhenMissingModels]
 class GenerateKeyframeImage implements ShouldQueue
@@ -35,9 +35,13 @@ class GenerateKeyframeImage implements ShouldQueue
     public function handle(KeyframePainter $painter): void
     {
         $keyframe = $this->keyframe->load('shot.project');
+        $style = $painter->styleReferenceFor($keyframe->shot->project);
         $first = $keyframe->position > 1 ? $keyframe->shot->keyframes()->first()?->render() : null;
 
-        $painter->paint($keyframe, $keyframe->prompt, $first ? [$painter->referenceFor($first)] : []);
+        $painter->paint($keyframe, $keyframe->prompt, array_values(array_filter([
+            $style,
+            $first ? $painter->referenceFor($first) : null,
+        ])));
     }
 
     public function failed(?Throwable $exception): void
