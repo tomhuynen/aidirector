@@ -16,13 +16,9 @@
       </div>
     </header>
 
-    <main class="mx-auto w-full max-w-6xl flex-1 px-6 py-12 md:py-16">
+    <main class="relative mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-12 md:py-16">
       <slot />
     </main>
-
-    <footer class="mx-auto w-full max-w-6xl px-6 py-8 text-xs text-muted-foreground">
-      {{ app.title }}
-    </footer>
   </div>
   <Toaster position="bottom-right" />
 </template>

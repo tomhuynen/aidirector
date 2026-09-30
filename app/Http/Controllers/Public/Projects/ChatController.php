@@ -98,10 +98,11 @@ class ChatController
             'ask' => $data['ask'] ?? null,
             /** @var bool */
             'done' => (bool) ($data['done'] ?? false),
-            /** @var array{id: string, url: string}|null */
+            /** @var array{id: string, url: string, styleRoundsUrl: string}|null */
             'project' => $project === null ? null : [
                 'id' => $project->sqid,
                 'url' => route('public.projects.view', $project),
+                'styleRoundsUrl' => route('public.projects.style.round', $project),
             ],
             /** @var array<int, array{id: string, caption: string|null}> */
             'photos' => $photos->map(fn(Media $media) => [

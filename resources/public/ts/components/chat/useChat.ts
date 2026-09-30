@@ -1,23 +1,17 @@
 import { ref } from 'vue'
 
-import type { ChatAttachment, ChatMessage, ChatRole } from './types'
+import type { ChatAttachment, ChatMessage, ChatRole, NewChatMessage } from './types'
 
 type UseChatOptions = {
   /** Messages shown before the user says anything, such as a greeting. */
-  initial?: Omit<ChatMessage, 'id' | 'kind'>[]
+  initial?: { role: ChatRole; content: string }[]
   /** Sends the user's text and attachments and resolves with the assistant's reply. */
   send: (text: string, attachments: ChatAttachment[]) => Promise<string | null>
 }
 
 let nextId = 0
 
-const makeMessage = (role: ChatRole, content: string, attachments: ChatAttachment[] = []): ChatMessage => ({
-  id: `chat-${++nextId}`,
-  role,
-  kind: 'text',
-  content,
-  attachments,
-})
+const makeMessage = (message: NewChatMessage): ChatMessage => ({ ...message, id: `chat-${++nextId}` }) as ChatMessage
 
 /**
  * Transport-agnostic chat state: keeps the thread, appends the user's message
@@ -25,17 +19,22 @@ const makeMessage = (role: ChatRole, content: string, attachments: ChatAttachmen
  */
 export function useChat(options: UseChatOptions) {
   const messages = ref<ChatMessage[]>(
-    (options.initial ?? []).map((message) => makeMessage(message.role, message.content, message.attachments)),
+    (options.initial ?? []).map((message) =>
+      makeMessage({ kind: 'text', role: message.role, content: message.content }),
+    ),
   )
   const busy = ref(false)
   const error = ref<string | null>(null)
 
-  const push = (role: ChatRole, content: string, attachments: ChatAttachment[] = []) => {
-    const message = makeMessage(role, content, attachments)
-    messages.value.push(message)
+  /** Appends any message kind and returns the reactive copy in the thread. */
+  const push = (message: NewChatMessage): ChatMessage => {
+    messages.value.push(makeMessage(message))
 
-    return message
+    return messages.value[messages.value.length - 1]
   }
+
+  const pushText = (role: ChatRole, content: string, attachments: ChatAttachment[] = []) =>
+    push({ kind: 'text', role, content, attachments })
 
   const send = async (text: string, attachments: ChatAttachment[] = []) => {
     const content = text.trim()
@@ -46,13 +45,13 @@ export function useChat(options: UseChatOptions) {
 
     error.value = null
     busy.value = true
-    push('user', content, attachments)
+    pushText('user', content, attachments)
 
     try {
       const reply = await options.send(content, attachments)
 
       if (reply) {
-        push('assistant', reply)
+        pushText('assistant', reply)
       }
     } catch (caught) {
       error.value = caught instanceof Error ? caught.message : String(caught)
@@ -61,5 +60,5 @@ export function useChat(options: UseChatOptions) {
     }
   }
 
-  return { messages, busy, error, send, push }
+  return { messages, busy, error, send, push, pushText }
 }

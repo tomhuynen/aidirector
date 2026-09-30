@@ -11,6 +11,7 @@ use App\Models\Media;
 use App\Models\PersonalAccessToken;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Models\StyleOption;
 use App\Models\Tenant;
 use App\Models\Upload;
 use App\Models\User;
@@ -86,6 +87,7 @@ class AppServiceProvider extends ServiceProvider
             'generation' => Generation::class,
             'media' => Media::class,
             'upload' => Upload::class,
+            'style-option' => StyleOption::class,
         ]);
 
         Model::preventLazyLoading(! $this->app->isProduction());

@@ -104,6 +104,7 @@ describe('chat', function () {
             ->and($project->conversation->title)->toBe('Mailbox explainer')
             ->and($response->json('project.id'))->toBe($project->sqid)
             ->and($response->json('project.url'))->toBe(route('public.projects.view', $project))
+            ->and($response->json('project.styleRoundsUrl'))->toBe(route('public.projects.style.round', $project))
             ->and(ConversationMessage::query()->where('conversation_id', $conversationId)->count())->toBe(4);
 
         ProjectIntake::assertPromptedTimes(2);

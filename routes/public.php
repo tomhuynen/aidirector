@@ -7,10 +7,13 @@ use App\Http\Controllers\Public\Auth\ForgotPasswordController;
 use App\Http\Controllers\Public\Auth\LoginController;
 use App\Http\Controllers\Public\Auth\RegisterController;
 use App\Http\Controllers\Public\Auth\ResetPasswordController;
+use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
+use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
+use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
 use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
@@ -54,6 +57,17 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
+
+    Route::prefix('projects/{project}/style')
+        ->name('projects.style.')
+        ->scopeBindings()
+        ->group(function () {
+            Route::post('rounds', [StyleRoundController::class, 'store'])->name('round');
+            Route::get('rounds/{round}', [StyleRoundController::class, 'index'])->whereNumber('round')->name('options');
+            Route::post('{styleOption}/pin', [StylePinController::class, 'store'])->name('pin');
+        });
+
+    Route::get('media/{media}/{conversion?}', [MediaViewController::class, 'view'])->middleware('signed')->name('media.view');
 
     Route::prefix('projects/{project}/shots')
         ->name('shots.')

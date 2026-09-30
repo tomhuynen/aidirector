@@ -24,6 +24,8 @@ class ProjectPolicy
 
     public const DESTROY = 'destroy';
 
+    public const STYLE = 'style';
+
     public function index(Director $director): bool
     {
         return true;
@@ -49,6 +51,14 @@ class ProjectPolicy
     }
 
     public function destroy(Director $director, Project $project): bool
+    {
+        return $project->isOwnedBy($director);
+    }
+
+    /**
+     * Explore and pin styles for the project.
+     */
+    public function style(Director $director, Project $project): bool
     {
         return $project->isOwnedBy($director);
     }

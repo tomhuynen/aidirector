@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Collection;
 use Laravel\Ai\Models\Conversation;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Image\Enums\Fit;
@@ -99,6 +101,34 @@ class Project extends Model implements HasMedia
     public function shots(): HasMany
     {
         return $this->hasMany(Shot::class)->orderBy('position');
+    }
+
+    /** @return MorphMany<Generation, $this> */
+    public function generations(): MorphMany
+    {
+        return $this->morphMany(Generation::class, 'generatable');
+    }
+
+    /** @return HasMany<StyleOption, $this> */
+    public function styleOptions(): HasMany
+    {
+        return $this->hasMany(StyleOption::class)->orderBy('round')->orderBy('position');
+    }
+
+    /**
+     * The content photos a style sheet is composed from: the first few that
+     * have a caption, since those are what the prompt can name.
+     *
+     * @return Collection<int, BaseMedia>
+     */
+    public function styleSheetSubjects(int $limit = 4): Collection
+    {
+        $photos = $this->getMedia(self::CONTENT_REFERENCES);
+
+        return $photos
+            ->sortByDesc(fn(BaseMedia $media) => filled($media->getCustomProperty(self::CAPTION)))
+            ->take($limit)
+            ->values();
     }
 
     public function isOwnedBy(Director $director): bool
