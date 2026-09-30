@@ -20,6 +20,8 @@ use App\Http\Controllers\Public\Shots\Storyline\GenerateController as StorylineG
 use App\Http\Controllers\Public\Shots\Storyline\SuggestController as StorylineSuggestController;
 use App\Http\Controllers\Public\Shots\UpdateController as ShotUpdateController;
 use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
+use App\Http\Controllers\Uploads\StoreController as UploadStoreController;
+use App\Http\Controllers\Uploads\ViewController as UploadViewController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -70,3 +72,14 @@ Route::middleware('auth:director')->group(function () {
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');
         });
 });
+
+/*
+ * Uploads: storing needs a signed URL or an authorised user (see StoreRequest),
+ * viewing needs the signed link from the upload resource.
+ */
+Route::prefix('uploads')
+    ->name('uploads.')
+    ->group(function () {
+        Route::post('/', [UploadStoreController::class, 'store'])->name('store');
+        Route::get('{upload}', [UploadViewController::class, 'view'])->middleware('signed')->name('view');
+    });

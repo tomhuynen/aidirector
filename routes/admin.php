@@ -25,6 +25,8 @@ use App\Http\Controllers\Admin\Tenants\SwitchController as TenantSwitchControlle
 use App\Http\Controllers\Admin\Tenants\UpdateController as TenantUpdateController;
 use App\Http\Controllers\Admin\Tenants\ViewController as TenantViewController;
 use App\Http\Controllers\Admin\Widgets\ActionController as WidgetActionController;
+use App\Http\Controllers\Uploads\StoreController as UploadStoreController;
+use App\Http\Controllers\Uploads\ViewController as UploadViewController;
 use App\Support\Search\Http\Controllers\Search\IndexController as SearchIndexController;
 use App\Support\Search\Http\Controllers\Search\ViewController as SearchViewController;
 use Illuminate\Support\Facades\Route;
@@ -50,6 +52,13 @@ Route::prefix('activities')
     ->group(function () {
         Route::get('/', [ActivityIndexController::class, 'index'])->name('index');
         Route::get('{activity}', [ActivityViewController::class, 'view'])->name('view');
+    });
+
+Route::prefix('uploads')
+    ->name('uploads.')
+    ->group(function () {
+        Route::post('/', [UploadStoreController::class, 'store'])->name('store');
+        Route::get('{upload}', [UploadViewController::class, 'view'])->middleware('signed')->name('view');
     });
 
 Route::prefix('config')
