@@ -26,6 +26,8 @@ enum ShotStatus: string
 
     case KEYFRAMES_READY = 'keyframes-ready';
 
+    case VIDEO_PENDING = 'video-pending';
+
     case VIDEO_READY = 'video-ready';
 
     public function description(): string
@@ -39,6 +41,7 @@ enum ShotStatus: string
             self::STORYLINE_CHOSEN => 'Storyline chosen',
             self::KEYFRAMES_PENDING => 'Generating keyframes',
             self::KEYFRAMES_READY => 'Keyframes ready',
+            self::VIDEO_PENDING => 'Rendering video',
             self::VIDEO_READY => 'Video ready',
         };
     }

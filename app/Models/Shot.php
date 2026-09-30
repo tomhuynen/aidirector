@@ -13,14 +13,25 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use RedExplosion\Sqids\Concerns\HasSqids;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
-class Shot extends Model
+class Shot extends Model implements HasMedia
 {
     /** @use HasFactory<\Database\Factories\ShotFactory> */
     use HasFactory;
     use HasSqids;
+    use InteractsWithMedia;
     use UsesTenantConnection;
+
+    /**
+     * The numbered storyboard of the keyframes that the video model animates.
+     */
+    public const COLLAGE = 'collage';
+
+    public const VIDEO = 'video';
 
     protected $guarded = [];
 
@@ -99,6 +110,34 @@ class Shot extends Model
     {
         $this->keyframes()->get()->each->delete();
         $this->unsetRelation('keyframes');
+        $this->forgetVideo();
+    }
+
+    /**
+     * Remove the collage and the video, which no longer match once the keyframes change.
+     */
+    public function forgetVideo(): void
+    {
+        $this->clearMediaCollection(self::COLLAGE);
+        $this->clearMediaCollection(self::VIDEO);
+
+        $this->forceFill(['video_prompt' => null, 'video_job_id' => null, 'video_error' => null])->save();
+    }
+
+    public function collage(): ?Media
+    {
+        return $this->getFirstMedia(self::COLLAGE);
+    }
+
+    public function video(): ?Media
+    {
+        return $this->getFirstMedia(self::VIDEO);
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(self::COLLAGE)->singleFile()->acceptsMimeTypes(['image/jpeg', 'image/png']);
+        $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }
 
     /** @return BelongsTo<Project, $this> */

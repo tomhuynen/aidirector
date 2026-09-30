@@ -9,6 +9,8 @@ use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Shot;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\URL;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 /** @mixin Shot */
 class ShotResource extends JsonResource
@@ -46,6 +48,14 @@ class ShotResource extends JsonResource
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
+            /** @var string|null */
+            'videoPrompt' => $this->video_prompt,
+            /** @var string|null */
+            'videoError' => $this->video_error,
+            /** @var string|null */
+            'collageUrl' => $this->mediaUrl($this->collage()),
+            /** @var string|null */
+            'videoUrl' => $this->mediaUrl($this->video()),
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,
             'links' => $this->when($this->resource->exists, fn() => [
@@ -57,9 +67,23 @@ class ShotResource extends JsonResource
                 'storylineGenerate' => route('public.shots.storyline.generate', [$this->project, $this->resource]),
                 'storylineReopen' => route('public.shots.storyline.reopen', [$this->project, $this->resource]),
                 'keyframesGenerate' => route('public.shots.keyframes.generate', [$this->project, $this->resource]),
+                'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
             ]),
             /** @var array<string, bool> */
             'can' => $this->when(! is_null($request->user()), fn() => $this->authorizations($request, ShotPolicy::abilities(ShotPolicy::CREATE)), []),
         ];
+    }
+
+    /**
+     * A signed link to a private media file. The expiry is rounded to the hour
+     * so the link stays the same while the page polls and the browser can cache it.
+     */
+    private function mediaUrl(?Media $media): ?string
+    {
+        if ($media === null) {
+            return null;
+        }
+
+        return URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $media]);
     }
 }

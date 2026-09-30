@@ -27,6 +27,7 @@ use App\Http\Controllers\Public\Shots\Storyline\ChooseController as StorylineCho
 use App\Http\Controllers\Public\Shots\Storyline\GenerateController as StorylineGenerateController;
 use App\Http\Controllers\Public\Shots\Storyline\SuggestController as StorylineSuggestController;
 use App\Http\Controllers\Public\Shots\UpdateController as ShotUpdateController;
+use App\Http\Controllers\Public\Shots\Video\GenerateController as VideoGenerateController;
 use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
 use App\Http\Controllers\Uploads\StoreController as UploadStoreController;
 use App\Http\Controllers\Uploads\ViewController as UploadViewController;
@@ -94,6 +95,7 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{shot}/keyframes/{keyframe}/image/{conversion?}', [KeyframeImageController::class, 'view'])
                 ->whereIn('conversion', [Keyframe::THUMBNAIL])
                 ->name('keyframes.image');
+            Route::post('{shot}/video/generate', [VideoGenerateController::class, 'store'])->name('video.generate');
             Route::get('{shot}/update', [ShotUpdateController::class, 'update'])->name('update');
             Route::post('{shot}/update', [ShotUpdateController::class, 'store']);
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');

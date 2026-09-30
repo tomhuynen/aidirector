@@ -41,4 +41,25 @@ return [
 
     'queue' => 'ai',
 
+    /*
+    |--------------------------------------------------------------------------
+    | Video
+    |--------------------------------------------------------------------------
+    |
+    | The video model animates the numbered keyframe collage. Durations are
+    | clamped to what the model accepts; the job polls OpenRouter until the
+    | clip is done or the wait runs out.
+    |
+    */
+
+    'video' => [
+        'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
+        'resolution' => env('AI_VIDEO_RESOLUTION', '720p'),
+        'min_duration' => 4,
+        'max_duration' => 15,
+        'poll_seconds' => 20,
+        'max_wait_minutes' => 30,
+        'collage_panel_height' => 720,
+    ],
+
 ];

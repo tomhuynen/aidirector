@@ -39,6 +39,14 @@
           :generating="shot.status === 'keyframes-pending'"
           :error="shot.storylineError"
           :images-url="shot.links?.keyframesGenerate ?? '#'"
+          :video="{
+            url: shot.videoUrl,
+            collageUrl: shot.collageUrl,
+            prompt: shot.videoPrompt,
+            error: shot.videoError,
+            pending: shot.status === 'video-pending',
+            generateUrl: shot.links?.videoGenerate ?? '#',
+          }"
         />
       </template>
       <BriefForm v-else :project="project" :shot="shot" />
@@ -84,6 +92,7 @@ const state = computed<State>(() => {
     case 'storyline-ready':
     case 'keyframes-pending':
     case 'keyframes-ready':
+    case 'video-pending':
     case 'video-ready':
       return props.shot.storyline ? 'keyframes' : 'options'
     default:
@@ -130,6 +139,7 @@ const busy = computed(
     state.value === 'suggesting' ||
     state.value === 'planning' ||
     props.shot.status === 'keyframes-pending' ||
+    props.shot.status === 'video-pending' ||
     props.keyframes.some((keyframe) => keyframe.rendering),
 )
 

@@ -27,6 +27,9 @@ return new class extends Migration {
             $table->json('chosen_storyline')->nullable();
             $table->json('storyline')->nullable();
             $table->text('storyline_error')->nullable();
+            $table->text('video_prompt')->nullable();
+            $table->string('video_job_id', 128)->nullable();
+            $table->text('video_error')->nullable();
             $table->timestamps();
 
             $table->index(['project_id', 'position']);
