@@ -12,7 +12,6 @@ use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
-use App\Http\Controllers\Public\Projects\Photos\PickController as PhotoPickController;
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
 use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
 use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
@@ -67,8 +66,6 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
-
-    Route::post('projects/{project}/photos/pick', [PhotoPickController::class, 'store'])->name('projects.photos.pick');
 
     Route::prefix('projects/{project}/style')
         ->name('projects.style.')

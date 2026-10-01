@@ -16,7 +16,6 @@ return new class extends Migration {
             $table->string('title');
             $table->string('purpose', 32);
             $table->text('description')->nullable();
-            $table->string('website')->nullable();
             $table->json('style');
             $table->string('aspect_ratio', 8);
             $table->unsignedSmallInteger('default_duration');

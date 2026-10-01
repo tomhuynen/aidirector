@@ -8,7 +8,6 @@ use App\Models\Director;
 use App\Models\Generation;
 use App\Models\Keyframe;
 use App\Models\Media;
-use App\Models\PhotoSuggestion;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Models\StyleOption;
@@ -45,7 +44,6 @@ function furnishedProject(Project $project, Director $director): void
     $child = StyleOption::factory()->childOf($parent)->ready()->create();
     $child->addMedia(UploadedFile::fake()->image('sheet-2.png'))->toMediaCollection(StyleOption::RENDER);
 
-    PhotoSuggestion::factory()->for($project)->create();
     $parent->generations()->create(['director_id' => $director->id, 'kind' => 'image', 'provider' => 'openrouter', 'model' => 'x']);
 
     ProjectIntake::fake([['reply' => 'Hi', 'ask' => null, 'done' => false]]);
@@ -68,7 +66,6 @@ it('removes every relation and every file when a project is deleted', function (
         ->and(Shot::query()->count())->toBe(0)
         ->and(Keyframe::query()->count())->toBe(0)
         ->and(StyleOption::query()->count())->toBe(0)
-        ->and(PhotoSuggestion::query()->count())->toBe(0)
         ->and(Conversation::query()->count())->toBe(0)
         ->and(ConversationMessage::query()->count())->toBe(0)
         ->and(Media::query()->pluck('model_id')->all())->toBe([$other->id])

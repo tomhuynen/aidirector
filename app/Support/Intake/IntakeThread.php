@@ -5,10 +5,8 @@ declare(strict_types=1);
 namespace App\Support\Intake;
 
 use App\Ai\Agents\ProjectIntake;
-use App\Http\Resources\Public\PhotoSuggestionResource;
 use App\Http\Resources\Public\StyleOptionResource;
 use App\Models\Media;
-use App\Models\PhotoSuggestion;
 use App\Models\Project;
 use App\Models\StyleOption;
 use Carbon\CarbonInterface;
@@ -19,8 +17,8 @@ use Laravel\Ai\Models\ConversationMessage;
 /**
  * Rebuilds the intake chat as the director saw it, so a project that is
  * still in setup can be resumed where it was left: the stored turns, the
- * photos added along the way, the photo galleries and the style rounds, in
- * the order they happened.
+ * photos added along the way and the style rounds, in the order they
+ * happened.
  */
 class IntakeThread
 {
@@ -71,22 +69,6 @@ class IntakeThread
             }
 
         }
-
-        $project->photoSuggestions()->get()
-            ->groupBy('batch')
-            ->each(function (Collection $suggestions, int $batch) use ($entries, $project, $request) {
-                /** @var PhotoSuggestion $first */
-                $first = $suggestions->first();
-
-                $entries->push([$first->created_at, 1, [
-                    'kind' => 'photo-gallery',
-                    'role' => 'assistant',
-                    'content' => '',
-                    'batch' => $batch,
-                    'pickUrl' => route('public.projects.photos.pick', $project),
-                    'suggestions' => PhotoSuggestionResource::collection($suggestions)->resolve($request),
-                ]]);
-            });
 
         $project->styleOptions()->with(['media', 'parent'])->get()
             ->each(fn(StyleOption $option) => $option->setRelation('project', $project))

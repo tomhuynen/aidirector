@@ -64,25 +64,4 @@ return [
         'max_wait_minutes' => 30,
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Photo search
-    |--------------------------------------------------------------------------
-    |
-    | Google image results through Serper, used to suggest contextual photos
-    | in the intake chat. Each query searches the client's website first and
-    | tops up from the whole web. Results smaller than min_edge are dropped.
-    |
-    */
-
-    'photo_search' => [
-        'api_key' => env('SERPER_API_KEY'),
-        'endpoint' => env('SERPER_IMAGES_URL', 'https://google.serper.dev/images'),
-        'per_query' => 8,
-        'max_queries' => 3,
-        'min_edge' => 600,
-        'max_download_bytes' => 15 * 1024 * 1024,
-        // Serper charges one credit per request; $1 per 1,000 at the smallest pack.
-        'cost_per_request' => 0.001,
-    ],
 ];
