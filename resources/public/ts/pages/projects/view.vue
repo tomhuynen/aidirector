@@ -30,11 +30,12 @@
 
     <section>
       <div class="space-y-5 rounded-xl border border-border bg-card p-6">
-        <OutputPicker
+        <FormatPicker
           :formats="videoFormats"
-          :outputs="project.videoOutputs"
-          :keyframe-ratio="project.aspectRatio"
-          :save-url="project.links?.outputs ?? '#'"
+          :aspect-ratio="project.aspectRatio"
+          :resolution="project.videoResolution"
+          :has-shots="shots.length > 0"
+          :save-url="project.links?.format ?? '#'"
         />
         <dl class="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border pt-4 text-sm">
           <div class="space-y-1">
@@ -157,7 +158,7 @@ import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import Placeholder from '@public:components/editor/Placeholder.vue'
 import { shotCode } from '@public:components/editor/shotCode'
-import OutputPicker from '@public:components/OutputPicker.vue'
+import FormatPicker from '@public:components/FormatPicker.vue'
 import Page from '@public:components/Page.vue'
 import { Button } from '@shared:ui/button'
 import { ArrowRight, ExternalLink, Pencil, Plus } from 'lucide-vue-next'

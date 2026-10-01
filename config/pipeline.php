@@ -75,7 +75,6 @@ return [
         // The default for projects without their own; the lowest the model offers, for quick tests.
         'resolution' => env('AI_VIDEO_RESOLUTION', '480p'),
         'resolutions' => ['480p', '720p', '1080p', '4K'],
-        'aspect_ratios' => ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', '9:21'],
         'min_duration' => 4,
         'max_duration' => 15,
         'poll_seconds' => 20,

@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Support\Video;
 
+use App\Enums\AspectRatio;
 use Illuminate\Support\Facades\Config;
 
 /**
- * The aspect ratios and resolutions the video model can deliver, and the
- * frame size of each combination.
+ * The aspect ratios a project can use, the resolutions the video model can
+ * deliver, and the frame size of each combination.
  */
 class VideoFormats
 {
@@ -18,10 +19,6 @@ class VideoFormats
         '16:9' => 'Landscape',
         '9:16' => 'Portrait',
         '1:1' => 'Square',
-        '4:3' => 'Classic',
-        '3:4' => 'Classic portrait',
-        '21:9' => 'Cinematic',
-        '9:21' => 'Tall',
     ];
 
     /**
@@ -29,7 +26,7 @@ class VideoFormats
      */
     public static function aspectRatios(): array
     {
-        return array_values(Config::get('pipeline.video.aspect_ratios'));
+        return array_column(AspectRatio::cases(), 'value');
     }
 
     /**

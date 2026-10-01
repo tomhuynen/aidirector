@@ -82,58 +82,55 @@ describe('index', function () {
     });
 });
 
-describe('outputs', function () {
-    it('offers every supported format with its frame size and starts on the project format', function () {
+describe('format', function () {
+    it('offers the aspect ratios and resolutions with their frame sizes', function () {
         $project = Project::factory()->ownedBy($this->director)->create(['aspect_ratio' => AspectRatio::PORTRAIT, 'video_resolution' => '480p']);
 
         actingAs($this->director, 'director')
             ->get(route('public.projects.view', $project))
             ->assertInertia(fn($page) => $page
-                ->where('videoFormats.aspectRatios.0', ['value' => '16:9', 'name' => 'Landscape'])
-                ->has('videoFormats.aspectRatios', 7)
+                ->where('videoFormats.aspectRatios', [
+                    ['value' => '16:9', 'name' => 'Landscape'],
+                    ['value' => '9:16', 'name' => 'Portrait'],
+                    ['value' => '1:1', 'name' => 'Square'],
+                ])
                 ->where('videoFormats.resolutions', ['480p', '720p', '1080p', '4K'])
                 ->where('videoFormats.sizes.16:9 480p', ['width' => 854, 'height' => 480])
                 ->where('videoFormats.sizes.9:16 1080p', ['width' => 1080, 'height' => 1920])
-                ->where('videoFormats.sizes.21:9 720p', ['width' => 1680, 'height' => 720])
                 ->where('videoFormats.sizes.1:1 4K', ['width' => 2160, 'height' => 2160])
-                ->where('project.videoOutputs', [['aspectRatio' => '9:16', 'resolution' => '480p']])
-                ->where('project.links.outputs', route('public.projects.outputs', $project)));
+                ->where('project.aspectRatio', '9:16')
+                ->where('project.videoResolution', '480p')
+                ->where('project.links.format', route('public.projects.format', $project)));
     });
 
-    it('saves several outputs once each', function () {
-        $project = Project::factory()->ownedBy($this->director)->create();
+    it('sets the project aspect ratio and resolution', function () {
+        $project = Project::factory()->ownedBy($this->director)->create(['aspect_ratio' => AspectRatio::PORTRAIT]);
 
         actingAs($this->director, 'director')
-            ->post(route('public.projects.outputs', $project), ['outputs' => [
-                ['aspectRatio' => '16:9', 'resolution' => '1080p'],
-                ['aspectRatio' => '9:16', 'resolution' => '720p'],
-                ['aspectRatio' => '16:9', 'resolution' => '1080p'],
-            ]])
+            ->post(route('public.projects.format', $project), ['aspectRatio' => '16:9', 'resolution' => '1080p'])
             ->assertRedirect(route('public.projects.view', $project));
 
-        expect($project->fresh()->videoOutputs())->toEqual([
-            ['aspect_ratio' => '16:9', 'resolution' => '1080p'],
-            ['aspect_ratio' => '9:16', 'resolution' => '720p'],
-        ]);
+        expect($project->fresh())
+            ->aspect_ratio->toBe(AspectRatio::LANDSCAPE)
+            ->videoResolution()->toBe('1080p');
     });
 
-    it('only accepts formats the video model supports and at least one', function (array $outputs, string $field) {
+    it('only accepts formats the project and the video model support', function (array $format, string $field) {
         $project = Project::factory()->ownedBy($this->director)->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.projects.outputs', $project), ['outputs' => $outputs])
+            ->post(route('public.projects.format', $project), $format)
             ->assertSessionHasErrors($field);
     })->with([
-        'none' => [[], 'outputs'],
-        'unknown ratio' => [[['aspectRatio' => '4:5', 'resolution' => '720p']], 'outputs.0.aspectRatio'],
-        'unknown resolution' => [[['aspectRatio' => '16:9', 'resolution' => '8K']], 'outputs.0.resolution'],
+        'unknown ratio' => [['aspectRatio' => '21:9', 'resolution' => '720p'], 'aspectRatio'],
+        'unknown resolution' => [['aspectRatio' => '16:9', 'resolution' => '8K'], 'resolution'],
     ]);
 
-    it('forbids changing another director\'s outputs', function () {
+    it('forbids changing another director\'s format', function () {
         $project = Project::factory()->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.projects.outputs', $project), ['outputs' => [['aspectRatio' => '16:9', 'resolution' => '720p']]])
+            ->post(route('public.projects.format', $project), ['aspectRatio' => '16:9', 'resolution' => '720p'])
             ->assertForbidden();
     });
 });
