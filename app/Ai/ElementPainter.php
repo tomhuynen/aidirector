@@ -6,7 +6,6 @@ namespace App\Ai;
 
 use App\Models\Element;
 use App\Models\Keyframe;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Image;
 use Throwable;
@@ -21,33 +20,6 @@ class ElementPainter
     public function __construct(
         private readonly KeyframePainter $keyframes,
     ) {}
-
-    /**
-     * Gives every element in these keyframes that has no reference image yet
-     * one. A failed element is logged and skipped; the keyframes still render.
-     *
-     * @param  Collection<int, Keyframe>  $siblings  with elements loaded
-     */
-    public function paintMissing(Collection $siblings, Keyframe $first): void
-    {
-        $missing = $siblings
-            ->flatMap(fn(Keyframe $keyframe) => $keyframe->elements)
-            ->unique('id')
-            ->filter(fn(Element $element) => $element->reference() === null);
-
-        foreach ($missing as $element) {
-            $element->setRelation('project', $first->shot->project);
-            $inFirst = $first->elements->contains('id', $element->id);
-
-            try {
-                $this->paint($element, $inFirst ? $first : null);
-            } catch (Throwable $exception) {
-                report($exception);
-            }
-        }
-
-        $siblings->each(fn(Keyframe $keyframe) => $keyframe->load('elements.media'));
-    }
 
     /**
      * @throws Throwable when the image model fails; the failure is logged on the element first.

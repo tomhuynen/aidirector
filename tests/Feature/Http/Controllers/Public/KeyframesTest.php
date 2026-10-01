@@ -3,12 +3,12 @@
 declare(strict_types=1);
 
 use App\Ai\Agents\TweakInterpreter;
-use App\Ai\ElementPainter;
 use App\Ai\KeyframePainter;
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
 use App\Jobs\DetectElements;
 use App\Jobs\GenerateKeyframeImage;
+use App\Jobs\GenerateKeyframeOption;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
 use App\Jobs\TweakKeyframeImage;
@@ -16,6 +16,8 @@ use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use Illuminate\Bus\PendingBatch;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -57,12 +59,31 @@ function fakePng(): string
  */
 function renderAllKeyframes(Shot $shot): void
 {
-    (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+    drawFirstKeyframeOptions($shot);
 
     $first = $shot->keyframes()->firstOrFail();
     $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
 
-    (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
+    (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+}
+
+/**
+ * Draws the options for keyframe 1. The options run as a batch, which a faked
+ * queue only records; then they are drawn here one by one.
+ */
+function drawFirstKeyframeOptions(Shot $shot, bool $more = false): void
+{
+    (new GenerateKeyframes($shot, $more))->handle();
+
+    $first = $shot->keyframes()->firstOrFail();
+
+    if ($first->renders()->isEmpty()) {
+        foreach (range(0, GenerateKeyframes::optionCount() - 1) as $index) {
+            (new GenerateKeyframeOption($first, $index))->handle(app(KeyframePainter::class));
+        }
+
+        GenerateKeyframes::finishOptions($shot->id);
+    }
 }
 
 /**
@@ -216,12 +237,49 @@ describe('job', function () {
 });
 
 describe('first keyframe', function () {
+    it('draws the options side by side in one batch', function () {
+        Bus::fake();
+
+        $shot = plannedShot($this->project, ['status' => ShotStatus::FIRST_KEYFRAME_PENDING]);
+
+        (new GenerateKeyframes($shot))->handle();
+
+        $first = $shot->keyframes()->firstOrFail();
+
+        Bus::assertBatched(fn(PendingBatch $batch) => $batch->jobs->count() === GenerateKeyframes::optionCount()
+            && $batch->allowsFailures()
+            && $batch->jobs->every(fn(GenerateKeyframeOption $job) => $job->keyframe->is($first))
+            && $batch->jobs->pluck('variation')->all() === range(0, GenerateKeyframes::optionCount() - 1));
+    });
+
+    it('settles the round once the batch is done', function () {
+        Image::fake(fn() => numberedPng());
+
+        $shot = plannedShot($this->project, ['status' => ShotStatus::FIRST_KEYFRAME_PENDING]);
+        $first = Keyframe::factory()->for($shot)->create(['position' => 1, 'rendering' => true]);
+
+        GenerateKeyframes::finishOptions($shot->id);
+
+        expect($shot->fresh())->status->toBe(ShotStatus::STORYLINE_READY)->storyline_error->not->toBeNull()
+            ->and($first->fresh())->rendering->toBeFalse()->render_error->not->toBeNull();
+
+        (new GenerateKeyframeOption($first, 0))->handle(app(KeyframePainter::class));
+        GenerateKeyframes::finishOptions($shot->id, failed: 2);
+
+        expect($shot->fresh())->status->toBe(ShotStatus::FIRST_KEYFRAME_READY)->storyline_error->toContain('Not every option')
+            ->and($first->fresh())->render_id->toBeNull()->render_error->toBeNull();
+
+        GenerateKeyframes::finishOptions($shot->id);
+
+        expect($shot->fresh()->storyline_error)->toBeNull();
+    });
+
     it('draws options for keyframe 1 only and waits for a choice', function () {
         Image::fake(fn() => numberedPng());
 
         $shot = plannedShot($this->project, ['status' => ShotStatus::FIRST_KEYFRAME_PENDING]);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateKeyframes($shot))->handle();
 
         $shot->refresh();
         [$first, $second] = $shot->keyframes()->get();
@@ -244,7 +302,7 @@ describe('first keyframe', function () {
         Image::fake(fn() => numberedPng());
 
         $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateKeyframes($shot))->handle();
 
         Queue::fake();
 
@@ -255,7 +313,7 @@ describe('first keyframe', function () {
         expect($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING);
         Queue::assertPushed(GenerateKeyframes::class, fn(GenerateKeyframes $job) => $job->more);
 
-        (new GenerateKeyframes($shot->fresh(), more: true))->handle(app(KeyframePainter::class));
+        (new GenerateKeyframes($shot->fresh(), more: true))->handle();
 
         expect($shot->keyframes()->firstOrFail()->renders())->toHaveCount(6)
             ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY);
@@ -265,7 +323,7 @@ describe('first keyframe', function () {
         Image::fake(fn() => numberedPng());
 
         $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateKeyframes($shot))->handle();
         $first = $shot->keyframes()->firstOrFail();
         $chosen = $first->renders()->get(1);
 
@@ -285,7 +343,7 @@ describe('first keyframe', function () {
         expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
             ->and($shot->keyframes()->where('position', 2)->first()->rendering)->toBeTrue();
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
 
         $chosenBytes = Storage::disk(Disk::TENANT->value)->get($chosen->getPathRelativeToRoot());
 

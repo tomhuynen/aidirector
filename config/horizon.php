@@ -218,8 +218,10 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            // Keyframe options and cast and sets images are drawn side by side.
             'supervisor-ai' => [
-                'maxProcesses' => 4,
+                'minProcesses' => 4,
+                'maxProcesses' => 10,
             ],
         ],
 
@@ -228,7 +230,8 @@ return [
                 'maxProcesses' => 5,
             ],
             'supervisor-ai' => [
-                'maxProcesses' => 2,
+                'minProcesses' => 3,
+                'maxProcesses' => 6,
             ],
         ],
     ],

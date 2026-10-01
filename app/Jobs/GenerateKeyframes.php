@@ -4,19 +4,20 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Ai\Briefs\KeyframeImageBrief;
-use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
 use App\Models\Element;
 use App\Models\Shot;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
 use Throwable;
 
 /**
- * Draws options for keyframe 1 for the director to choose from. The first run
+ * Draws options for keyframe 1 for the director to choose from, side by side
+ * in one batch of {@see GenerateKeyframeOption} jobs. The first run
  * replaces the shot's keyframes with fresh rows for the current plan, linked
  * to the cast and sets the plan names; with
  * `$more` it adds another batch of options to the existing keyframe 1. The
@@ -38,7 +39,7 @@ class GenerateKeyframes implements ShouldQueue
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
-    public function handle(KeyframePainter $painter): void
+    public function handle(): void
     {
         $shot = $this->shot->load('project');
 
@@ -46,19 +47,46 @@ class GenerateKeyframes implements ShouldQueue
             $this->replaceKeyframes($shot);
         }
 
-        $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
-        $first = $siblings->firstOrFail();
+        $first = $shot->keyframes()->with('media')->firstOrFail();
         $drawn = $first->renders()->count();
+        $shotId = $shot->id;
 
-        foreach (range(0, self::optionCount() - 1) as $index) {
-            $painter->render($first, $siblings, KeyframeImageBrief::variation($drawn + $index), choose: false);
+        Bus::batch(collect(range(0, self::optionCount() - 1))->map(fn(int $index) => new GenerateKeyframeOption($first, $drawn + $index))->all())
+            ->name("Keyframe 1 options for shot {$shot->id}")
+            ->onQueue(Config::get('pipeline.queue'))
+            ->allowFailures()
+            ->finally(static fn(Batch $batch) => self::finishOptions($shotId, $batch->failedJobs))
+            ->dispatch();
+    }
+
+    /**
+     * Once every option of a round is drawn or failed: wait for the director's
+     * choice when there is anything to choose from, otherwise report the failure.
+     */
+    public static function finishOptions(int $shotId, int $failed = 0): void
+    {
+        $shot = Shot::query()->find($shotId);
+        $first = $shot?->keyframes()->with('media')->first();
+
+        if ($shot === null || $first === null) {
+            return;
         }
 
-        $first->forceFill(['render_id' => null, 'rendering' => false, 'render_error' => null])->save();
+        $hasOptions = $first->renders()->isNotEmpty();
+
+        $first->forceFill([
+            'render_id' => null,
+            'rendering' => false,
+            'render_error' => $hasOptions ? null : __('No option could be drawn.'),
+        ])->save();
 
         $shot->forceFill([
-            'storyline_error' => null,
-            'status' => ShotStatus::FIRST_KEYFRAME_READY,
+            'storyline_error' => match (true) {
+                ! $hasOptions => __('The keyframe images could not be generated. Please try again.'),
+                $failed > 0 => __('Not every option could be drawn. Choose one of these or try again.'),
+                default => null,
+            },
+            'status' => $hasOptions ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
     }
 

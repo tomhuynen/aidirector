@@ -11,6 +11,7 @@ use App\Enums\Disk;
 use App\Enums\ElementType;
 use App\Enums\ShotStatus;
 use App\Jobs\DetectElements;
+use App\Jobs\GenerateElementReference;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
 use App\Models\Director;
@@ -18,6 +19,8 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use Illuminate\Bus\PendingBatch;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Ai\Image;
@@ -73,7 +76,7 @@ function castShot(Project $project, array $attributes = []): Shot
  */
 function chooseFirstKeyframe(Shot $shot): Keyframe
 {
-    (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+    (new GenerateKeyframes($shot))->handle();
 
     $first = $shot->keyframes()->firstOrFail();
     $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
@@ -119,7 +122,7 @@ describe('linking', function () {
         $shot = castShot($this->project);
 
         $first = chooseFirstKeyframe($shot);
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
 
         $second = $shot->keyframes()->where('position', 2)->firstOrFail();
 
@@ -146,7 +149,7 @@ describe('linking', function () {
         $elements = collect(range(1, 4))->map(fn(int $n) => withReference(Element::factory()->for($this->project)->object()->create(['name' => "Crate {$n}"])));
         $second->elements()->sync($elements->pluck('id')->all());
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
             && $prompt->contains('- Crate 4 (object)')
@@ -313,7 +316,7 @@ describe('reference images', function () {
         $first->elements()->attach($guard);
         $shot->keyframes()->where('position', 3)->firstOrFail()->elements()->attach($guard);
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
 
         $firstBytes = Storage::disk(Disk::TENANT->value)->get($first->fresh()->render()->getPathRelativeToRoot());
 
@@ -330,6 +333,39 @@ describe('reference images', function () {
             && $prompt->contains('The first attached image is the reference for Security guard (person)'));
     });
 
+    it('draws new element images side by side before the keyframes', function () {
+        Image::fake(fn() => elementPng());
+
+        $shot = castShot($this->project);
+        $first = chooseFirstKeyframe($shot);
+        $guard = Element::factory()->for($this->project)->create(['name' => 'Security guard']);
+        $crate = Element::factory()->for($this->project)->object()->create();
+        $first->elements()->attach($guard);
+        $shot->keyframes()->where('position', 3)->firstOrFail()->elements()->attach($crate);
+
+        Bus::fake();
+
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+
+        Bus::assertBatched(fn(PendingBatch $batch) => $batch->jobs->count() === 2
+            && $batch->allowsFailures()
+            && $batch->jobs->first(fn(GenerateElementReference $job) => $job->element->is($guard))?->source?->is($first)
+            && $batch->jobs->first(fn(GenerateElementReference $job) => $job->element->is($crate))?->source === null);
+
+        expect($shot->keyframes()->where('position', 2)->firstOrFail()->renders())->toHaveCount(0);
+    });
+
+    it('does not fail the batch when an element image fails', function () {
+        Image::fake(fn() => throw new RuntimeException('Provider down'));
+
+        $crate = Element::factory()->for($this->project)->object()->create();
+
+        (new GenerateElementReference($crate))->handle(app(ElementPainter::class));
+
+        expect($crate->fresh()->reference())->toBeNull()
+            ->and($crate->generations()->whereNotNull('error')->count())->toBe(1);
+    });
+
     it('keeps rendering the keyframes when an element image fails', function () {
         Image::fake(function (ImagePrompt $prompt) {
             if ($prompt->contains('Show only this object')) {
@@ -344,7 +380,7 @@ describe('reference images', function () {
         $crate = Element::factory()->for($this->project)->object()->create();
         $shot->keyframes()->where('position', 2)->firstOrFail()->elements()->attach($crate);
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
 
         expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
             ->and($crate->fresh()->reference())->toBeNull()
