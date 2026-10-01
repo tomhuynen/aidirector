@@ -15,6 +15,19 @@
       </Button>
     </template>
 
+    <!-- The cast and sets group picture, or the chosen style sheet when the cast was skipped. -->
+    <figure v-if="headerImage" class="overflow-hidden rounded-xl border border-border bg-card">
+      <img
+        :src="headerImage"
+        :alt="
+          project.coverUrl
+            ? $t('The cast and sets of :title', { title: project.title })
+            : $t('Style reference for :title', { title: project.title })
+        "
+        class="aspect-[21/9] w-full object-cover"
+      />
+    </figure>
+
     <section class="grid gap-6 lg:grid-cols-3">
       <div class="overflow-hidden rounded-xl border border-border bg-card lg:col-span-2">
         <div class="grid md:grid-cols-2">
@@ -176,10 +189,13 @@ import { shotCode } from '@public:components/editor/shotCode'
 import Page from '@public:components/Page.vue'
 import { Button } from '@shared:ui/button'
 import { ArrowRight, ExternalLink, Pencil, Plus } from 'lucide-vue-next'
+import { computed } from 'vue'
 
 defineOptions({
   layout: AppLayout,
 })
 
-defineProps<Inertia.Pages.Projects.View>()
+const props = defineProps<Inertia.Pages.Projects.View>()
+
+const headerImage = computed(() => props.project.coverUrl ?? props.project.styleReferenceUrl)
 </script>

@@ -92,7 +92,9 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             Say in one or two sentences that you will now show a few visual directions, rendered with their own subjects, and that they should pick the one that comes closest; they can ask for more like any of them. Set "ask" to "style" on every turn where you are waiting for a style to be picked. The app renders the style sheets; you never describe styles yourself in this stage.
             When the user's message says a style was chosen, confirm it in one sentence and go to stage four. A style is needed before anything can be rendered, so this step cannot be skipped: if the user wants to skip it, say so briefly and suggest asking for more like the closest option instead.
 
-            Stage four, the cast and sets.
+            Stage four, the cast and sets. This stage is optional.
+            Start by asking in one short question whether the user wants to set up the recurring people, places and objects now, so every shot draws them the same way, or skip it and add them later while making shots. If they skip, set "skip_elements" to true, say in one sentence that the project is ready and set "done" to true.
+            If they want to set them up:
             First check whether you know enough to suggest people, places and objects: who the audience is, where the shots take place and what happens in them. If something important is missing, ask about it in one question before you begin.
             Then go through the categories one at a time, in this order: people, places, objects. For each category:
             1. Tell the user briefly what you already know for it, from the description, the conversation and the uploaded photos listed under "What the app knows", and ask whether that is right and whether they want to add anything.
@@ -109,7 +111,7 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             - If the user gives several things at once, take them all and move on to the first missing one.
             - Reply in the language the user writes in. No markdown, no lists, no headings.
             - Earlier assistant turns in this conversation are JSON objects; the user only ever saw their "reply".
-            - "element_round" and "skip" are actions for this turn only: set them only on the turn you start or skip a category, otherwise null.
+            - "element_round", "skip" and "skip_elements" are actions for this turn only: set them only on the turn you start or skip a category, otherwise null.
             {$this->knowledge()}
             INSTRUCTIONS;
     }
@@ -171,6 +173,7 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
                 'brief' => $schema->string()->required(),
             ])->nullable()->required(),
             'skip' => $schema->string()->enum(ElementType::collect()->map->value->all())->nullable()->required(),
+            'skip_elements' => $schema->boolean()->required(),
             'done' => $schema->boolean()->required(),
         ];
     }

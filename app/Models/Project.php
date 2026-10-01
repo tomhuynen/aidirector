@@ -43,6 +43,12 @@ class Project extends Model implements HasMedia
     public const STYLE_REFERENCES = 'style_references';
 
     /**
+     * The group picture of the cast and sets, drawn when setup finishes with
+     * elements picked. It heads the project page.
+     */
+    public const COVER = 'cover';
+
+    /**
      * The size every reference is sent to the models at, whatever arrived.
      */
     public const REFERENCE = 'reference';
@@ -233,6 +239,7 @@ class Project extends Model implements HasMedia
     {
         $this->addMediaCollection(self::CONTENT_REFERENCES)->acceptsMimeTypes(self::REFERENCE_MIME_TYPES);
         $this->addMediaCollection(self::STYLE_REFERENCES)->acceptsMimeTypes(self::REFERENCE_MIME_TYPES);
+        $this->addMediaCollection(self::COVER)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
     }
 
     /**

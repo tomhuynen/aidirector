@@ -39,6 +39,8 @@ class ProjectResource extends JsonResource
             /** @var string|null */
             'styleReferenceUrl' => $this->styleReferenceUrl(),
             /** @var string|null */
+            'coverUrl' => $this->coverUrl(),
+            /** @var string|null */
             'website' => $this->website,
             'videoResolution' => $this->videoResolution(),
             'aspectRatio' => $this->aspect_ratio,
@@ -61,6 +63,16 @@ class ProjectResource extends JsonResource
             /** @var array<string, bool> */
             'can' => $this->when(! is_null($request->user()), fn() => $this->authorizations($request, ProjectPolicy::abilities()), []),
         ];
+    }
+
+    /**
+     * A signed link to the cast and sets group picture, once it has been drawn.
+     */
+    private function coverUrl(): ?string
+    {
+        $cover = $this->getFirstMedia(Project::COVER);
+
+        return $cover === null ? null : URL::temporarySignedRoute('public.media.view', now()->addHours(2), ['media' => $cover]);
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
 use App\Http\Requests\Public\ProjectChatRequest;
 use App\Jobs\AnalyzePhoto;
+use App\Jobs\GenerateProjectCover;
 use App\Models\Director;
 use App\Models\ElementRound;
 use App\Models\Media;
@@ -236,6 +237,14 @@ class ChatController
             return null;
         }
 
+        if ((bool) ($data['skip_elements'] ?? false)) {
+            foreach (ElementType::cases() as $type) {
+                $this->startElementRound->skip($project, $type);
+            }
+
+            return null;
+        }
+
         $skip = ElementType::tryFrom((string) ($data['skip'] ?? ''));
 
         if ($skip !== null) {
@@ -268,6 +277,11 @@ class ChatController
         }
 
         $project->forceFill(['setup_completed_at' => now()])->save();
+
+        // With cast and sets picked, a group picture heads the project page.
+        if ($project->elements()->exists()) {
+            GenerateProjectCover::dispatch($project);
+        }
 
         return true;
     }

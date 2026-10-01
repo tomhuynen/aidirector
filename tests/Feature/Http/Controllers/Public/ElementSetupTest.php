@@ -6,12 +6,14 @@ use App\Ai\Agents\ElementSuggester;
 use App\Ai\Agents\PhotoAnalyst;
 use App\Ai\Agents\ProjectIntake;
 use App\Ai\ElementPainter;
+use App\Ai\ProjectCoverPainter;
 use App\Enums\Disk;
 use App\Enums\ElementRoundStatus;
 use App\Enums\ElementSuggestionStatus;
 use App\Enums\ElementType;
 use App\Jobs\AnalyzePhoto;
 use App\Jobs\GenerateElementSuggestions;
+use App\Jobs\GenerateProjectCover;
 use App\Jobs\RenderElementSuggestion;
 use App\Models\Director;
 use App\Models\Element;
@@ -149,6 +151,84 @@ describe('chat', function () {
             ->toContain('- People: settled, picked: Guard')
             ->toContain('- Places: skipped')
             ->toContain('- Objects: not started');
+    });
+});
+
+describe('optional stage and cover', function () {
+    it('lets the director skip the whole cast and sets stage and finishes without a cover', function () {
+        Queue::fake([GenerateProjectCover::class]);
+        $conversationId = projectInElementStage($this->director, $this->project);
+        ProjectIntake::fake([[
+            'reply' => 'Fine, the project is ready.', 'ask' => null, 'done' => true,
+            'skip' => null, 'skip_elements' => true, 'element_round' => null,
+        ]]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Not now'])
+            ->assertSuccessful()
+            ->assertJsonPath('done', true);
+
+        expect($this->project->fresh()->setup_completed_at)->not->toBeNull()
+            ->and($this->project->elementRounds()->pluck('status')->unique()->all())->toBe([ElementRoundStatus::SKIPPED])
+            ->and($this->project->elementRounds()->count())->toBe(3);
+
+        Queue::assertNotPushed(GenerateProjectCover::class);
+    });
+
+    it('draws a cover when setup finishes with cast and sets picked', function () {
+        Queue::fake([GenerateProjectCover::class]);
+        $conversationId = projectInElementStage($this->director, $this->project);
+        Element::query()->create(['project_id' => $this->project->id, 'type' => ElementType::PERSON, 'name' => 'Guard', 'description' => 'd']);
+        foreach (ElementType::cases() as $type) {
+            ElementRound::factory()->for($this->project)->type($type)->status(ElementRoundStatus::PICKED)->create();
+        }
+        ProjectIntake::fake([['reply' => 'Ready.', 'ask' => null, 'done' => true, 'skip' => null, 'skip_elements' => false, 'element_round' => null]]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Thanks'])
+            ->assertJsonPath('done', true);
+
+        Queue::assertPushed(GenerateProjectCover::class, fn(GenerateProjectCover $job) => $job->project->is($this->project));
+    });
+
+    it('paints the cast in one picture with the place behind them and shows it on the project page', function () {
+        Image::fake([pngBase64()]);
+        $this->project->addMedia(UploadedFile::fake()->image('sheet.png'))->toMediaCollection(Project::STYLE_REFERENCES);
+        $make = function (ElementType $type, string $name) {
+            $element = Element::query()->create(['project_id' => $this->project->id, 'type' => $type, 'name' => $name, 'description' => "{$name} look"]);
+            $element->addMedia(UploadedFile::fake()->image("{$name}.png"))->toMediaCollection(Element::REFERENCE);
+        };
+        $make(ElementType::PERSON, 'Guard');
+        $make(ElementType::PERSON, 'Visitor');
+        $make(ElementType::PLACE, 'Main gate');
+        $make(ElementType::OBJECT, 'Barrier');
+        Element::query()->create(['project_id' => $this->project->id, 'type' => ElementType::OBJECT, 'name' => 'Unrendered', 'description' => 'd']);
+
+        (new GenerateProjectCover($this->project))->handle(app(ProjectCoverPainter::class));
+
+        expect($this->project->fresh()->getFirstMedia(Project::COVER))->not->toBeNull();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->attachments->count() === 5
+            && $prompt->size === '16:9'
+            && $prompt->contains('The setting is Main gate')
+            && $prompt->contains('Attached image 1: Guard (person)')
+            && ! $prompt->contains('Unrendered'));
+
+        $this->project->forceFill(['setup_completed_at' => now()])->save();
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.view', $this->project))
+            ->assertInertia(fn($page) => $page->where('project.coverUrl', fn(?string $url) => str_contains((string) $url, '/media/') && str_contains((string) $url, 'signature=')));
+    });
+
+    it('skips the cover when no element has a reference image', function () {
+        Image::fake();
+        Element::query()->create(['project_id' => $this->project->id, 'type' => ElementType::PERSON, 'name' => 'Guard', 'description' => 'd']);
+
+        (new GenerateProjectCover($this->project))->handle(app(ProjectCoverPainter::class));
+
+        Image::assertNothingGenerated();
+        expect($this->project->fresh()->getFirstMedia(Project::COVER))->toBeNull();
     });
 });
 
