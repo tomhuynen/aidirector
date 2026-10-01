@@ -16,6 +16,7 @@ class GenerateController
 {
     /**
      * Render the images for the planned keyframes again, keeping the plan as it is.
+     * It starts over at choosing the first keyframe.
      */
     public function store(Project $project, Shot $shot)
     {
@@ -28,7 +29,7 @@ class GenerateController
         }
 
         $shot->forceFill([
-            'status' => ShotStatus::KEYFRAMES_PENDING,
+            'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
             'storyline_error' => null,
         ])->save();
 

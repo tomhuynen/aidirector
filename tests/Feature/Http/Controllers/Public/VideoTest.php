@@ -12,7 +12,6 @@ use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Support\Video\CollageBuilder;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -72,24 +71,6 @@ function videoPromptParts(): array
     ];
 }
 
-describe('collage', function () {
-    it('lays up to five keyframes out in one numbered row', function () {
-        $collage = new Imagick();
-        $collage->readImageBlob(app(CollageBuilder::class)->build([pngOf(90, 160), pngOf(90, 160), pngOf(90, 160), pngOf(90, 160)]));
-
-        expect($collage->getImageFormat())->toBe('JPEG')
-            ->and($collage->getImageWidth())->toBeGreaterThan($collage->getImageHeight() * 2)
-            ->and($collage->getImageHeight())->toBeLessThan(800);
-    });
-
-    it('switches to a grid above five keyframes', function () {
-        $collage = new Imagick();
-        $collage->readImageBlob(app(CollageBuilder::class)->build(array_fill(0, 6, pngOf(160, 90))));
-
-        expect($collage->getImageHeight())->toBeGreaterThan(720 * 2);
-    });
-});
-
 describe('generate', function () {
     it('starts rendering the video', function () {
         $shot = renderedShot($this->project);
@@ -134,22 +115,24 @@ describe('generate', function () {
 });
 
 describe('job', function () {
-    it('submits the numbered collage with a prompt that forbids inventing anything', function () {
+    it('submits every keyframe as its own reference with a prompt that forbids inventing anything', function () {
         VideoPromptWriter::fake([videoPromptParts()]);
         Http::fake(['openrouter.ai/api/v1/videos' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
 
+        $this->project->forceFill(['video_resolution' => '1080p'])->save();
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'duration' => 30]);
 
-        (new GenerateVideo($shot))->handle(app(CollageBuilder::class), app(App\Support\Video\OpenRouterVideoClient::class));
+        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class));
 
         $shot->refresh();
 
         expect($shot->video_job_id)->toBe('vid_123')
-            ->and($shot->collage())->not->toBeNull()
             ->and($shot->video_prompt)
             ->toContain('Create one continuous, natural 15-second animation')
-            ->toContain('storyboard collage of 4 keyframes, numbered 1 to 4')
-            ->toContain('must never appear in the video')
+            ->toContain('the very first frame of the video must match keyframe 1 exactly, and the very last frame of the video must match keyframe 4 exactly')
+            ->toContain('the first frame is keyframe 1 exactly and the last frame is keyframe 4 exactly')
+            ->toContain('The 4 reference images are the keyframes of this shot, supplied in chronological order')
+            ->not->toContain('collage')
             ->toContain('Keyframe 1 (Moment 1) at about 0.0 s. Keyframe 2 (Moment 2) at about 5.0 s.')
             ->toContain('Visual style: Preserve the soft 3D illustration style')
             ->toContain('Action sequence: The man lights the cigarette (keyframe 1)')
@@ -164,10 +147,22 @@ describe('job', function () {
             && $request['duration'] === 15
             && $request['aspect_ratio'] === '9:16'
             && $request['generate_audio'] === false
-            && str_starts_with($request['input_references'][0]['image_url']['url'], 'data:image/jpeg;base64,')
+            && $request['resolution'] === '1080p'
+            && count($request['input_references']) === 4
+            && collect($request['input_references'])->every(fn(array $reference) => str_starts_with($reference['image_url']['url'], 'data:image/png;base64,'))
             && $request['prompt'] === $shot->video_prompt);
 
         Queue::assertPushed(PollVideo::class, fn(PollVideo $job) => $job->jobId === 'vid_123' && $job->shot->is($shot));
+    });
+
+    it('renders at the project resolution or the default', function () {
+        $shot = renderedShot($this->project);
+
+        expect($shot->load('project')->videoResolution())->toBe(config('pipeline.video.resolution'));
+
+        $this->project->forceFill(['video_resolution' => '480p'])->save();
+
+        expect($shot->fresh()->load('project')->videoResolution())->toBe('480p');
     });
 
     it('returns to the keyframes with an error when submitting fails', function () {
@@ -258,21 +253,21 @@ describe('poll', function () {
 });
 
 describe('page', function () {
-    it('links the collage, the video and the prompt', function () {
+    it('links the video and the prompt', function () {
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_READY, 'video_prompt' => 'The prompt']);
-        $shot->addMediaFromString(pngOf(40, 20))->usingFileName('collage.png')->toMediaCollection(Shot::COLLAGE);
         $shot->addMediaFromString(fakeMp4())->usingFileName('shot.mp4')->toMediaCollection(Shot::VIDEO);
 
         $response = actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
             ->assertInertia(fn($page) => $page
                 ->where('shot.videoPrompt', 'The prompt')
-                ->where('shot.collageUrl', fn(string $url) => str_contains($url, 'signature='))
+                ->where('shot.videoResolution', config('pipeline.video.resolution'))
+                ->where('shot.videoResolutions', config('pipeline.video.resolutions'))
                 ->where('shot.videoUrl', fn(string $url) => str_contains($url, 'signature='))
                 ->where('shot.links.videoGenerate', route('public.shots.video.generate', [$this->project, $shot])));
 
         actingAs($this->director, 'director')
-            ->get($response->viewData('page')['props']['shot']['collageUrl'])
+            ->get($response->viewData('page')['props']['shot']['videoUrl'])
             ->assertSuccessful();
     });
 

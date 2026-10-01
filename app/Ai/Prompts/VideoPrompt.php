@@ -7,7 +7,7 @@ namespace App\Ai\Prompts;
 /**
  * The full prompt for the video model: the shot-specific parts written by the
  * {@see \App\Ai\Agents\VideoPromptWriter} wrapped in fixed instructions that
- * explain the numbered collage and forbid anything the keyframes do not show.
+ * explain the keyframe references and forbid anything the keyframes do not show.
  */
 class VideoPrompt
 {
@@ -26,7 +26,9 @@ class VideoPrompt
         return implode("\n\n", [
             "Create one continuous, natural {$duration}-second animation following the supplied keyframes in chronological order.",
 
-            "The reference image is a storyboard collage of {$count} keyframes, numbered 1 to {$count} in the top-left corner of each panel. The numbers, the white gutters and the panel layout are only there to show the order: they must never appear in the video. The video is a single full-frame shot of the scene shown inside the panels. Timing: {$anchors}",
+            "Most important requirement: the very first frame of the video must match keyframe 1 exactly, and the very last frame of the video must match keyframe {$count} exactly. Same pose, same position, same framing, same objects and object states, same expression and same gaze. The video starts on keyframe 1 as it is shown, not before it and not after it, and it ends on keyframe {$count} as it is shown and holds that pose until the last frame. Do not start or end on any other moment.",
+
+            "The {$count} reference images are the keyframes of this shot, supplied in chronological order: reference image 1 is keyframe 1 and reference image {$count} is keyframe {$count}. Each image is one moment of the same continuous shot, with the same framing; the video passes through them in this order. Timing: {$anchors}",
 
             "Visual style: {$parts['style']}",
 
@@ -42,7 +44,7 @@ class VideoPrompt
 
             'Keep the camera stationary and maintain the same framing whenever possible. No cuts, camera transitions, scene changes, morphing, duplicated body parts, disappearing objects, unexplained object movement or changes to the character\'s appearance. No text, captions, numbers or logos. No sound.',
 
-            'Primary objective: faithfully animate the supplied storyboard rather than reinterpret it. Preserve what is shown in the keyframes; invent only the intermediate motion necessary to connect them naturally.',
+            "Primary objective: faithfully animate the supplied storyboard rather than reinterpret it. Preserve what is shown in the keyframes; invent only the intermediate motion necessary to connect them naturally. Remember: the first frame is keyframe 1 exactly and the last frame is keyframe {$count} exactly.",
         ]);
     }
 }

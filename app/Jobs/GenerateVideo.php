@@ -9,7 +9,6 @@ use App\Ai\Prompts\VideoPrompt;
 use App\Enums\ShotStatus;
 use App\Models\Keyframe;
 use App\Models\Shot;
-use App\Support\Video\CollageBuilder;
 use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -22,9 +21,9 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Turns the shot's keyframes into a video request: composes the numbered
- * collage, has the text model write the shot-specific prompt, submits both
- * to the video model and hands off to {@see PollVideo}.
+ * Turns the shot's keyframes into a video request: has the text model write
+ * the shot-specific prompt and submits it with every keyframe image, in order,
+ * as a reference to the video model before handing off to {@see PollVideo}.
  */
 #[DeleteWhenMissingModels]
 class GenerateVideo implements ShouldQueue
@@ -41,7 +40,7 @@ class GenerateVideo implements ShouldQueue
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
-    public function handle(CollageBuilder $collages, OpenRouterVideoClient $videos): void
+    public function handle(OpenRouterVideoClient $videos): void
     {
         $shot = $this->shot->load(['project', 'keyframes.media']);
         $keyframes = $shot->keyframes;
@@ -51,20 +50,24 @@ class GenerateVideo implements ShouldQueue
         }
 
         $duration = self::duration($shot);
-        $collage = $collages->build($keyframes->map(fn(Keyframe $keyframe) => $this->bytes($keyframe))->all());
+        $prompt = VideoPrompt::compose(
+            $this->writePrompt($shot, $keyframes, $duration),
+            self::timeline($keyframes, $duration),
+            $duration,
+        );
 
-        $shot->addMediaFromString($collage)
-            ->usingFileName("collage-{$shot->position}.jpg")
-            ->toMediaCollection(Shot::COLLAGE);
-
-        $prompt = VideoPrompt::compose($this->writePrompt($shot, $keyframes, $duration), self::timeline($keyframes, $duration), $duration);
+        $references = $keyframes
+            ->map(fn(Keyframe $keyframe) => 'data:' . $keyframe->render()->mime_type . ';base64,' . base64_encode($this->bytes($keyframe)))
+            ->values()
+            ->all();
 
         $jobId = $videos->submit(
             Config::get('pipeline.models.video'),
             $prompt,
-            ['data:image/jpeg;base64,' . base64_encode($collage)],
+            $references,
             $duration,
             $shot->aspectRatio()->value,
+            $shot->videoResolution(),
         );
 
         $shot->forceFill([

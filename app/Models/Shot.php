@@ -26,11 +26,6 @@ class Shot extends Model implements HasMedia
     use InteractsWithMedia;
     use UsesTenantConnection;
 
-    /**
-     * The numbered storyboard of the keyframes that the video model animates.
-     */
-    public const COLLAGE = 'collage';
-
     public const VIDEO = 'video';
 
     protected $guarded = [];
@@ -114,19 +109,21 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Remove the collage and the video, which no longer match once the keyframes change.
+     * Remove the video, which no longer matches once the keyframes change.
      */
     public function forgetVideo(): void
     {
-        $this->clearMediaCollection(self::COLLAGE);
         $this->clearMediaCollection(self::VIDEO);
 
         $this->forceFill(['video_prompt' => null, 'video_job_id' => null, 'video_error' => null])->save();
     }
 
-    public function collage(): ?Media
+    /**
+     * The resolution videos render at, which is set on the project.
+     */
+    public function videoResolution(): string
     {
-        return $this->getFirstMedia(self::COLLAGE);
+        return $this->project->videoResolution();
     }
 
     public function video(): ?Media
@@ -136,7 +133,6 @@ class Shot extends Model implements HasMedia
 
     public function registerMediaCollections(): void
     {
-        $this->addMediaCollection(self::COLLAGE)->singleFile()->acceptsMimeTypes(['image/jpeg', 'image/png']);
         $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }
 

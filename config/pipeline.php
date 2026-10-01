@@ -11,7 +11,7 @@ return [
     |
     | OpenRouter model slugs used by the generation pipeline. Text drives the
     | director and keyframe planner, image generates assets and keyframes,
-    | video turns the keyframe collage into a clip.
+    | video turns the keyframes into a clip.
     |
     */
 
@@ -37,6 +37,8 @@ return [
     'keyframes' => [
         'min' => 3,
         'max' => 6,
+        // Variations of keyframe 1 the director chooses from before the rest renders.
+        'first_options' => (int) env('AI_FIRST_KEYFRAME_OPTIONS', 3),
     ],
 
     'queue' => 'ai',
@@ -46,7 +48,7 @@ return [
     | Video
     |--------------------------------------------------------------------------
     |
-    | The video model animates the numbered keyframe collage. Durations are
+    | The video model animates the keyframes, sent as reference images. Durations are
     | clamped to what the model accepts; the job polls OpenRouter until the
     | clip is done or the wait runs out.
     |
@@ -55,11 +57,11 @@ return [
     'video' => [
         'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
         'resolution' => env('AI_VIDEO_RESOLUTION', '720p'),
+        'resolutions' => ['480p', '720p', '1080p', '4K'],
         'min_duration' => 4,
         'max_duration' => 15,
         'poll_seconds' => 20,
         'max_wait_minutes' => 30,
-        'collage_panel_height' => 720,
     ],
 
 ];

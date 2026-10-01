@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Models\Conversation;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Image\Enums\Fit;
@@ -148,6 +149,14 @@ class Project extends Model implements HasMedia
     public function needsSetup(): bool
     {
         return $this->conversation_id !== null && ! $this->hasMedia(self::STYLE_REFERENCES);
+    }
+
+    /**
+     * The resolution the project's videos render at, or the pipeline default.
+     */
+    public function videoResolution(): string
+    {
+        return $this->video_resolution ?? Config::get('pipeline.video.resolution');
     }
 
     public function isOwnedBy(Director $director): bool

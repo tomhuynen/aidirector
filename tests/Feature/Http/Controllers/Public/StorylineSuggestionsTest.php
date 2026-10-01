@@ -191,7 +191,7 @@ describe('jobs', function () {
 
         $shot->refresh();
 
-        expect($shot->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
+        expect($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($shot->storylineKeyframes()[0]['prompt'])->toBe('A man in a navy suit stands at a red mailbox.')
             ->and(Keyframe::query()->whereKey($stale->id)->exists())->toBeFalse();
 
@@ -202,6 +202,9 @@ describe('jobs', function () {
         $shot = Shot::factory()->for($this->project)->create();
 
         expect((string) (new StorylineWriter($shot->load('project')))->instructions())
-            ->toContain('Prompt: a self-contained brief for an image model');
+            ->toContain('Prompt: a self-contained brief for an image model')
+            ->toContain('in front of one calm, even backdrop surface that fills the area directly behind them')
+            ->toContain('Nothing crosses or touches the figure')
+            ->toContain('The wider setting, indoors or outdoors, may be visible around and above that backdrop');
     });
 });

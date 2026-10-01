@@ -16,7 +16,7 @@ use Illuminate\Validation\ValidationException;
 class GenerateController
 {
     /**
-     * Render the video from the shot's keyframes.
+     * Render the video from the shot's keyframes at the project's resolution.
      */
     public function store(Project $project, Shot $shot)
     {

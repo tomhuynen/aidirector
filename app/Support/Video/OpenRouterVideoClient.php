@@ -21,14 +21,14 @@ class OpenRouterVideoClient
      *
      * @param  list<string>  $references  Reference images as data URLs.
      */
-    public function submit(string $model, string $prompt, array $references, int $duration, string $aspectRatio): string
+    public function submit(string $model, string $prompt, array $references, int $duration, string $aspectRatio, string $resolution): string
     {
         $response = $this->client()->post('videos', array_filter([
             'model' => $model,
             'prompt' => $prompt,
             'duration' => $duration,
             'aspect_ratio' => $aspectRatio,
-            'resolution' => Config::get('pipeline.video.resolution'),
+            'resolution' => $resolution,
             'generate_audio' => false,
             'input_references' => array_map(fn(string $url) => [
                 'type' => 'image_url',

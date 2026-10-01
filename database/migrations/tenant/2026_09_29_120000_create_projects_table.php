@@ -19,6 +19,7 @@ return new class extends Migration {
             $table->json('style');
             $table->string('aspect_ratio', 8);
             $table->unsignedSmallInteger('default_duration');
+            $table->string('video_resolution', 8)->nullable();
             $table->timestamp('archived_at')->nullable();
             $table->timestamps();
         });

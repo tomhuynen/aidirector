@@ -30,7 +30,7 @@ class VideoPromptWriter implements Agent, HasStructuredOutput
     {
         return <<<'INSTRUCTIONS'
             You write prompts for an image-to-video model that animates a storyboard of numbered keyframes into one continuous clip.
-            The video model sees a collage of the keyframes, numbered 1 to N in chronological order, and your text. It must animate exactly what the keyframes show and invent nothing else.
+            The video model sees the keyframes as reference images in chronological order, and your text. It must animate exactly what the keyframes show and invent nothing else.
 
             Write three parts:
 

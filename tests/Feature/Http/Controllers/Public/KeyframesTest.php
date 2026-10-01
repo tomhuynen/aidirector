@@ -7,6 +7,7 @@ use App\Enums\Disk;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateKeyframeImage;
 use App\Jobs\GenerateKeyframes;
+use App\Jobs\GenerateRemainingKeyframes;
 use App\Jobs\TweakKeyframeImage;
 use App\Models\Director;
 use App\Models\Keyframe;
@@ -45,6 +46,35 @@ function fakePng(): string
     return base64_encode((string) ob_get_clean());
 }
 
+/**
+ * Runs the whole render: options for keyframe 1, the director picks the first, then the rest.
+ */
+function renderAllKeyframes(Shot $shot): void
+{
+    (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+
+    $first = $shot->keyframes()->firstOrFail();
+    $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
+
+    (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+}
+
+/**
+ * A distinct small PNG per call, so references can be told apart.
+ */
+function numberedPng(): string
+{
+    static $count = 0;
+    $count++;
+
+    $image = imagecreatetruecolor(16 + $count, 9);
+
+    ob_start();
+    imagepng($image);
+
+    return base64_encode((string) ob_get_clean());
+}
+
 function plannedShot(Project $project, array $attributes = []): Shot
 {
     return Shot::factory()->for($project)->create([
@@ -61,7 +91,7 @@ describe('job', function () {
 
         $shot = plannedShot($this->project);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         $shot->refresh();
         $keyframes = $shot->keyframes()->get();
@@ -73,7 +103,8 @@ describe('job', function () {
             ->and($keyframes->pluck('position')->all())->toBe([1, 2, 3])
             ->and($keyframes->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->rendering))->toBeTrue()
             ->and($keyframes->first()->prompt)->toContain('A man in a navy suit stands at a red mailbox')
-            ->and($keyframes->first()->generations()->where('kind', 'image')->count())->toBe(1);
+            ->and($keyframes->first()->generations()->where('kind', 'image')->count())->toBe(GenerateKeyframes::optionCount())
+            ->and($keyframes->get(1)->generations()->where('kind', 'image')->count())->toBe(1);
 
         Storage::disk(Disk::TENANT->value)->assertExists($keyframes->first()->render()->getPathRelativeToRoot());
     });
@@ -83,17 +114,18 @@ describe('job', function () {
 
         $shot = plannedShot($this->project);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->size === $shot->aspectRatio()->value
             && $prompt->contains('Visual style:')
+            && $prompt->contains('in front of one calm, even backdrop surface')
             && $prompt->contains('A man in a navy suit stands at a red mailbox'));
     });
 
     it('uses the first render as the reference for the following keyframes', function () {
         Image::fake(fn() => fakePng());
 
-        (new GenerateKeyframes(plannedShot($this->project)))->handle(app(KeyframePainter::class));
+        renderAllKeyframes(plannedShot($this->project));
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox') && $prompt->attachments->isEmpty());
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope') && $prompt->attachments->count() === 1);
@@ -111,7 +143,7 @@ describe('job', function () {
 
         $shot = plannedShot($this->project);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox')
             && $prompt->contains('first attached image is the project\'s style reference sheet')
@@ -136,7 +168,7 @@ describe('job', function () {
         $shot = plannedShot($this->project);
         $stale = Keyframe::factory()->for($shot)->create(['title' => 'Old keyframe']);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         expect(Keyframe::query()->whereKey($stale->id)->exists())->toBeFalse()
             ->and($shot->keyframes()->count())->toBe(3);
@@ -160,6 +192,132 @@ describe('job', function () {
             ->and($shot->keyframes()->first()->rendering)->toBeFalse()
             ->and($shot->keyframes()->first()->render_error)->toBe('Provider down')
             ->and($shot->keyframes()->first()->generations()->whereNotNull('error')->count())->toBe(1);
+    });
+});
+
+describe('first keyframe', function () {
+    it('draws options for keyframe 1 only and waits for a choice', function () {
+        Image::fake(fn() => numberedPng());
+
+        $shot = plannedShot($this->project, ['status' => ShotStatus::FIRST_KEYFRAME_PENDING]);
+
+        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+
+        $shot->refresh();
+        [$first, $second] = $shot->keyframes()->get();
+
+        expect($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY)
+            ->and($shot->keyframes()->count())->toBe(3)
+            ->and($first->renders())->toHaveCount(3)
+            ->and($first->render_id)->toBeNull()
+            ->and($first->rendering)->toBeFalse()
+            ->and($second->renders())->toHaveCount(0)
+            ->and($second->rendering)->toBeFalse();
+
+        Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Stage it as described.'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Show more of the surroundings'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose a different backdrop surface'));
+    });
+
+    it('adds more options on request', function () {
+        Image::fake(fn() => numberedPng());
+
+        $shot = plannedShot($this->project);
+        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+
+        Queue::fake();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.more', [$this->project, $shot]))
+            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+
+        expect($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING);
+        Queue::assertPushed(GenerateKeyframes::class, fn(GenerateKeyframes $job) => $job->more);
+
+        (new GenerateKeyframes($shot->fresh(), more: true))->handle(app(KeyframePainter::class));
+
+        expect($shot->keyframes()->firstOrFail()->renders())->toHaveCount(6)
+            ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY);
+    });
+
+    it('renders the other keyframes from the chosen option', function () {
+        Image::fake(fn() => numberedPng());
+
+        $shot = plannedShot($this->project);
+        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        $first = $shot->keyframes()->firstOrFail();
+        $chosen = $first->renders()->get(1);
+
+        Queue::fake();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.choose', [$this->project, $shot]), ['render' => $chosen->id])
+            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+
+        expect($first->fresh()->render()->id)->toBe($chosen->id)
+            ->and($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
+            ->and($shot->keyframes()->where('position', 2)->first()->rendering)->toBeTrue();
+
+        Queue::assertPushed(GenerateRemainingKeyframes::class, fn(GenerateRemainingKeyframes $job) => $job->shot->is($shot));
+
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+
+        $chosenBytes = Storage::disk(Disk::TENANT->value)->get($chosen->getPathRelativeToRoot());
+
+        expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
+            ->and($shot->keyframes()->get()->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->rendering))->toBeTrue();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
+            && $prompt->attachments->count() === 1
+            && $prompt->attachments->first()->content() === $chosenBytes);
+    });
+
+    it('rejects an option of another keyframe', function () {
+        Image::fake(fn() => numberedPng());
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+        $shot->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_READY])->save();
+        $other = $shot->keyframes()->where('position', 2)->firstOrFail()->render();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.choose', [$this->project, $shot]), ['render' => $other->id])
+            ->assertSessionHasErrors('render');
+    });
+
+    it('only accepts a choice while the first keyframe is waiting for one', function () {
+        Queue::fake();
+
+        $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.choose', [$this->project, $shot]), ['render' => 1])
+            ->assertSessionHasErrors('render');
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.more', [$this->project, $shot]))
+            ->assertSessionHasErrors('keyframes');
+
+        Queue::assertNothingPushed();
+    });
+
+    it('forbids choosing for another director\'s shot', function () {
+        $shot = plannedShot(Project::factory()->create(), ['status' => ShotStatus::FIRST_KEYFRAME_READY]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.choose', [$shot->project, $shot]), ['render' => 1])
+            ->assertForbidden();
+    });
+
+    it('goes back to choosing when the other keyframes fail', function () {
+        $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_PENDING]);
+        Keyframe::factory()->for($shot)->create(['position' => 2, 'rendering' => true]);
+
+        (new GenerateRemainingKeyframes($shot))->failed(new RuntimeException('Provider down'));
+
+        expect($shot->fresh())->status->toBe(ShotStatus::FIRST_KEYFRAME_READY)->storyline_error->not->toBeNull()
+            ->and($shot->keyframes()->first()->rendering)->toBeFalse();
     });
 });
 
@@ -213,7 +371,7 @@ describe('update', function () {
 
         $shot = plannedShot($this->project);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
         $previous = $keyframe->render()->id;
@@ -246,7 +404,7 @@ describe('tweak', function () {
 
         $shot = plannedShot($this->project);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
         $previous = $keyframe->render()->id;
@@ -272,7 +430,7 @@ describe('tweak', function () {
         Image::fake(fn() => fakePng());
 
         $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
         $keyframe = $shot->keyframes()->firstOrFail();
 
         actingAs($this->director, 'director')
@@ -312,8 +470,8 @@ describe('render', function () {
         Image::fake(fn() => fakePng());
 
         $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
-        $keyframe = $shot->keyframes()->firstOrFail();
+        renderAllKeyframes($shot);
+        $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
         $first = $keyframe->render()->id;
         (new TweakKeyframeImage($keyframe, 'Brighter'))->handle(app(KeyframePainter::class));
 
@@ -326,17 +484,17 @@ describe('render', function () {
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
             ->assertInertia(fn($page) => $page
-                ->has('keyframes.0.renders', 2)
-                ->where('keyframes.0.renders.0.chosen', true)
-                ->where('keyframes.0.renders.1.chosen', false)
-                ->where('keyframes.0.renders.1.imageUrl', fn(string $url) => str_contains($url, '?render=')));
+                ->has('keyframes.1.renders', 2)
+                ->where('keyframes.1.renders.0.chosen', true)
+                ->where('keyframes.1.renders.1.chosen', false)
+                ->where('keyframes.1.renders.1.imageUrl', fn(string $url) => str_contains($url, '?render=')));
     });
 
     it('rejects a render of another keyframe', function () {
         Image::fake(fn() => fakePng());
 
         $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
         [$first, $second] = $shot->keyframes()->get();
 
         actingAs($this->director, 'director')
@@ -348,7 +506,7 @@ describe('render', function () {
         Image::fake(fn() => fakePng());
 
         $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
         $keyframe = $shot->keyframes()->firstOrFail();
 
         actingAs($this->director, 'director')
@@ -373,7 +531,7 @@ describe('generate', function () {
 
         $shot->refresh();
 
-        expect($shot->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
+        expect($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($shot->storyline_error)->toBeNull();
 
         Queue::assertPushed(GenerateKeyframes::class, fn(GenerateKeyframes $job) => $job->shot->is($shot));
@@ -406,7 +564,7 @@ describe('image', function () {
 
         $shot = plannedShot($this->project);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         $keyframe = $shot->keyframes()->first();
 
@@ -425,7 +583,7 @@ describe('image', function () {
 
         $shot = plannedShot($this->project);
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
@@ -454,7 +612,7 @@ describe('image', function () {
 
         $shot = plannedShot(Project::factory()->create());
 
-        (new GenerateKeyframes($shot))->handle(app(KeyframePainter::class));
+        renderAllKeyframes($shot);
 
         actingAs($this->director, 'director')
             ->get(route('public.shots.keyframes.image', [$shot->project, $shot, $shot->keyframes()->first()]))

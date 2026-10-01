@@ -20,11 +20,13 @@ use Throwable;
 class KeyframePainter
 {
     /**
+     * With `$choose` off the render is only added as a version, for options the director picks from later.
+     *
      * @param  array<int, StoredImage>  $attachments
      *
      * @throws Throwable when the image model fails; the failure is logged on the keyframe first.
      */
-    public function paint(Keyframe $keyframe, string $prompt, array $attachments = []): Media
+    public function paint(Keyframe $keyframe, string $prompt, array $attachments = [], bool $choose = true): Media
     {
         $shot = $keyframe->shot;
         $model = Config::get('pipeline.models.image');
@@ -73,7 +75,9 @@ class KeyframePainter
             ->usingFileName("keyframe-{$keyframe->position}.{$extension}")
             ->toMediaCollection(Keyframe::RENDERS);
 
-        $keyframe->forceFill(['render_id' => $render->id, 'rendering' => false, 'render_error' => null])->save();
+        if ($choose) {
+            $keyframe->forceFill(['render_id' => $render->id, 'rendering' => false, 'render_error' => null])->save();
+        }
 
         return $render;
     }

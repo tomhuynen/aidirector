@@ -39,11 +39,18 @@
           :generating="shot.status === 'keyframes-pending'"
           :error="shot.storylineError"
           :images-url="shot.links?.keyframesGenerate ?? '#'"
+          :choosing="{
+            active: shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready',
+            pending: shot.status === 'first-keyframe-pending',
+            optionCount: shot.firstKeyframeOptions,
+            chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
+            moreUrl: shot.links?.firstKeyframeMore ?? '#',
+          }"
           :video="{
             url: shot.videoUrl,
-            collageUrl: shot.collageUrl,
-            prompt: shot.videoPrompt,
             error: shot.videoError,
+            resolution: shot.videoResolution,
+            resolutions: shot.videoResolutions,
             pending: shot.status === 'video-pending',
             generateUrl: shot.links?.videoGenerate ?? '#',
           }"
@@ -90,6 +97,8 @@ const state = computed<State>(() => {
     case 'storyline-pending':
       return 'planning'
     case 'storyline-ready':
+    case 'first-keyframe-pending':
+    case 'first-keyframe-ready':
     case 'keyframes-pending':
     case 'keyframes-ready':
     case 'video-pending':
@@ -138,6 +147,7 @@ const busy = computed(
   () =>
     state.value === 'suggesting' ||
     state.value === 'planning' ||
+    props.shot.status === 'first-keyframe-pending' ||
     props.shot.status === 'keyframes-pending' ||
     props.shot.status === 'video-pending' ||
     props.keyframes.some((keyframe) => keyframe.rendering),

@@ -12,14 +12,14 @@ use App\Models\Shot;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Throwable;
 
 /**
- * Renders an image for every keyframe in the shot's storyline. The first
- * keyframe is generated from its prompt alone; the following ones get the
- * first render as a reference so the character and scene stay consistent.
+ * Draws options for keyframe 1 for the director to choose from. The first run
+ * replaces the shot's keyframes with fresh rows for the current plan; with
+ * `$more` it adds another batch of options to the existing keyframe 1. The
+ * other keyframes render after the choice, in {@see GenerateRemainingKeyframes}.
  */
 #[DeleteWhenMissingModels]
 class GenerateKeyframes implements ShouldQueue
@@ -32,6 +32,7 @@ class GenerateKeyframes implements ShouldQueue
 
     public function __construct(
         public readonly Shot $shot,
+        public readonly bool $more = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
@@ -40,17 +41,26 @@ class GenerateKeyframes implements ShouldQueue
     {
         $shot = $this->shot->load('project');
         $style = $painter->styleReferenceFor($shot->project);
-        $first = null;
 
-        foreach ($this->replaceKeyframes($shot, $style !== null) as $keyframe) {
-            $render = $painter->paint($keyframe, $keyframe->prompt, array_values(array_filter([$style, $first])));
+        $first = $this->more ? $shot->keyframes()->firstOrFail() : $this->replaceKeyframes($shot, $style !== null);
+        $first->setRelation('shot', $shot);
 
-            $first ??= $painter->referenceFor($render);
+        $drawn = $first->renders()->count();
+
+        foreach (range(0, self::optionCount() - 1) as $index) {
+            $painter->paint(
+                $first,
+                $first->prompt . "\n" . KeyframeImageBrief::variation($drawn + $index),
+                $style ? [$style] : [],
+                choose: false,
+            );
         }
+
+        $first->forceFill(['render_id' => null, 'rendering' => false, 'render_error' => null])->save();
 
         $shot->forceFill([
             'storyline_error' => null,
-            'status' => ShotStatus::KEYFRAMES_READY,
+            'status' => ShotStatus::FIRST_KEYFRAME_READY,
         ])->save();
     }
 
@@ -61,28 +71,37 @@ class GenerateKeyframes implements ShouldQueue
             'render_error' => $exception?->getMessage(),
         ]);
 
+        $hasOptions = $this->shot->keyframes()->first()?->renders()->isNotEmpty() ?? false;
+
         $this->shot->forceFill([
-            'storyline_error' => __('The keyframe images could not be generated. Please try again.'),
-            'status' => ShotStatus::STORYLINE_READY,
+            'storyline_error' => $hasOptions
+                ? __('Not every option could be drawn. Choose one of these or try again.')
+                : __('The keyframe images could not be generated. Please try again.'),
+            'status' => $hasOptions ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
     }
 
+    public static function optionCount(): int
+    {
+        return max(1, (int) Config::get('pipeline.keyframes.first_options'));
+    }
+
     /**
-     * Replace the shot's keyframes with fresh rows for the current plan.
-     *
-     * @return Collection<int, Keyframe>
+     * Replace the shot's keyframes with fresh rows for the current plan and return keyframe 1.
      */
-    private function replaceKeyframes(Shot $shot, bool $withStyleReference): Collection
+    private function replaceKeyframes(Shot $shot, bool $withStyleReference): Keyframe
     {
         $shot->forgetKeyframes();
 
-        return collect($shot->storylineKeyframes())
+        $keyframes = collect($shot->storylineKeyframes())
             ->map(fn(array $keyframe, int $index) => $shot->keyframes()->create([
                 'position' => $index + 1,
                 'title' => $keyframe['title'],
                 'description' => $keyframe['description'],
                 'prompt' => KeyframeImageBrief::for($shot, $keyframe, $withStyleReference, withFirstKeyframe: $index > 0),
-                'rendering' => true,
-            ])->setRelation('shot', $shot));
+                'rendering' => $index === 0,
+            ]));
+
+        return $keyframes->firstOrFail();
     }
 }

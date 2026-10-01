@@ -26,6 +26,7 @@ class KeyframeImageBrief
             '',
             $keyframe['prompt'] ?? $keyframe['description'],
             '',
+            'Staging: the character stands in the foreground in front of one calm, even backdrop surface that fills the area directly behind them from head to feet, such as a facade, a container side, a fence panel, a wall, or open sky. Nothing crosses or touches the figure: no railings, pillars, poles, barriers or machines behind or in front of the character. The wider setting may be visible around and above the backdrop and in the distance, simpler than the character. Any sign or context object sits on the backdrop beside the character, clearly readable, not touching them. The ground near the feet is plain. Show the character fully in frame with space around them.',
             'No text, captions, logos or watermarks in the image.',
         ];
 
@@ -41,6 +42,21 @@ class KeyframeImageBrief
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * A staging direction per option of keyframe 1, so the options differ on purpose.
+     * The directions repeat for further batches.
+     */
+    public static function variation(int $index): string
+    {
+        $directions = [
+            'Stage it as described.',
+            'Show more of the surroundings: a wider view where the setting is clearly visible around and above the backdrop, with the sky and the site in the distance.',
+            'Choose a different backdrop surface and different lighting for the same setting than an obvious first choice, for example another building side or time of day, still calm and even behind the character.',
+        ];
+
+        return 'Variation for this option: ' . $directions[$index % count($directions)];
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Public;
 
 use App\Http\Resources\Concerns\AuthorizesResource;
+use App\Jobs\GenerateKeyframes;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Shot;
 use Illuminate\Http\Request;
@@ -48,12 +49,15 @@ class ShotResource extends JsonResource
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
+            /** @var int */
+            'firstKeyframeOptions' => GenerateKeyframes::optionCount(),
+            'videoResolution' => $this->videoResolution(),
+            /** @var array<int, string> */
+            'videoResolutions' => config('pipeline.video.resolutions'),
             /** @var string|null */
             'videoPrompt' => $this->video_prompt,
             /** @var string|null */
             'videoError' => $this->video_error,
-            /** @var string|null */
-            'collageUrl' => $this->mediaUrl($this->collage()),
             /** @var string|null */
             'videoUrl' => $this->mediaUrl($this->video()),
             'createdAt' => $this->created_at,
@@ -67,6 +71,8 @@ class ShotResource extends JsonResource
                 'storylineGenerate' => route('public.shots.storyline.generate', [$this->project, $this->resource]),
                 'storylineReopen' => route('public.shots.storyline.reopen', [$this->project, $this->resource]),
                 'keyframesGenerate' => route('public.shots.keyframes.generate', [$this->project, $this->resource]),
+                'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
+                'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
             ]),
             /** @var array<string, bool> */
