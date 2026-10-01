@@ -9,6 +9,7 @@ use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotListItemResource;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
+use App\Support\Video\VideoFormats;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 
@@ -31,6 +32,8 @@ class ViewController
         return Inertia::render('projects/view', [
             'project' => fn() => ProjectResource::make($project),
             'shots' => fn() => ShotListItemResource::collection($project->shots),
+            /** @var array{aspectRatios: array<int, array{value: string, name: string}>, resolutions: array<int, string>, sizes: array<string, array{width: int, height: int}>} */
+            'videoFormats' => fn() => VideoFormats::catalogue(),
             'elements' => fn() => ElementResource::collection(
                 $project->elements()->with(['project', 'media', 'keyframes.shot.project'])->get()
             ),

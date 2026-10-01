@@ -28,46 +28,18 @@
       />
     </figure>
 
-    <section class="grid gap-6 lg:grid-cols-3">
-      <div class="overflow-hidden rounded-xl border border-border bg-card lg:col-span-2">
-        <div class="grid md:grid-cols-2">
-          <div class="aspect-square border-b border-border bg-paper-deep md:border-r md:border-b-0">
-            <img
-              v-if="project.styleReferenceUrl"
-              :src="project.styleReferenceUrl"
-              :alt="$t('Style reference for :title', { title: project.title })"
-              class="size-full object-cover"
-            />
-            <Placeholder v-else class="size-full rounded-none border-0 bg-paper-deep">
-              <span class="rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground">
-                {{ $t('No style chosen yet') }}
-              </span>
-            </Placeholder>
-          </div>
-          <div class="space-y-5 p-6">
-            <h2 class="text-xl font-semibold">{{ $t('Style') }}</h2>
-            <Field :label="$t('Look')" :value="project.style.look" />
-            <Field :label="$t('Medium')" :value="project.style.medium" />
-            <Field :label="$t('Mood')" :value="project.style.mood" />
-            <Field :label="$t('Palette')" :value="project.style.palette" />
-          </div>
-        </div>
-      </div>
-
+    <section>
       <div class="space-y-5 rounded-xl border border-border bg-card p-6">
-        <h2 class="text-xl font-semibold">{{ $t('Format') }}</h2>
-        <dl class="grid grid-cols-2 gap-x-4 gap-y-5 text-sm">
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">{{ $t('Aspect ratio') }}</dt>
-            <dd class="font-medium tabular-nums">{{ project.aspectRatio }}</dd>
-          </div>
+        <OutputPicker
+          :formats="videoFormats"
+          :outputs="project.videoOutputs"
+          :keyframe-ratio="project.aspectRatio"
+          :save-url="project.links?.outputs ?? '#'"
+        />
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border pt-4 text-sm">
           <div class="space-y-1">
             <dt class="text-muted-foreground">{{ $t('Shot length') }}</dt>
             <dd class="font-medium tabular-nums">{{ $t(':count s', { count: String(project.defaultDuration) }) }}</dd>
-          </div>
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">{{ $t('Video resolution') }}</dt>
-            <dd class="font-medium tabular-nums">{{ project.videoResolution }}</dd>
           </div>
           <div class="space-y-1">
             <dt class="text-muted-foreground">{{ $t('Shots') }}</dt>
@@ -183,9 +155,9 @@ import { Link } from '@inertiajs/vue3'
 import AppLayout from '@public/ts/layouts/App.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
-import Field from '@public:components/editor/Field.vue'
 import Placeholder from '@public:components/editor/Placeholder.vue'
 import { shotCode } from '@public:components/editor/shotCode'
+import OutputPicker from '@public:components/OutputPicker.vue'
 import Page from '@public:components/Page.vue'
 import { Button } from '@shared:ui/button'
 import { ArrowRight, ExternalLink, Pencil, Plus } from 'lucide-vue-next'

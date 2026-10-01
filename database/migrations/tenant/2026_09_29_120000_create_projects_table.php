@@ -21,6 +21,7 @@ return new class extends Migration {
             $table->string('aspect_ratio', 8);
             $table->unsignedSmallInteger('default_duration');
             $table->string('video_resolution', 8)->nullable();
+            $table->json('video_outputs')->nullable();
             $table->timestamp('setup_completed_at')->nullable();
             $table->timestamp('archived_at')->nullable();
             $table->timestamps();

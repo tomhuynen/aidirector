@@ -43,6 +43,8 @@ class ProjectResource extends JsonResource
             /** @var string|null */
             'website' => $this->website,
             'videoResolution' => $this->videoResolution(),
+            /** @var array<int, array{aspectRatio: string, resolution: string}> */
+            'videoOutputs' => array_map(fn(array $output) => ['aspectRatio' => $output['aspect_ratio'], 'resolution' => $output['resolution']], $this->videoOutputs()),
             'aspectRatio' => $this->aspect_ratio,
             /** @var int */
             'defaultDuration' => $this->default_duration,
@@ -53,6 +55,7 @@ class ProjectResource extends JsonResource
             'updatedAt' => $this->updated_at,
             'links' => $this->when($this->resource->exists, fn() => [
                 'view' => route('public.projects.view', $this->resource),
+                'outputs' => route('public.projects.outputs', $this->resource),
                 /** The editor opens on the first shot, or on a new shot when there are none. Only with the shots loaded. */
                 'editor' => $this->when($this->resource->relationLoaded('shots'), fn() => $this->editorUrl()),
                 'update' => route('public.projects.update', $this->resource),

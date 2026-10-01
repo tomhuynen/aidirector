@@ -14,6 +14,7 @@ use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyCont
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
 use App\Http\Controllers\Public\Projects\Elements\RoundController as ElementRoundController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
+use App\Http\Controllers\Public\Projects\OutputsController as ProjectOutputsController;
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
 use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
 use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
@@ -68,6 +69,7 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{project}/setup', [ProjectCreateController::class, 'resume'])->name('setup');
             Route::get('{project}/update', [ProjectUpdateController::class, 'update'])->name('update');
             Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
+            Route::post('{project}/outputs', [ProjectOutputsController::class, 'store'])->name('outputs');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
 

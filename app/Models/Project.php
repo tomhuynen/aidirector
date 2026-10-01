@@ -84,6 +84,7 @@ class Project extends Model implements HasMedia
      *  purpose: 'App\Enums\ProjectPurpose',
      *  aspect_ratio: 'App\Enums\AspectRatio',
      *  style: 'array',
+     *  video_outputs: 'array',
      *  setup_completed_at: 'datetime',
      *  archived_at: 'datetime',
      * }
@@ -94,6 +95,7 @@ class Project extends Model implements HasMedia
             'purpose' => ProjectPurpose::class,
             'aspect_ratio' => AspectRatio::class,
             'style' => 'array',
+            'video_outputs' => 'array',
             'setup_completed_at' => 'datetime',
             'archived_at' => 'datetime',
         ];
@@ -228,6 +230,18 @@ class Project extends Model implements HasMedia
     public function videoResolution(): string
     {
         return $this->video_resolution ?? Config::get('pipeline.video.resolution');
+    }
+
+    /**
+     * The video formats the project delivers. Until the director picks them,
+     * the project's own aspect ratio at its video resolution.
+     *
+     * @return list<array{aspect_ratio: string, resolution: string}>
+     */
+    public function videoOutputs(): array
+    {
+        return array_values($this->video_outputs ?? [])
+            ?: [['aspect_ratio' => $this->aspect_ratio->value, 'resolution' => $this->videoResolution()]];
     }
 
     public function isOwnedBy(Director $director): bool

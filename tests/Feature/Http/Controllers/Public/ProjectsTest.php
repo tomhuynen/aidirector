@@ -82,6 +82,62 @@ describe('index', function () {
     });
 });
 
+describe('outputs', function () {
+    it('offers every supported format with its frame size and starts on the project format', function () {
+        $project = Project::factory()->ownedBy($this->director)->create(['aspect_ratio' => AspectRatio::PORTRAIT, 'video_resolution' => '480p']);
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.view', $project))
+            ->assertInertia(fn($page) => $page
+                ->where('videoFormats.aspectRatios.0', ['value' => '16:9', 'name' => 'Landscape'])
+                ->has('videoFormats.aspectRatios', 7)
+                ->where('videoFormats.resolutions', ['480p', '720p', '1080p', '4K'])
+                ->where('videoFormats.sizes.16:9 480p', ['width' => 854, 'height' => 480])
+                ->where('videoFormats.sizes.9:16 1080p', ['width' => 1080, 'height' => 1920])
+                ->where('videoFormats.sizes.21:9 720p', ['width' => 1680, 'height' => 720])
+                ->where('videoFormats.sizes.1:1 4K', ['width' => 2160, 'height' => 2160])
+                ->where('project.videoOutputs', [['aspectRatio' => '9:16', 'resolution' => '480p']])
+                ->where('project.links.outputs', route('public.projects.outputs', $project)));
+    });
+
+    it('saves several outputs once each', function () {
+        $project = Project::factory()->ownedBy($this->director)->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.outputs', $project), ['outputs' => [
+                ['aspectRatio' => '16:9', 'resolution' => '1080p'],
+                ['aspectRatio' => '9:16', 'resolution' => '720p'],
+                ['aspectRatio' => '16:9', 'resolution' => '1080p'],
+            ]])
+            ->assertRedirect(route('public.projects.view', $project));
+
+        expect($project->fresh()->videoOutputs())->toEqual([
+            ['aspect_ratio' => '16:9', 'resolution' => '1080p'],
+            ['aspect_ratio' => '9:16', 'resolution' => '720p'],
+        ]);
+    });
+
+    it('only accepts formats the video model supports and at least one', function (array $outputs, string $field) {
+        $project = Project::factory()->ownedBy($this->director)->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.outputs', $project), ['outputs' => $outputs])
+            ->assertSessionHasErrors($field);
+    })->with([
+        'none' => [[], 'outputs'],
+        'unknown ratio' => [[['aspectRatio' => '4:5', 'resolution' => '720p']], 'outputs.0.aspectRatio'],
+        'unknown resolution' => [[['aspectRatio' => '16:9', 'resolution' => '8K']], 'outputs.0.resolution'],
+    ]);
+
+    it('forbids changing another director\'s outputs', function () {
+        $project = Project::factory()->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.outputs', $project), ['outputs' => [['aspectRatio' => '16:9', 'resolution' => '720p']]])
+            ->assertForbidden();
+    });
+});
+
 describe('create and update', function () {
     it('shows the intake chat instead of a form for new projects', function () {
         actingAs($this->director, 'director')
