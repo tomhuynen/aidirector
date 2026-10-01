@@ -16,6 +16,15 @@ beforeEach(function () {
     $this->director = Director::factory()->create();
 });
 
+function pngBytes(): string
+{
+    $image = imagecreatetruecolor(16, 9);
+    ob_start();
+    imagepng($image);
+
+    return (string) ob_get_clean();
+}
+
 function validProject(array $overrides = []): array
 {
     return [
@@ -129,22 +138,45 @@ describe('create and update', function () {
 });
 
 describe('view and destroy', function () {
-    it('opens the editor on the first shot of an owned project', function () {
-        $project = Project::factory()->ownedBy($this->director)->create();
+    it('shows the project overview with its style, references and shots', function () {
+        Storage::fake(Disk::TENANT->value);
+
+        $project = Project::factory()->ownedBy($this->director)->create(['website' => 'https://damen.com', 'video_resolution' => '480p']);
         $shots = Shot::factory()->for($project)->count(2)->sequence(['position' => 1], ['position' => 2])->create();
+        $project->addMediaFromString(pngBytes())->usingFileName('vessel.png')->withCustomProperties([Project::CAPTION => 'A tug at the quay'])->toMediaCollection(Project::CONTENT_REFERENCES);
+        $project->addMediaFromString(pngBytes())->usingFileName('sheet.png')->toMediaCollection(Project::STYLE_REFERENCES);
+
+        $response = actingAs($this->director, 'director')
+            ->get(route('public.projects.view', $project))
+            ->assertSuccessful()
+            ->assertInertia(fn($page) => $page
+                ->component('projects/view')
+                ->where('project.id', $project->sqid)
+                ->where('project.website', 'https://damen.com')
+                ->where('project.videoResolution', '480p')
+                ->where('project.styleReferenceUrl', fn(string $url) => str_contains($url, 'signature='))
+                ->where('project.links.editor', route('public.shots.view', [$project, $shots->first()]))
+                ->has('references', 1)
+                ->where('references.0.caption', 'A tug at the quay')
+                ->has('shots', 2)
+                ->where('shots.1.url', route('public.shots.view', [$project, $shots->last()])));
 
         actingAs($this->director, 'director')
-            ->get(route('public.projects.view', $project))
-            ->assertRedirect(route('public.shots.view', [$project, $shots->first()]));
+            ->get($response->viewData('page')['props']['references'][0]['url'])
+            ->assertSuccessful();
     });
 
-    it('shows the empty editor for a project without shots', function () {
+    it('points the editor link at a new shot when there are none', function () {
         $project = Project::factory()->ownedBy($this->director)->create();
 
         actingAs($this->director, 'director')
             ->get(route('public.projects.view', $project))
             ->assertSuccessful()
-            ->assertInertia(fn($page) => $page->component('projects/view')->where('project.id', $project->sqid));
+            ->assertInertia(fn($page) => $page
+                ->component('projects/view')
+                ->has('shots', 0)
+                ->has('references', 0)
+                ->where('project.links.editor', route('public.shots.create', $project)));
     });
 
     it('forbids viewing another director\'s project', function () {

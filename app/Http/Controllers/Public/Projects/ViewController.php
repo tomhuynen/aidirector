@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Projects;
 
 use App\Http\Resources\Public\ProjectResource;
+use App\Http\Resources\Public\ReferenceImageResource;
+use App\Http\Resources\Public\ShotListItemResource;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Support\Facades\Gate;
@@ -13,9 +15,8 @@ use Inertia\Inertia;
 class ViewController
 {
     /**
-     * The editor is the project's home. A project still in setup goes back
-     * to its intake chat; with shots, open the first one; without shots,
-     * show the empty editor.
+     * The project overview: its style, reference images and shots, with the
+     * way into the editor. A project still in setup goes back to its intake chat.
      */
     public function view(Project $project)
     {
@@ -25,12 +26,12 @@ class ViewController
             return redirect()->route('public.projects.setup', $project);
         }
 
-        if ($first = $project->shots()->first()) {
-            return redirect()->route('public.shots.view', [$project, $first]);
-        }
+        $project->load(['media', 'shots' => fn($shots) => $shots->with(['project', 'keyframes.media'])->withCount('keyframes')]);
 
         return Inertia::render('projects/view', [
             'project' => fn() => ProjectResource::make($project),
+            'references' => fn() => ReferenceImageResource::collection($project->getMedia(Project::CONTENT_REFERENCES)),
+            'shots' => fn() => ShotListItemResource::collection($project->shots),
         ]);
     }
 }
