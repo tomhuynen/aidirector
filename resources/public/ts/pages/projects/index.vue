@@ -10,7 +10,8 @@
         : $t('Each project holds a purpose, a style and a sequence of shots.')
     "
   >
-    <template #actions>
+    <!-- Without projects the empty state has its own call to create the first one. -->
+    <template v-if="projects.length > 0" #actions>
       <Button as-child>
         <Link :href="create.url()">
           <Plus class="size-4" />

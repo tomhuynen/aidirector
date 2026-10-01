@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Support\Intake;
 
 use App\Ai\Agents\ProjectIntake;
+use App\Enums\ElementRoundStatus;
 use App\Http\Resources\Public\StyleOptionResource;
+use App\Models\ElementRound;
 use App\Models\Media;
 use App\Models\Project;
 use App\Models\StyleOption;
+use App\Support\Elements\ElementRoundState;
 use Carbon\CarbonInterface;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -17,15 +20,19 @@ use Laravel\Ai\Models\ConversationMessage;
 /**
  * Rebuilds the intake chat as the director saw it, so a project that is
  * still in setup can be resumed where it was left: the stored turns, the
- * photos added along the way and the style rounds, in the order they
- * happened.
+ * photos added along the way, the style rounds and the cast and sets
+ * rounds, in the order they happened.
  */
 class IntakeThread
 {
+    public function __construct(
+        private readonly ElementRoundState $elementRoundState,
+    ) {}
+
     /**
      * Matches the photo notes the chat appends to a director's message.
      */
-    private const PHOTO_NOTES = '/(?:^|\n\n)The director added \d+ photos?:\n.*$/s';
+    private const PHOTO_NOTES = '/(?:^|\n\n)The director added \d+ photos?[.:].*$/s';
 
     /**
      * @return array{
@@ -86,6 +93,17 @@ class IntakeThread
                     'round' => $round,
                     'optionsUrl' => route('public.projects.style.options', [$project, $round]),
                     'options' => StyleOptionResource::collection($options)->resolve($request),
+                ]]);
+            });
+
+        $project->elementRounds()->get()
+            ->reject(fn(ElementRound $round) => $round->status === ElementRoundStatus::SKIPPED)
+            ->each(function (ElementRound $round) use ($entries, $project) {
+                $entries->push([$round->created_at, 1, [
+                    'kind' => 'element-options',
+                    'role' => 'assistant',
+                    'content' => '',
+                    ...$this->elementRoundState->for($round->setRelation('project', $project)),
                 ]]);
             });
 

@@ -38,6 +38,11 @@ return [
     'style_options_count' => 4,
 
     /*
+     * Suggestions per cast and sets category in the intake chat.
+     */
+    'element_suggestions_count' => 8,
+
+    /*
     | Image size for keyframes, options and cast and sets: low, medium or high
     | (1K, 2K or 4K on OpenRouter's Gemini image models). Low keeps tests quick.
     */

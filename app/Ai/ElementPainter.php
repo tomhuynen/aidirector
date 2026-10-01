@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Ai;
 
 use App\Models\Element;
+use App\Models\ElementSuggestion;
 use App\Models\Keyframe;
+use App\Models\Project;
 use Illuminate\Support\Facades\Config;
+use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Image;
 use Throwable;
 
@@ -91,5 +94,88 @@ class ElementPainter
                 default => '.png',
             })
             ->toMediaCollection(Element::REFERENCE);
+    }
+
+    /**
+     * Renders an element suggestion from the intake chat in the project
+     * style. A suggestion based on an uploaded photo restyles that photo, so
+     * the real shapes and markings survive; otherwise it is drawn from its
+     * description with the style sheet as reference.
+     *
+     * @throws Throwable when the image model fails; the failure is logged on the suggestion first.
+     */
+    public function paintSuggestion(ElementSuggestion $suggestion): void
+    {
+        $round = $suggestion->round;
+        $project = $round->project;
+        $style = $project->style ?? [];
+        $model = Config::get('pipeline.models.image');
+        $photo = $suggestion->sourcePhoto;
+        $styleSheet = $this->keyframes->styleReferenceFor($project);
+
+        $attachments = array_values(array_filter([
+            $photo === null ? null : ImageFile::fromStorage(
+                $photo->hasGeneratedConversion(Project::REFERENCE) ? $photo->getPathRelativeToRoot(Project::REFERENCE) : $photo->getPathRelativeToRoot(),
+                $photo->hasGeneratedConversion(Project::REFERENCE) ? ($photo->conversions_disk ?? $photo->disk) : $photo->disk,
+            ),
+            $styleSheet,
+        ]));
+
+        $prompt = implode("\n", array_filter([
+            'Visual style: ' . ($style['look'] ?? '') . '. Medium: ' . ($style['medium'] ?? '') . '. Mood: ' . ($style['mood'] ?? '') . '. Palette: ' . ($style['palette'] ?? '') . '.',
+            $round->type->referenceStaging(),
+            "{$suggestion->name} ({$round->type->value}): {$suggestion->description}",
+            match (true) {
+                $photo !== null && $styleSheet !== null => "The first attached image is a photo of the real {$suggestion->name}: keep its shapes, proportions, markings and colours. The second attached image is the project's style reference sheet: draw it in exactly that rendering style; do not copy the sheet's subjects or layout.",
+                $photo !== null => "The attached image is a photo of the real {$suggestion->name}: keep its shapes, proportions, markings and colours, drawn in the visual style above.",
+                $styleSheet !== null => 'The attached image is the project\'s style reference sheet. Match its rendering style exactly; do not copy its subjects or layout.',
+                default => null,
+            },
+            'No text, captions, logos or watermarks in the image.',
+        ]));
+
+        $started = hrtime(true);
+
+        try {
+            $response = Image::of($prompt)
+                ->size('1:1')
+                ->quality(Config::get('pipeline.image_quality'))
+                ->attachments($attachments)
+                ->timeout(180)
+                ->generate('openrouter', $model);
+        } catch (Throwable $exception) {
+            $suggestion->generations()->create([
+                'director_id' => $project->director_id,
+                'kind' => 'image',
+                'provider' => 'openrouter',
+                'model' => $model,
+                'prompt' => $prompt,
+                'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
+                'error' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
+
+        $suggestion->generations()->create([
+            'director_id' => $project->director_id,
+            'kind' => 'image',
+            'provider' => $response->meta->provider ?? 'openrouter',
+            'model' => $response->meta->model ?? $model,
+            'prompt' => $prompt,
+            'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
+            'usage' => $response->usage->toArray(),
+        ]);
+
+        $image = $response->firstImage();
+
+        $suggestion
+            ->addMediaFromString($image->content())
+            ->usingFileName('suggestion-' . $suggestion->sqid . match ($image->mime()) {
+                'image/jpeg' => '.jpg',
+                'image/webp' => '.webp',
+                default => '.png',
+            })
+            ->toMediaCollection(ElementSuggestion::RENDER);
     }
 }

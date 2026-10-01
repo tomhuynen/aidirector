@@ -18,11 +18,8 @@ const makeMessage = (message: NewChatMessage): ChatMessage => ({ ...message, id:
  * before the request goes out, and appends the reply when it comes back.
  */
 export function useChat(options: UseChatOptions) {
-  const messages = ref<ChatMessage[]>(
-    (options.initial ?? []).map((message) =>
-      makeMessage({ kind: 'text', role: message.role, content: message.content }),
-    ),
-  )
+  // Every kind is kept as it is, so a resumed thread shows its grids again.
+  const messages = ref<ChatMessage[]>((options.initial ?? []).map((message) => makeMessage(message)))
   const busy = ref(false)
   const error = ref<string | null>(null)
 

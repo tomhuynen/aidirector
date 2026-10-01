@@ -29,6 +29,18 @@ enum ElementType: string
     }
 
     /**
+     * The category name in the intake chat, plural.
+     */
+    public function plural(): string
+    {
+        return match ($this) {
+            self::PERSON => 'People',
+            self::PLACE => 'Places',
+            self::OBJECT => 'Objects',
+        };
+    }
+
+    /**
      * How the element's reference image is staged, so it can be reused on its own.
      */
     public function referenceStaging(): string

@@ -36,6 +36,7 @@
           </Avatar>
 
           <slot v-if="message.kind === 'style-options'" name="style-options" :message="message" />
+          <slot v-else-if="message.kind === 'element-options'" name="element-options" :message="message" />
           <slot v-else name="text" :message="message">
             <div
               class="flex max-w-[85%] flex-col gap-2 text-[15px] leading-relaxed text-foreground"
@@ -239,6 +240,7 @@ const emit = defineEmits<{
 defineSlots<{
   'text'(props: { message: Extract<ChatMessage, { kind: 'text' }> }): unknown
   'style-options'(props: { message: Extract<ChatMessage, { kind: 'style-options' }> }): unknown
+  'element-options'(props: { message: Extract<ChatMessage, { kind: 'element-options' }> }): unknown
 }>()
 
 const draft = ref('')
@@ -302,7 +304,7 @@ const onDrop = (event: DragEvent) => {
 }
 
 /**
- * Follow the conversation. A tall message (a style grid)
+ * Follow the conversation. A tall message (a style or cast and sets grid)
  * would push the sentence that introduces it out of view, so for those the
  * thread scrolls to the sentence before it (or the top of the grid) instead
  * and the director scrolls down. Everything else scrolls to the end.
