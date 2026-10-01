@@ -43,13 +43,14 @@ it('sends a project without a style back to its chat', function () {
         ->assertRedirect(route('public.projects.setup', $this->project));
 });
 
-it('opens the editor once a style is pinned', function () {
+it('opens the project overview once a style is pinned', function () {
     $this->project->addMedia(UploadedFile::fake()->image('sheet.png'))->toMediaCollection(Project::STYLE_REFERENCES);
     $shot = Shot::factory()->for($this->project)->create();
 
     actingAs($this->director, 'director')
         ->get(route('public.projects.view', $this->project))
-        ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+        ->assertSuccessful()
+        ->assertInertia(fn($page) => $page->component('projects/view')->where('project.links.editor', route('public.shots.view', [$this->project, $shot])));
 
     actingAs($this->director, 'director')
         ->get(route('public.projects.setup', $this->project))
