@@ -4,22 +4,23 @@ declare(strict_types=1);
 
 namespace App\Ai\Briefs;
 
+use App\Ai\KeyframeReferences;
+use App\Enums\ElementType;
 use App\Models\Shot;
 
 /**
  * Composes the prompt the image model gets for one keyframe: the project's
  * visual style, the keyframe's own brief and the role of each attached
- * image. Attachments are sent in this order: the project's style reference
- * sheet if one is pinned, keyframe 1 of the shot, then the keyframe directly
- * before this one. {@see self::usesFirstKeyframe()} and
- * {@see self::usesPreviousKeyframe()} decide which apply.
+ * image. Which images are attached, and in which order, is decided by
+ * {@see KeyframeReferences}: the style sheet, the cast and sets in the
+ * keyframe, keyframe 1 and the keyframe directly before.
  */
 class KeyframeImageBrief
 {
     /**
      * @param  array{title: string, description: string, prompt?: string}  $keyframe
      */
-    public static function for(Shot $shot, array $keyframe, bool $withStyleReference, bool $withFirstKeyframe, bool $withPreviousKeyframe = false): string
+    public static function for(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
         $style = $shot->project->style;
 
@@ -28,22 +29,38 @@ class KeyframeImageBrief
             '',
             $keyframe['prompt'] ?? $keyframe['description'],
             '',
-            'Staging: the character stands in the foreground in front of one calm, even backdrop surface that fills the area directly behind them from head to feet, such as a facade, a container side, a fence panel, a wall, or open sky. Nothing crosses or touches the figure: no railings, pillars, poles, barriers or machines behind or in front of the character. The wider setting may be visible around and above the backdrop and in the distance, simpler than the character. Any sign or context object sits on the backdrop beside the character, clearly readable, not touching them. The ground near the feet is plain. Show the character fully in frame with space around them.',
-            'No text, captions, logos or watermarks in the image.',
         ];
 
-        $ordinals = ['first', 'second', 'third'];
+        if ($references->elements !== []) {
+            $lines[] = 'Cast and sets in this keyframe, draw them exactly as described:';
+
+            foreach ($references->elements as $element) {
+                $lines[] = '- ' . $element->promptLine();
+            }
+
+            $lines[] = '';
+        }
+
+        $lines[] = 'Staging: the character stands in the foreground in front of one calm, even backdrop surface that fills the area directly behind them from head to feet, such as a facade, a container side, a fence panel, a wall, or open sky. Nothing crosses or touches the figure: no railings, pillars, poles, barriers or machines behind or in front of the character. The wider setting may be visible around and above the backdrop and in the distance, simpler than the character. Any sign or context object sits on the backdrop beside the character, clearly readable, not touching them. The ground near the feet is plain. Show the character fully in frame with space around them.';
+        $lines[] = 'No text, captions, logos or watermarks in the image.';
+
+        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
         $attached = 0;
 
-        if ($withStyleReference) {
+        if ($references->style !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly: the same medium, shading, line work, colours and lighting. Do not copy its subjects, panels or layout.';
         }
 
-        if ($withFirstKeyframe) {
+        foreach ($references->elementImages as $entry) {
+            $element = $entry['element'];
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build and clothing' : '') . '. Do not copy its background or pose.';
+        }
+
+        if ($references->first !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is keyframe 1 of this shot. Keep the character\'s identity and appearance, the setting, the backdrop and the style exactly the same as in it.';
         }
 
-        if ($withPreviousKeyframe) {
+        if ($references->previous !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the character holds, what is in their pockets and what hangs on the backdrop, unless this keyframe\'s description changes it. Do not copy its pose.';
         }
 

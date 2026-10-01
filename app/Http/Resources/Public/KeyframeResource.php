@@ -32,6 +32,8 @@ class KeyframeResource extends JsonResource
             'rendering' => $this->rendering,
             /** @var string|null */
             'renderError' => $this->render_error,
+            /** @var array<int, string> */
+            'elements' => $this->whenLoaded('elements', fn() => $this->elements->pluck('name')->values()->all(), []),
             /** @var string|null */
             'imageUrl' => $rendered ? $this->imageUrl(null, $render) : null,
             /** @var string|null */

@@ -49,6 +49,8 @@ class ShotResource extends JsonResource
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
+            /** @var array<int, array{name: string, type: string, description: string, keyframes: array<int, int>, match: string|null}> */
+            'elementProposals' => $this->elementProposals(),
             /** @var int */
             'firstKeyframeOptions' => GenerateKeyframes::optionCount(),
             /** @var int */
@@ -76,6 +78,7 @@ class ShotResource extends JsonResource
                 'keyframesStore' => route('public.shots.keyframes.store', [$this->project, $this->resource]),
                 'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
                 'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
+                'elementsReview' => route('public.shots.elements.review', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
             ]),
             /** @var array<string, bool> */

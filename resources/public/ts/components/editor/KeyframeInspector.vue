@@ -5,6 +5,15 @@
         {{ $t('Keyframe :n', { n: String(index + 1) }) }}
       </p>
       <h2 class="text-xl font-semibold">{{ keyframe.title }}</h2>
+      <ul v-if="keyframe.elements.length > 0" class="flex flex-wrap gap-1.5 pt-2" :aria-label="$t('Cast & sets')">
+        <li
+          v-for="name in keyframe.elements"
+          :key="name"
+          class="rounded-full border border-signal/40 bg-signal-soft/40 px-2.5 py-0.5 text-xs"
+        >
+          {{ name }}
+        </li>
+      </ul>
     </div>
 
     <p v-if="keyframe.renderError" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm">

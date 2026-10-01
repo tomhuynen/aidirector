@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Projects;
 
+use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ReferenceImageResource;
 use App\Http\Resources\Public\ShotListItemResource;
@@ -32,6 +33,9 @@ class ViewController
             'project' => fn() => ProjectResource::make($project),
             'references' => fn() => ReferenceImageResource::collection($project->getMedia(Project::CONTENT_REFERENCES)),
             'shots' => fn() => ShotListItemResource::collection($project->shots),
+            'elements' => fn() => ElementResource::collection(
+                $project->elements()->with(['project', 'media', 'keyframes.shot.project'])->get()
+            ),
         ]);
     }
 }

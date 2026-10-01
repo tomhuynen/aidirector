@@ -7,7 +7,7 @@ namespace App\Jobs;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
-use App\Models\Keyframe;
+use App\Models\Element;
 use App\Models\Shot;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -17,7 +17,8 @@ use Throwable;
 
 /**
  * Draws options for keyframe 1 for the director to choose from. The first run
- * replaces the shot's keyframes with fresh rows for the current plan; with
+ * replaces the shot's keyframes with fresh rows for the current plan, linked
+ * to the cast and sets the plan names; with
  * `$more` it adds another batch of options to the existing keyframe 1. The
  * other keyframes render after the choice, in {@see GenerateRemainingKeyframes}.
  */
@@ -40,20 +41,17 @@ class GenerateKeyframes implements ShouldQueue
     public function handle(KeyframePainter $painter): void
     {
         $shot = $this->shot->load('project');
-        $style = $painter->styleReferenceFor($shot->project);
 
-        $first = $this->more ? $shot->keyframes()->firstOrFail() : $this->replaceKeyframes($shot, $style !== null);
-        $first->setRelation('shot', $shot);
+        if (! $this->more) {
+            $this->replaceKeyframes($shot);
+        }
 
+        $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
+        $first = $siblings->firstOrFail();
         $drawn = $first->renders()->count();
 
         foreach (range(0, self::optionCount() - 1) as $index) {
-            $painter->paint(
-                $first,
-                $first->prompt . "\n" . KeyframeImageBrief::variation($drawn + $index),
-                $style ? [$style] : [],
-                choose: false,
-            );
+            $painter->render($first, $siblings, KeyframeImageBrief::variation($drawn + $index), choose: false);
         }
 
         $first->forceFill(['render_id' => null, 'rendering' => false, 'render_error' => null])->save();
@@ -87,27 +85,29 @@ class GenerateKeyframes implements ShouldQueue
     }
 
     /**
-     * Replace the shot's keyframes with fresh rows for the current plan and return keyframe 1.
+     * Replace the shot's keyframes with fresh rows for the current plan, linked
+     * to the cast and sets the plan names. Their prompts are written at render time.
      */
-    private function replaceKeyframes(Shot $shot, bool $withStyleReference): Keyframe
+    private function replaceKeyframes(Shot $shot): void
     {
         $shot->forgetKeyframes();
 
-        $keyframes = collect($shot->storylineKeyframes())
-            ->map(fn(array $keyframe, int $index) => $shot->keyframes()->create([
-                'position' => $index + 1,
-                'title' => $keyframe['title'],
-                'description' => $keyframe['description'],
-                'prompt' => KeyframeImageBrief::for(
-                    $shot,
-                    $keyframe,
-                    $withStyleReference,
-                    withFirstKeyframe: KeyframeImageBrief::usesFirstKeyframe($index + 1),
-                    withPreviousKeyframe: KeyframeImageBrief::usesPreviousKeyframe($index + 1),
-                ),
-                'rendering' => $index === 0,
-            ]));
+        $elements = $shot->project->elements()->get()->keyBy(fn(Element $element) => mb_strtolower(trim($element->name)));
 
-        return $keyframes->firstOrFail();
+        foreach ($shot->storylineKeyframes() as $index => $plan) {
+            $keyframe = $shot->keyframes()->create([
+                'position' => $index + 1,
+                'title' => $plan['title'],
+                'description' => $plan['description'],
+                'rendering' => $index === 0,
+            ]);
+
+            $named = collect($plan['elements'] ?? [])
+                ->map(fn(string $name) => $elements->get(mb_strtolower(trim($name)))?->id)
+                ->filter()
+                ->unique();
+
+            $keyframe->elements()->sync($named->all());
+        }
     }
 }

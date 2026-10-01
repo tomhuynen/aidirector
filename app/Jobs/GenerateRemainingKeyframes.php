@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Ai\Briefs\KeyframeImageBrief;
+use App\Ai\ElementPainter;
 use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
 use App\Models\Shot;
@@ -16,9 +16,10 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Renders keyframes 2 to N once the director has chosen keyframe 1, each with
- * the style sheet, the chosen first keyframe and the keyframe just before it
- * as references.
+ * Renders keyframes 2 to N once keyframe 1 is chosen and its cast and sets
+ * reviewed. Elements without a reference image get one first; then every
+ * keyframe renders with the style sheet, its elements, the chosen first
+ * keyframe and the keyframe just before it as references.
  */
 #[DeleteWhenMissingModels]
 class GenerateRemainingKeyframes implements ShouldQueue
@@ -35,29 +36,42 @@ class GenerateRemainingKeyframes implements ShouldQueue
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
-    public function handle(KeyframePainter $painter): void
+    public function handle(KeyframePainter $painter, ElementPainter $elements): void
     {
-        $shot = $this->shot->load(['project', 'keyframes.media']);
-        $first = $shot->keyframes->first()?->render() ?? throw new RuntimeException('Choose the first keyframe before rendering the others.');
+        $shot = $this->shot->load('project');
+        $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
+        $first = $siblings->first();
 
-        $style = $painter->styleReferenceFor($shot->project);
-        $firstReference = $painter->referenceFor($first);
-        $previous = $first;
+        if ($first?->render() === null) {
+            throw new RuntimeException('Choose the first keyframe before rendering the others.');
+        }
 
-        foreach ($shot->keyframes->skip(1) as $keyframe) {
-            $references = array_values(array_filter([
-                $style,
-                $firstReference,
-                KeyframeImageBrief::usesPreviousKeyframe($keyframe->position) ? $painter->referenceFor($previous) : null,
-            ]));
+        $elements->paintMissing($siblings, $first);
 
-            $previous = $painter->paint($keyframe->setRelation('shot', $shot), $keyframe->prompt, $references);
+        foreach ($siblings->skip(1) as $keyframe) {
+            $painter->render($keyframe, $siblings);
         }
 
         $shot->forceFill([
             'storyline_error' => null,
             'status' => ShotStatus::KEYFRAMES_READY,
         ])->save();
+    }
+
+    /**
+     * Starts rendering keyframes 2 to N, once keyframe 1 and its cast and sets are settled.
+     */
+    public static function startFor(Shot $shot): void
+    {
+        $shot->keyframes()->where('position', '>', 1)->update(['rendering' => true, 'render_error' => null]);
+
+        $shot->forceFill([
+            'status' => ShotStatus::KEYFRAMES_PENDING,
+            'storyline_error' => null,
+            'element_proposals' => null,
+        ])->save();
+
+        self::dispatch($shot);
     }
 
     public function failed(?Throwable $exception): void

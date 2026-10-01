@@ -112,6 +112,30 @@ class Project extends Model implements HasMedia
         return $this->hasMany(Shot::class)->orderBy('position');
     }
 
+    /**
+     * The cast and sets: recurring people, places and objects.
+     *
+     * @return HasMany<Element, $this>
+     */
+    public function elements(): HasMany
+    {
+        return $this->hasMany(Element::class)->orderBy('type')->orderBy('name');
+    }
+
+    /**
+     * The cast and sets as a list for the writers, or a note that there are none yet.
+     */
+    public function elementsBrief(): string
+    {
+        $elements = $this->elements()->get();
+
+        if ($elements->isEmpty()) {
+            return 'None yet.';
+        }
+
+        return $elements->map(fn(Element $element) => '- ' . $element->promptLine())->join("\n");
+    }
+
     /** @return MorphMany<Generation, $this> */
     public function generations(): MorphMany
     {

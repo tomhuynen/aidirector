@@ -34,11 +34,19 @@ return [
      */
     'style_options_count' => 4,
 
+    /*
+    | Image size for keyframes, options and cast and sets: low, medium or high
+    | (1K, 2K or 4K on OpenRouter's Gemini image models). Low keeps tests quick.
+    */
+    'image_quality' => env('AI_IMAGE_QUALITY', 'low'),
+
     'keyframes' => [
         'min' => 3,
         'max' => 6,
         // Variations of keyframe 1 the director chooses from before the rest renders.
         'first_options' => (int) env('AI_FIRST_KEYFRAME_OPTIONS', 3),
+        // Reference images of the cast and sets attached to one keyframe render.
+        'max_element_references' => 3,
     ],
 
     'queue' => 'ai',
@@ -56,7 +64,8 @@ return [
 
     'video' => [
         'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
-        'resolution' => env('AI_VIDEO_RESOLUTION', '720p'),
+        // The default for projects without their own; the lowest the model offers, for quick tests.
+        'resolution' => env('AI_VIDEO_RESOLUTION', '480p'),
         'resolutions' => ['480p', '720p', '1080p', '4K'],
         'min_duration' => 4,
         'max_duration' => 15,

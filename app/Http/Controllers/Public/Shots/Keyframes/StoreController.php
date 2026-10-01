@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
-use App\Ai\Briefs\KeyframeImageBrief;
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\NewKeyframeRequest;
 use App\Jobs\GenerateKeyframeImage;
@@ -46,13 +45,6 @@ class StoreController
             'position' => $position,
             'title' => $plan['title'],
             'description' => $plan['description'],
-            'prompt' => KeyframeImageBrief::for(
-                $shot,
-                $plan,
-                withStyleReference: $project->styleReference() !== null,
-                withFirstKeyframe: KeyframeImageBrief::usesFirstKeyframe($position),
-                withPreviousKeyframe: KeyframeImageBrief::usesPreviousKeyframe($position),
-            ),
             'rendering' => true,
         ]);
 

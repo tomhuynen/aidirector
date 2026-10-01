@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Models\Director;
+use App\Models\Element;
 use App\Models\Generation;
 use App\Models\Keyframe;
 use App\Models\Media;
@@ -84,6 +85,7 @@ class AppServiceProvider extends ServiceProvider
             'project' => Project::class,
             'shot' => Shot::class,
             'keyframe' => Keyframe::class,
+            'element' => Element::class,
             'generation' => Generation::class,
             'media' => Media::class,
             'upload' => Upload::class,

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Events\KeyframeDeleting;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Collection;
 use RedExplosion\Sqids\Concerns\HasSqids;
@@ -32,6 +34,11 @@ class Keyframe extends Model implements HasMedia
 
     protected $guarded = [];
 
+    /** @var array<string, class-string> */
+    protected $dispatchesEvents = [
+        'deleting' => KeyframeDeleting::class,
+    ];
+
     /**
      * @return array{
      *  rendering: 'boolean',
@@ -48,6 +55,16 @@ class Keyframe extends Model implements HasMedia
     public function shot(): BelongsTo
     {
         return $this->belongsTo(Shot::class);
+    }
+
+    /**
+     * The cast and sets that appear in this keyframe.
+     *
+     * @return BelongsToMany<Element, $this>
+     */
+    public function elements(): BelongsToMany
+    {
+        return $this->belongsToMany(Element::class);
     }
 
     /** @return MorphMany<Generation, $this> */

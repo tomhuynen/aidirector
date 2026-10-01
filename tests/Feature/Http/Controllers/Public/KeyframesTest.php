@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use App\Ai\ElementPainter;
 use App\Ai\KeyframePainter;
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
+use App\Jobs\DetectElements;
 use App\Jobs\GenerateKeyframeImage;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
@@ -56,7 +58,7 @@ function renderAllKeyframes(Shot $shot): void
     $first = $shot->keyframes()->firstOrFail();
     $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
 
-    (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+    (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
 }
 
 /**
@@ -117,6 +119,7 @@ describe('job', function () {
         renderAllKeyframes($shot);
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->size === $shot->aspectRatio()->value
+            && $prompt->quality === 'low'
             && $prompt->contains('Visual style:')
             && $prompt->contains('in front of one calm, even backdrop surface')
             && $prompt->contains('A man in a navy suit stands at a red mailbox'));
@@ -269,12 +272,16 @@ describe('first keyframe', function () {
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
         expect($first->fresh()->render()->id)->toBe($chosen->id)
-            ->and($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
+            ->and($shot->fresh()->status)->toBe(ShotStatus::ELEMENTS_PENDING);
+
+        Queue::assertPushed(DetectElements::class, fn(DetectElements $job) => $job->shot->is($shot));
+
+        GenerateRemainingKeyframes::startFor($shot->fresh());
+
+        expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
             ->and($shot->keyframes()->where('position', 2)->first()->rendering)->toBeTrue();
 
-        Queue::assertPushed(GenerateRemainingKeyframes::class, fn(GenerateRemainingKeyframes $job) => $job->shot->is($shot));
-
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(ElementPainter::class));
 
         $chosenBytes = Storage::disk(Disk::TENANT->value)->get($chosen->getPathRelativeToRoot());
 
@@ -352,12 +359,16 @@ describe('add', function () {
 
         expect($added->title)->toBe('Walks away')
             ->and($added->rendering)->toBeTrue()
-            ->and($added->prompt)->toContain('The man walks away from the mailbox, smiling.')
-            ->and($added->prompt)->toContain('keyframe 1 of this shot')
-            ->and($added->prompt)->toContain('the keyframe directly before this one')
             ->and($shot->fresh()->storylineKeyframes()[3])->toEqual(['title' => 'Walks away', 'description' => 'The man walks away from the mailbox, smiling.', 'prompt' => 'The man walks away from the mailbox, smiling.']);
 
         Queue::assertPushed(GenerateKeyframeImage::class, fn(GenerateKeyframeImage $job) => $job->keyframe->is($added));
+
+        (new GenerateKeyframeImage($added))->handle(app(KeyframePainter::class));
+
+        expect($added->fresh()->prompt)
+            ->toContain('The man walks away from the mailbox, smiling.')
+            ->toContain('keyframe 1 of this shot')
+            ->toContain('the keyframe directly before this one');
     });
 
     it('requires a title and a description', function () {
@@ -414,9 +425,6 @@ describe('update', function () {
         $keyframe->refresh();
 
         expect($keyframe->description)->toBe('He drops the envelope in the slot and smiles.')
-            ->and($keyframe->prompt)->toContain('He drops the envelope in the slot and smiles.')
-            ->and($keyframe->prompt)->toContain('keyframe 1 of this shot')
-            ->and($keyframe->prompt)->not->toContain('directly before this one')
             ->and($keyframe->rendering)->toBeTrue()
             ->and($keyframe->render_error)->toBeNull()
             ->and($shot->fresh()->storylineKeyframes()[1])->toEqual(['title' => 'Posting', 'description' => 'He drops the envelope in the slot and smiles.', 'prompt' => 'He drops the envelope in the slot and smiles.']);
@@ -455,7 +463,10 @@ describe('update', function () {
 
         $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
         $previous = $keyframe->render()->id;
-        $keyframe->forceFill(['prompt' => 'A man in a navy suit smiles at the mailbox.', 'rendering' => true])->save();
+        $plan = $shot->storylineKeyframes();
+        $plan[1]['prompt'] = 'A man in a navy suit smiles at the mailbox.';
+        $shot->forceFill(['storyline' => ['keyframes' => $plan]])->save();
+        $keyframe->forceFill(['rendering' => true])->save();
 
         (new GenerateKeyframeImage($keyframe))->handle(app(KeyframePainter::class));
 
@@ -465,7 +476,10 @@ describe('update', function () {
             ->and($keyframe->render()->id)->not->toBe($previous)
             ->and($keyframe->renders())->toHaveCount(2);
 
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('smiles at the mailbox') && $prompt->attachments->count() === 1);
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('smiles at the mailbox')
+            && $prompt->contains('keyframe 1 of this shot')
+            && ! $prompt->contains('directly before this one')
+            && $prompt->attachments->count() === 1);
     });
 
     it('marks the keyframe when its render fails', function () {

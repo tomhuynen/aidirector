@@ -110,6 +110,56 @@
     </section>
 
     <section class="space-y-4">
+      <div class="flex items-baseline justify-between gap-4">
+        <h2 class="text-xl font-semibold">
+          {{ $t('Cast & sets') }}
+          <span class="font-normal text-muted-foreground tabular-nums">({{ elements.length }})</span>
+        </h2>
+        <p class="text-sm text-muted-foreground">
+          {{ $t('People, places and objects that look the same in every shot.') }}
+        </p>
+      </div>
+      <p
+        v-if="elements.length === 0"
+        class="rounded-xl border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground"
+      >
+        {{ $t('None yet. They are added when you review the cast and sets of a shot.') }}
+      </p>
+      <ul v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <li
+          v-for="element in elements"
+          :key="element.id"
+          class="flex gap-4 rounded-xl border border-border bg-card p-3"
+        >
+          <img
+            v-if="element.imageUrl"
+            :src="element.imageUrl"
+            :alt="element.name"
+            class="size-24 shrink-0 rounded-lg border border-border bg-paper-deep object-cover"
+            loading="lazy"
+          />
+          <Placeholder v-else class="size-24 shrink-0 bg-background" />
+          <div class="min-w-0 space-y-1">
+            <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">{{ element.typeLabel }}</p>
+            <p class="font-semibold">{{ element.name }}</p>
+            <p class="line-clamp-2 text-sm leading-snug text-muted-foreground">{{ element.description }}</p>
+            <p v-if="element.shots.length > 0" class="flex flex-wrap gap-x-2 text-xs">
+              <Link
+                v-for="shot in element.shots"
+                :key="shot.url"
+                :href="shot.url"
+                class="text-signal tabular-nums hover:underline"
+                :title="shot.title"
+              >
+                {{ shotCode(shot.position) }}
+              </Link>
+            </p>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="space-y-4">
       <h2 class="text-xl font-semibold">
         {{ $t('Shots') }}
         <span class="font-normal text-muted-foreground tabular-nums">({{ shots.length }})</span>

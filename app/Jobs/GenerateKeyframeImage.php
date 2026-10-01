@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Models\Keyframe;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -15,8 +14,8 @@ use Throwable;
 
 /**
  * Renders a single keyframe again, for example after the director changed
- * its description. Like the full render it attaches the project's style
- * sheet, keyframe 1 and the keyframe just before it, where they apply.
+ * its description. Like the full render it attaches the style sheet, its
+ * cast and sets, keyframe 1 and the keyframe just before it, where they apply.
  */
 #[DeleteWhenMissingModels]
 class GenerateKeyframeImage implements ShouldQueue
@@ -35,18 +34,10 @@ class GenerateKeyframeImage implements ShouldQueue
 
     public function handle(KeyframePainter $painter): void
     {
-        $keyframe = $this->keyframe->load('shot.project');
-        $siblings = $keyframe->shot->keyframes()->with('media')->get();
-        $first = KeyframeImageBrief::usesFirstKeyframe($keyframe->position) ? $siblings->first()?->render() : null;
-        $previous = KeyframeImageBrief::usesPreviousKeyframe($keyframe->position)
-            ? $siblings->firstWhere('position', $keyframe->position - 1)?->render()
-            : null;
+        $shot = $this->keyframe->shot()->with('project')->firstOrFail();
+        $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
 
-        $painter->paint($keyframe, $keyframe->prompt, array_values(array_filter([
-            $painter->styleReferenceFor($keyframe->shot->project),
-            $first ? $painter->referenceFor($first) : null,
-            $previous ? $painter->referenceFor($previous) : null,
-        ])));
+        $painter->render($siblings->firstWhere('id', $this->keyframe->id) ?? $this->keyframe->setRelation('shot', $shot), $siblings);
     }
 
     public function failed(?Throwable $exception): void

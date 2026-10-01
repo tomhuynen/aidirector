@@ -43,6 +43,10 @@ class StorylineOptionsWriter implements Agent, HasStructuredOutput
             Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.
             Shot length: about {$this->shot->durationInSeconds()} seconds.
 
+            Cast and sets of this project, recurring people, places and objects:
+            {$project->elementsBrief()}
+            Reuse one of these when this shot is about that person, place or object, and then call it by its exact name and describe it with its description word for word. Introduce new people, places or objects whenever the story needs someone or something else; never force an existing one into a story where it does not belong.
+
             What the brief is:
             - The brief is an idea, not a script. The takeaway is fixed. The subject and action describe one way of showing it; treat them as the first interpretation the writer thought of, not the only one.
             - Each storyline is a different scene that lands the same takeaway. If all {$count} were filmed, a viewer should see {$count} different scenes, not {$count} takes of the same scene.

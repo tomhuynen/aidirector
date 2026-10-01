@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
-use App\Ai\Briefs\KeyframeImageBrief;
 use App\Http\Requests\Public\KeyframeRequest;
 use App\Jobs\GenerateKeyframeImage;
 use App\Models\Keyframe;
@@ -22,20 +21,11 @@ class UpdateController
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
-        $shot->setRelation('project', $project);
-
         $description = $request->validated('description');
         $plan = ['title' => $keyframe->title, 'description' => $description, 'prompt' => $description];
 
         $keyframe->forceFill([
             'description' => $description,
-            'prompt' => KeyframeImageBrief::for(
-                $shot,
-                $plan,
-                withStyleReference: $project->styleReference() !== null,
-                withFirstKeyframe: KeyframeImageBrief::usesFirstKeyframe($keyframe->position),
-                withPreviousKeyframe: KeyframeImageBrief::usesPreviousKeyframe($keyframe->position),
-            ),
             'rendering' => true,
             'render_error' => null,
         ])->save();
@@ -61,7 +51,7 @@ class UpdateController
             return;
         }
 
-        $keyframes[$index] = $plan;
+        $keyframes[$index] = [...$keyframes[$index], ...$plan];
 
         $shot->forceFill(['storyline' => ['keyframes' => $keyframes]])->save();
     }

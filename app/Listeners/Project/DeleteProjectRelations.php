@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Listeners\Project;
 
 use App\Events\ProjectDeleting;
+use App\Models\Element;
 use App\Models\Shot;
 use App\Models\StyleOption;
 use Laravel\Ai\Models\Conversation;
@@ -23,6 +24,8 @@ class DeleteProjectRelations
         $project = $event->project;
 
         $project->shots()->get()->each(fn(Shot $shot) => $shot->delete());
+
+        $project->elements()->get()->each(fn(Element $element) => $element->delete());
 
         // Children first, so a parent never outlives the options that point at it.
         $project->styleOptions()->reorder()->orderByDesc('round')->get()->each(fn(StyleOption $option) => $option->delete());
