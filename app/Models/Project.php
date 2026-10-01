@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\AspectRatio;
+use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
 use App\Events\ProjectDeleting;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -77,6 +78,7 @@ class Project extends Model implements HasMedia
      *  purpose: 'App\Enums\ProjectPurpose',
      *  aspect_ratio: 'App\Enums\AspectRatio',
      *  style: 'array',
+     *  setup_completed_at: 'datetime',
      *  archived_at: 'datetime',
      * }
      */
@@ -86,6 +88,7 @@ class Project extends Model implements HasMedia
             'purpose' => ProjectPurpose::class,
             'aspect_ratio' => AspectRatio::class,
             'style' => 'array',
+            'setup_completed_at' => 'datetime',
             'archived_at' => 'datetime',
         ];
     }
@@ -142,6 +145,35 @@ class Project extends Model implements HasMedia
         return $this->morphMany(Generation::class, 'generatable');
     }
 
+    /** @return HasMany<ElementRound, $this> */
+    public function elementRounds(): HasMany
+    {
+        return $this->hasMany(ElementRound::class)->orderBy('id');
+    }
+
+    /**
+     * The cast and sets categories the intake chat has settled: picked from or skipped.
+     *
+     * @return list<ElementType>
+     */
+    public function settledElementTypes(): array
+    {
+        return $this->elementRounds()->get()
+            ->filter(fn(ElementRound $round) => $round->status->settlesCategory())
+            ->map(fn(ElementRound $round) => $round->type)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Whether the intake chat may finish: style pinned and every category settled.
+     */
+    public function canCompleteSetup(): bool
+    {
+        return $this->styleReference() !== null && count($this->settledElementTypes()) === count(ElementType::cases());
+    }
+
     /** @return HasMany<StyleOption, $this> */
     public function styleOptions(): HasMany
     {
@@ -175,12 +207,13 @@ class Project extends Model implements HasMedia
     }
 
     /**
-     * A project started in the intake chat stays in setup until a style is
-     * pinned; opening it resumes the conversation.
+     * A project started in the intake chat stays in setup until the chat has
+     * finished: style pinned and every cast and sets category picked or
+     * skipped. Opening it resumes the conversation.
      */
     public function needsSetup(): bool
     {
-        return $this->conversation_id !== null && ! $this->hasMedia(self::STYLE_REFERENCES);
+        return $this->conversation_id !== null && $this->setup_completed_at === null;
     }
 
     /**

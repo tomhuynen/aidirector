@@ -7,13 +7,18 @@ namespace App\Http\Controllers\Public\Projects;
 use App\Ai\Agents\PhotoCaptioner;
 use App\Ai\Agents\ProjectIntake;
 use App\Enums\AspectRatio;
+use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
 use App\Http\Requests\Public\ProjectChatRequest;
+use App\Jobs\AnalyzePhoto;
 use App\Models\Director;
+use App\Models\ElementRound;
 use App\Models\Media;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use App\Models\Upload;
+use App\Support\Elements\ElementRoundState;
+use App\Support\Elements\StartElementRound;
 use App\Support\Media\ClaimUploads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -37,6 +42,8 @@ class ChatController
 {
     public function __construct(
         private readonly ClaimUploads $claimUploads,
+        private readonly StartElementRound $startElementRound,
+        private readonly ElementRoundState $elementRoundState,
     ) {}
 
     public function store(ProjectChatRequest $request): JsonResponse
@@ -55,17 +62,20 @@ class ChatController
             ]);
         }
 
-        $agent = new ProjectIntake();
-
         if ($conversationId !== null) {
             abort_unless($director->conversations()->whereKey($conversationId)->exists(), 403);
+        }
 
+        $photos = $uploads->isEmpty() ? collect() : $this->addPhotos($director, $project, $uploads);
+
+        // The agent sees the project's photos, style and cast and sets status on every turn.
+        $agent = new ProjectIntake($project);
+
+        if ($conversationId !== null) {
             $agent->continue($conversationId, as: $director);
         } else {
             $agent->forUser($director);
         }
-
-        $photos = $uploads->isEmpty() ? collect() : $this->addPhotos($director, $project, $uploads);
         $prompt = $this->prompt((string) $request->validated('message'), $photos);
         $model = Config::get('pipeline.models.text');
         $started = hrtime(true);
@@ -89,6 +99,8 @@ class ChatController
         $conversationId = $response->conversationId;
         $data = $response->toArray();
         $project = $this->projectFor($director, $conversationId, $data);
+        $round = $project === null ? null : $this->elementAction($project, $data);
+        $done = $project !== null && (bool) ($data['done'] ?? false) && $this->completeSetup($project);
 
         return response()->json([
             'conversation' => $conversationId,
@@ -97,7 +109,9 @@ class ChatController
             /** @var string|null */
             'ask' => $data['ask'] ?? null,
             /** @var bool */
-            'done' => (bool) ($data['done'] ?? false),
+            'done' => $done,
+            /** @var array{id: string, type: 'person'|'place'|'object', label: string, status: 'suggesting'|'ready'|'picked'|'skipped'|'failed', error: string|null, pollUrl: string, pickUrl: string, options: array<int, array{id: string, name: string, description: string, status: 'pending'|'ready'|'failed', picked: bool, fromPhoto: bool, thumbnailUrl: string|null, imageUrl: string|null}>}|null */
+            'elementRound' => $round === null ? null : $this->elementRoundState->for($round),
             /** @var array{id: string, url: string, styleRoundsUrl: string}|null */
             'project' => $project === null ? null : [
                 'id' => $project->sqid,
@@ -140,6 +154,9 @@ class ChatController
     private function addPhotos(Director $director, Project $project, Collection $uploads): Collection
     {
         $photos = $this->claimUploads->toCollection($project, $uploads, Project::CONTENT_REFERENCES);
+
+        // What each photo shows is worked out in the background for the cast and sets stage.
+        $photos->each(fn(Media $photo) => AnalyzePhoto::dispatch($photo));
         $captioner = new PhotoCaptioner($photos, (string) $project->description);
         $model = Config::get('pipeline.models.text');
         $started = hrtime(true);
@@ -205,6 +222,54 @@ class ChatController
             'usage' => $usage,
             'error' => $error,
         ]);
+    }
+
+    /**
+     * Starts or skips the cast and sets category the agent asked for. Only
+     * once a style is pinned: suggestions are drawn in that style.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function elementAction(Project $project, array $data): ?ElementRound
+    {
+        if ($project->styleReference() === null) {
+            return null;
+        }
+
+        $skip = ElementType::tryFrom((string) ($data['skip'] ?? ''));
+
+        if ($skip !== null) {
+            $this->startElementRound->skip($project, $skip);
+        }
+
+        $request = $data['element_round'] ?? null;
+        $type = is_array($request) ? ElementType::tryFrom((string) ($request['type'] ?? '')) : null;
+        $brief = is_array($request) ? trim((string) ($request['brief'] ?? '')) : '';
+
+        if ($type === null || $brief === '' || in_array($type, $project->settledElementTypes(), true)) {
+            return null;
+        }
+
+        return $this->startElementRound->start($project, $type, $brief)->setRelation('project', $project);
+    }
+
+    /**
+     * Finishes the intake when the agent says it is done and the project
+     * really is: style pinned and every cast and sets category settled.
+     */
+    private function completeSetup(Project $project): bool
+    {
+        if ($project->setup_completed_at !== null) {
+            return true;
+        }
+
+        if (! $project->canCompleteSetup()) {
+            return false;
+        }
+
+        $project->forceFill(['setup_completed_at' => now()])->save();
+
+        return true;
     }
 
     /**

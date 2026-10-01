@@ -6,6 +6,8 @@ namespace App\Providers;
 
 use App\Models\Director;
 use App\Models\Element;
+use App\Models\ElementRound;
+use App\Models\ElementSuggestion;
 use App\Models\Generation;
 use App\Models\Keyframe;
 use App\Models\Media;
@@ -90,6 +92,8 @@ class AppServiceProvider extends ServiceProvider
             'media' => Media::class,
             'upload' => Upload::class,
             'style-option' => StyleOption::class,
+            'element-round' => ElementRound::class,
+            'element-suggestion' => ElementSuggestion::class,
         ]);
 
         Model::preventLazyLoading(! $this->app->isProduction());

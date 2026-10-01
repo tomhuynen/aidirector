@@ -11,6 +11,8 @@ use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
+use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
+use App\Http\Controllers\Public\Projects\Elements\RoundController as ElementRoundController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
 use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
@@ -67,6 +69,14 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{project}/update', [ProjectUpdateController::class, 'update'])->name('update');
             Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
+        });
+
+    Route::prefix('projects/{project}/elements/rounds')
+        ->name('projects.elements.rounds.')
+        ->scopeBindings()
+        ->group(function () {
+            Route::get('{elementRound}', [ElementRoundController::class, 'show'])->name('view');
+            Route::post('{elementRound}/pick', [ElementPickController::class, 'store'])->name('pick');
         });
 
     Route::prefix('projects/{project}/style')

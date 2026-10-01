@@ -7,11 +7,13 @@ use App\Ai\Agents\ProjectIntake;
 use App\Enums\AspectRatio;
 use App\Enums\Disk;
 use App\Enums\ProjectPurpose;
+use App\Jobs\AnalyzePhoto;
 use App\Models\Director;
 use App\Models\Generation;
 use App\Models\Project;
 use App\Models\Upload;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Ai\Models\Conversation;
 use Laravel\Ai\Models\ConversationMessage;
@@ -140,7 +142,8 @@ describe('chat', function () {
             ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Thanks'])
             ->assertSuccessful()
             ->assertJsonPath('project.id', $project->sqid)
-            ->assertJsonPath('done', true);
+            // The agent says done, but there is no style or cast and sets yet.
+            ->assertJsonPath('done', false);
 
         expect(Project::query()->count())->toBe(1)
             ->and($project->fresh()->title)->toBe('Mailbox')
@@ -183,6 +186,7 @@ describe('chat', function () {
     describe('photos', function () {
         beforeEach(function () {
             Storage::fake(Disk::TENANT->value);
+            Queue::fake([AnalyzePhoto::class]);
             ProjectIntake::fake([
                 ['reply' => 'Hi.', 'description' => 'd', 'purpose' => 'explainer', 'title' => 't', 'ask' => 'photos', 'done' => false],
             ]);
@@ -235,6 +239,8 @@ describe('chat', function () {
             ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === "Here are two\n\nThe director added 2 photos:\n1. A grey harbour tug with a red hull stripe.\n2. A shipyard hall with a blue gantry crane.");
 
             expect(Generation::query()->where('kind', 'caption')->count())->toBe(1);
+
+            Queue::assertPushed(AnalyzePhoto::class, 2);
         });
 
         it('keeps the photos when the captioner fails', function () {

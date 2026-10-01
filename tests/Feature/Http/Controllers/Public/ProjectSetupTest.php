@@ -42,8 +42,17 @@ it('sends a project without a style back to its chat', function () {
         ->assertRedirect(route('public.projects.setup', $this->project));
 });
 
-it('opens the project overview once a style is pinned', function () {
+it('keeps a project in setup until the chat finished, even with a style pinned', function () {
     $this->project->addMedia(UploadedFile::fake()->image('sheet.png'))->toMediaCollection(Project::STYLE_REFERENCES);
+
+    actingAs($this->director, 'director')
+        ->get(route('public.projects.view', $this->project))
+        ->assertRedirect(route('public.projects.setup', $this->project));
+});
+
+it('opens the project overview once setup is completed', function () {
+    $this->project->addMedia(UploadedFile::fake()->image('sheet.png'))->toMediaCollection(Project::STYLE_REFERENCES);
+    $this->project->forceFill(['setup_completed_at' => now()])->save();
     $shot = Shot::factory()->for($this->project)->create();
 
     actingAs($this->director, 'director')
