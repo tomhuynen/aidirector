@@ -16,6 +16,9 @@
       :hint="hint"
       @send="send"
     >
+      <template #photo-gallery="{ message }">
+        <PhotoGallery :message="message" :disabled="done || busy || styleActivity !== null" @pick="pickPhotos" />
+      </template>
       <template #style-options="{ message }">
         <StyleOptionsGrid :message="message" :disabled="done || styleActivity !== null" @more="moreLike" @pin="pin" />
       </template>
@@ -34,6 +37,7 @@ import AppLayout from '@public/ts/layouts/App.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia, PostResponse } from '@public/ts/types/utils'
 import Chat from '@public:components/chat/Chat.vue'
+import PhotoGallery from '@public:components/chat/PhotoGallery.vue'
 import StyleOptionsGrid from '@public:components/chat/StyleOptionsGrid.vue'
 import type { ChatMessage, NewChatMessage, StyleOptionTile } from '@public:components/chat/types'
 import { useChat } from '@public:components/chat/useChat'
@@ -50,6 +54,8 @@ const props = defineProps<Inertia.Pages.Projects.Setup>()
 type ChatTurn = PostResponse<'/projects/create/chat'>
 type StyleRound = PostResponse<'/projects/{project}/style/rounds'>
 type StyleOptionsMessage = Extract<ChatMessage, { kind: 'style-options' }>
+type PhotoGalleryMessage = Extract<ChatMessage, { kind: 'photo-gallery' }>
+type PhotoPick = PostResponse<'/projects/{project}/photos/pick'>
 
 const { account } = usePage()
 const userInitial = computed(() => account.value?.name.trim().charAt(0).toUpperCase() ?? '')
@@ -91,7 +97,7 @@ const messageFrom = (caught: unknown): string => {
   }
 }
 
-const { messages, busy, error, send, push } = useChat({
+const { messages, busy, error, send, push, pushText } = useChat({
   // A resumed thread is rebuilt on the server in the same shape the chat keeps.
   initial: props.resume
     ? (props.resume.messages as unknown as NewChatMessage[])
@@ -111,6 +117,14 @@ const { messages, busy, error, send, push } = useChat({
     http.conversation = turn.conversation
     ask.value = turn.ask
     project.value = turn.project
+
+    if (turn.gallery) {
+      // The reply introduces the gallery, so both go in here and nothing is left for useChat to append.
+      pushText('assistant', turn.reply)
+      push({ kind: 'photo-gallery', role: 'assistant', content: '', ...turn.gallery })
+
+      return null
+    }
 
     if (turn.done && turn.project) {
       done.value = true
@@ -195,6 +209,53 @@ const startRound = async (parent: StyleOptionTile | null = null) => {
 }
 
 const moreLike = (option: StyleOptionTile) => startRound(option)
+
+/*
+ * Photo galleries: the ticked photos are downloaded on the server into
+ * staging uploads, then sent in a chat turn like photos added with +.
+ */
+const picking = useHttp<{ suggestions: string[] }, PhotoPick>({ suggestions: [] })
+
+const pickPhotos = async (message: PhotoGalleryMessage, ids: string[]) => {
+  if (ids.length === 0 || styleActivity.value !== null) {
+    return
+  }
+
+  styleActivity.value = $t('Fetching :count photos…', { count: String(ids.length) })
+  picking.suggestions = ids
+
+  let result: PhotoPick
+
+  try {
+    result = await picking.post(message.pickUrl)
+  } catch (caught) {
+    error.value = messageFrom(caught)
+    styleActivity.value = null
+
+    return
+  }
+
+  const added = ids.filter((id) => !result.failed.includes(id))
+  message.suggestions = message.suggestions.map((tile) => ({ ...tile, picked: tile.picked || added.includes(tile.id) }))
+  styleActivity.value = null
+
+  if (result.failed.length > 0) {
+    error.value = $t(':count photos could not be fetched from their website.', { count: String(result.failed.length) })
+  }
+
+  if (result.uploads.length > 0) {
+    const previews = new Map(message.suggestions.map((tile) => [tile.id, tile.thumbnailUrl]))
+
+    await send(
+      '',
+      result.uploads.map((upload, index) => ({
+        id: upload.id,
+        name: upload.name,
+        previewUrl: previews.get(added[index]) ?? upload.url,
+      })),
+    )
+  }
+}
 
 const pin = async (option: StyleOptionTile) => {
   if (styleActivity.value !== null) {

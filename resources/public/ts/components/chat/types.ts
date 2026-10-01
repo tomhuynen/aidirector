@@ -1,4 +1,4 @@
-import type { GetResponse } from '@public/ts/types/utils'
+import type { GetResponse, PostResponse } from '@public/ts/types/utils'
 
 export type ChatRole = 'user' | 'assistant'
 
@@ -19,6 +19,9 @@ type BaseMessage = {
 /** One tile of a style round, as the API returns it. */
 export type StyleOptionTile = GetResponse<'/projects/{project}/style/rounds/{round}'>[number]
 
+/** One photo found by search, as the chat API returns it. */
+export type PhotoSuggestionTile = NonNullable<PostResponse<'/projects/create/chat'>['gallery']>['suggestions'][number]
+
 /**
  * `kind` is the extension point for message types beyond text. Every kind
  * carries a plain-text `content` as fallback.
@@ -32,6 +35,13 @@ export type ChatMessage = BaseMessage &
         /** Where the round's options are polled from while they render. */
         optionsUrl: string
         options: StyleOptionTile[]
+      }
+    | {
+        kind: 'photo-gallery'
+        batch: number
+        /** Where the ticked photos are sent to be downloaded. */
+        pickUrl: string
+        suggestions: PhotoSuggestionTile[]
       }
   )
 

@@ -11,7 +11,7 @@ return new class extends Migration {
     {
         Schema::create('keyframes', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('shot_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('shot_id')->constrained();
             $table->unsignedSmallInteger('position');
             $table->string('title');
             $table->text('description');

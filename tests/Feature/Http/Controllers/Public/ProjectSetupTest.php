@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Ai\Agents\ProjectIntake;
 use App\Enums\Disk;
 use App\Models\Director;
+use App\Models\PhotoSuggestion;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Models\StyleOption;
@@ -70,6 +71,9 @@ it('resumes the thread where it was left', function () {
         ->prompt('No more photos', provider: 'openrouter', model: 'test');
 
     $this->travel(1)->seconds();
+    PhotoSuggestion::factory()->for($this->project)->picked()->create();
+
+    $this->travel(1)->seconds();
     $option = StyleOption::factory()->for($this->project)->ready()->create(['round' => 1, 'position' => 1]);
     StyleOption::factory()->for($this->project)->create(['round' => 1, 'position' => 2]);
 
@@ -82,7 +86,7 @@ it('resumes the thread where it was left', function () {
             ->where('resume.ask', 'style')
             ->where('resume.project.id', $this->project->sqid)
             ->where('resume.project.styleRoundsUrl', route('public.projects.style.round', $this->project))
-            ->has('resume.messages', 8)
+            ->has('resume.messages', 9)
             ->where('resume.messages.0.content', ProjectIntake::greeting())
             ->where('resume.messages.1.role', 'user')
             ->where('resume.messages.1.content', 'Damen')
@@ -94,11 +98,14 @@ it('resumes the thread where it was left', function () {
             ->where('resume.messages.5.content', 'No more photos')
             ->has('resume.messages.5.attachments', 0)
             ->where('resume.messages.6.content', 'Here are some directions.')
-            ->where('resume.messages.7.kind', 'style-options')
-            ->where('resume.messages.7.round', 1)
-            ->where('resume.messages.7.optionsUrl', route('public.projects.style.options', [$this->project, 1]))
-            ->where('resume.messages.7.options.0.id', $option->sqid)
-            ->where('resume.messages.7.options.1.status', 'pending'));
+            ->where('resume.messages.7.kind', 'photo-gallery')
+            ->where('resume.messages.7.batch', 1)
+            ->where('resume.messages.7.suggestions.0.picked', true)
+            ->where('resume.messages.8.kind', 'style-options')
+            ->where('resume.messages.8.round', 1)
+            ->where('resume.messages.8.optionsUrl', route('public.projects.style.options', [$this->project, 1]))
+            ->where('resume.messages.8.options.0.id', $option->sqid)
+            ->where('resume.messages.8.options.1.status', 'pending'));
 });
 
 it('forbids resuming another director\'s project', function () {

@@ -21,6 +21,7 @@
         <div
           v-for="message in messages"
           :key="message.id"
+          :data-message-id="message.id"
           class="flex items-start gap-3"
           :class="message.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
         >
@@ -35,6 +36,7 @@
           </Avatar>
 
           <slot v-if="message.kind === 'style-options'" name="style-options" :message="message" />
+          <slot v-else-if="message.kind === 'photo-gallery'" name="photo-gallery" :message="message" />
           <slot v-else name="text" :message="message">
             <div
               class="flex max-w-[85%] flex-col gap-2 text-[15px] leading-relaxed text-foreground"
@@ -238,6 +240,7 @@ const emit = defineEmits<{
 defineSlots<{
   'text'(props: { message: Extract<ChatMessage, { kind: 'text' }> }): unknown
   'style-options'(props: { message: Extract<ChatMessage, { kind: 'style-options' }> }): unknown
+  'photo-gallery'(props: { message: Extract<ChatMessage, { kind: 'photo-gallery' }> }): unknown
 }>()
 
 const draft = ref('')
@@ -300,10 +303,39 @@ const onDrop = (event: DragEvent) => {
   addFiles(event.dataTransfer?.files ?? null)
 }
 
-const scrollToEnd = async () => {
+/**
+ * Follow the conversation. A tall message (a photo gallery, a style grid)
+ * would push the sentence that introduces it out of view, so for those the
+ * thread scrolls to the sentence before it (or the top of the grid) instead
+ * and the director scrolls down. Everything else scrolls to the end.
+ */
+const scrollToLatest = async () => {
   await nextTick()
-  thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
+
+  const container = thread.value
+
+  if (!container) {
+    return
+  }
+
+  const last = props.messages[props.messages.length - 1]
+
+  if (last && last.kind !== 'text' && !props.busy) {
+    // The sentence right before the grid introduces it; a grid without one (a later style round) is its own anchor.
+    const previous = props.messages[props.messages.length - 2]
+    const intro = previous?.kind === 'text' && previous.role === 'assistant' ? previous : last
+    const element = container.querySelector<HTMLElement>(`[data-message-id="${intro.id}"]`)
+
+    if (element) {
+      const top = element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+      container.scrollTo({ top: Math.max(0, top - 16), behavior: 'smooth' })
+
+      return
+    }
+  }
+
+  container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
 }
 
-watch(() => [props.messages.length, props.busy, props.error], scrollToEnd, { immediate: true })
+watch(() => [props.messages.length, props.busy, props.error], scrollToLatest, { immediate: true })
 </script>

@@ -16,8 +16,8 @@ use Stringable;
 /**
  * Sets up a new project in conversation with the director. The conversation
  * settles what the project is about, what it is for and what it is called,
- * then collects photos of the real things that must be recognisable. Look
- * and feel come later.
+ * then collects photos of the real things that must be recognisable, found
+ * on the client's website and the web or uploaded, and finally the style.
  *
  * Every turn is stored in the tenant conversation tables, so the same
  * conversation can continue once the project exists.
@@ -63,7 +63,11 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             Title: the name of the project, between 2 and 120 characters, without surrounding quotes. If the user names the project, use that name. Otherwise propose one concrete title in "reply" and ask whether it works.
 
             Stage two, once all three are settled.
-            Ask for photos of the real things that must be recognisable in the shots: the client's products, vehicles, vessels, buildings, sites, tools or people. Give one or two concrete examples that fit this project. Tell the user to add them with the + button next to the message box, and that they can also skip this. Set "ask" to "photos" on every turn where you are waiting for photos.
+            Contextual photos of the real things that must be recognisable in the shots: the client's products, vehicles, vessels, buildings, sites, tools or people.
+            First settle "website": the client's website, as a bare domain such as "damen.com". If the description names a known company, propose its domain and ask whether that is right; if there is no client or no site, keep it null and move on.
+            Then let the app look for photos: set "photo_searches" to two or three short image searches for the things that matter in this project, such as "Damen shipyard gate" or "Damen Stan Tug". Write them in English unless the subject is local. Say in "reply" that you looked on their website and the web, that they can tick the photos that fit, and that they can also add their own with the + button. The app searches the website first and the web after; you never see the results.
+            Set "photo_searches" only on the turn you want a new search: when stage two starts, or when the user asks for more or different photos. Otherwise return an empty list.
+            Set "ask" to "photos" on every turn where you are waiting for photos.
             When the user adds photos you receive a numbered list of captions in their message, not the photos themselves. Acknowledge briefly what was added and ask whether there is more or whether to continue.
             When the user says there are no more photos, or has none, or wants to move on, go to stage three.
 
@@ -91,6 +95,8 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             'description' => $schema->string()->nullable()->required(),
             'purpose' => $schema->string()->enum(ProjectPurpose::collect()->map->value->all())->nullable()->required(),
             'title' => $schema->string()->nullable()->required(),
+            'website' => $schema->string()->nullable()->required(),
+            'photo_searches' => $schema->array()->items($schema->string())->max(3)->required(),
             'ask' => $schema->string()->enum([self::ASK_PHOTOS, self::ASK_STYLE])->nullable()->required(),
             'done' => $schema->boolean()->required(),
         ];

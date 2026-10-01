@@ -11,8 +11,8 @@ return new class extends Migration {
     {
         Schema::create('style_options', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('project_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('parent_id')->nullable()->constrained('style_options')->nullOnDelete();
+            $table->foreignId('project_id')->constrained();
+            $table->foreignId('parent_id')->nullable()->constrained('style_options');
             $table->unsignedSmallInteger('round');
             $table->unsignedSmallInteger('position');
             $table->json('style');

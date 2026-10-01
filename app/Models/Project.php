@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
+use App\Events\ProjectDeleting;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -56,6 +57,13 @@ class Project extends Model implements HasMedia
     public const REFERENCE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
     protected $guarded = [];
+
+    /**
+     * Relations and files are removed by listeners, never by the database.
+     */
+    protected $dispatchesEvents = [
+        'deleting' => ProjectDeleting::class,
+    ];
 
     protected $attributes = [
         'purpose' => ProjectPurpose::EXPLAINER->value,
@@ -108,6 +116,12 @@ class Project extends Model implements HasMedia
     public function generations(): MorphMany
     {
         return $this->morphMany(Generation::class, 'generatable');
+    }
+
+    /** @return HasMany<PhotoSuggestion, $this> */
+    public function photoSuggestions(): HasMany
+    {
+        return $this->hasMany(PhotoSuggestion::class)->orderBy('batch')->orderBy('position');
     }
 
     /** @return HasMany<StyleOption, $this> */
