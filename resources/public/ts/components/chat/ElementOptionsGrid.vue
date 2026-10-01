@@ -16,7 +16,7 @@
       class="grid grid-cols-3 gap-3 sm:grid-cols-4"
       :aria-label="$t('Writing suggestions')"
     >
-      <li v-for="n in 12" :key="n" class="space-y-2">
+      <li v-for="n in 8" :key="n" class="space-y-2">
         <Skeleton class="aspect-square w-full rounded-lg" />
         <Skeleton class="h-3 w-2/3" />
       </li>

@@ -172,19 +172,19 @@ describe('background work', function () {
         Queue::fake([RenderElementSuggestion::class]);
         $this->project->addMedia(UploadedFile::fake()->image('gate.jpg'))->toMediaCollection(Project::CONTENT_REFERENCES);
         $round = ElementRound::factory()->for($this->project)->status(ElementRoundStatus::SUGGESTING)->create();
-        ElementSuggester::fake([['suggestions' => collect(range(1, 12))->map(fn(int $i) => ['name' => "Person {$i}", 'description' => "Look {$i}", 'photo' => $i === 1 ? 1 : ($i === 2 ? 9 : null)])->all()]]);
+        ElementSuggester::fake([['suggestions' => collect(range(1, 8))->map(fn(int $i) => ['name' => "Person {$i}", 'description' => "Look {$i}", 'photo' => $i === 1 ? 1 : ($i === 2 ? 9 : null)])->all()]]);
 
         (new GenerateElementSuggestions($round))->handle();
 
         $suggestions = $round->suggestions()->get();
 
         expect($round->fresh()->status)->toBe(ElementRoundStatus::READY)
-            ->and($suggestions)->toHaveCount(12)
+            ->and($suggestions)->toHaveCount(8)
             ->and($suggestions[0]->source_media_id)->toBe(PhotoInventory::photos($this->project)->first()->id)
             ->and($suggestions[1]->source_media_id)->toBeNull()
-            ->and($suggestions[11]->name)->toBe('Person 12');
+            ->and($suggestions[7]->name)->toBe('Person 8');
 
-        Queue::assertPushed(RenderElementSuggestion::class, 12);
+        Queue::assertPushed(RenderElementSuggestion::class, 8);
         ElementSuggester::assertPrompted(fn(AgentPrompt $prompt) => str_contains($prompt->prompt, 'Visitors, contractors and the security guard'));
 
         (new GenerateElementSuggestions($round))->failed(new RuntimeException('x'));

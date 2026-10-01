@@ -40,7 +40,7 @@ return [
     /*
      * Suggestions per cast and sets category in the intake chat.
      */
-    'element_suggestions_count' => 12,
+    'element_suggestions_count' => 8,
 
     /*
     | Image size for keyframes, options and cast and sets: low, medium or high

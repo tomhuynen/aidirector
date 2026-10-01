@@ -16,7 +16,7 @@ use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 /**
- * One round of cast and sets suggestions in the intake chat: twelve people,
+ * One round of cast and sets suggestions in the intake chat: a handful of people,
  * places or objects written from a brief the director confirmed, each
  * rendered in the project style for the director to pick from. A skipped
  * category is a round without suggestions.

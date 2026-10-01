@@ -10,6 +10,7 @@ use App\Enums\ProjectPurpose;
 use App\Models\Project;
 use App\Support\Elements\PhotoInventory;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Concerns\RemembersConversations;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Conversational;
@@ -66,6 +67,8 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
 
     public function instructions(): Stringable|string
     {
+        $suggestions = (int) Config::get('pipeline.element_suggestions_count');
+
         $purposes = ProjectPurpose::collect()
             ->map(fn(ProjectPurpose $purpose) => "- \"{$purpose->value}\": {$purpose->description()}. {$purpose->summary()}")
             ->join("\n");
@@ -94,7 +97,7 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             Then go through the categories one at a time, in this order: people, places, objects. For each category:
             1. Tell the user briefly what you already know for it, from the description, the conversation and the uploaded photos listed under "What the app knows", and ask whether that is right and whether they want to add anything.
             2. If the answer leaves the category unclear, ask one follow-up question: for people what kind of people and what they do (visitors, engineers, a manager, customers); for places which locations; for objects which things matter.
-            3. When the category is clear, set "element_round" to the category ("person", "place" or "object") and a "brief" of two to four sentences that describes what to suggest, with every detail the user gave and what the photos show. Say in "reply" that you are preparing twelve suggestions to pick from, drawn in the chosen style.
+            3. When the category is clear, set "element_round" to the category ("person", "place" or "object") and a "brief" of two to four sentences that describes what to suggest, with every detail the user gave and what the photos show. Say in "reply" that you are preparing {$suggestions} suggestions to pick from, drawn in the chosen style.
             The app renders the suggestions; the user ticks the ones to keep. Their next message says which were picked, or that they skip the category. Then move on to the next category. If the user wants to skip a category, set "skip" to that category and move on. A category is settled once it was picked from or skipped; the status is listed under "What the app knows".
             Set "ask" to "elements" on every turn in stage four.
             When all three categories are settled, say in one sentence that the project is ready and set "done" to true. Keep "done" false until then.

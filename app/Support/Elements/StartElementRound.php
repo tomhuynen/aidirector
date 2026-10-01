@@ -16,7 +16,7 @@ use App\Models\Project;
 class StartElementRound
 {
     /**
-     * Twelve suggestions for the category, written and rendered in the background.
+     * Suggestions for the category (pipeline.element_suggestions_count), written and rendered in the background.
      */
     public function start(Project $project, ElementType $type, string $brief): ElementRound
     {
