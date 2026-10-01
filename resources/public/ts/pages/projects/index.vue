@@ -22,35 +22,20 @@
 
     <ProjectsEmpty v-if="projects.length === 0" :create-url="create.url()" />
 
-    <ul
-      v-else
-      class="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-3"
-    >
-      <li v-for="project in projects" :key="project.id" class="bg-card">
-        <Link
-          :href="project.links?.view ?? '#'"
-          class="group flex h-full flex-col transition-colors hover:bg-paper-deep/70"
-        >
-          <div class="aspect-[16/9] overflow-hidden border-b border-border bg-paper-deep">
-            <img
-              v-if="project.styleReferenceUrl"
-              :src="project.styleReferenceUrl"
-              :alt="$t('Style reference for :title', { title: project.title })"
-              class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-            />
-            <Placeholder v-else class="size-full rounded-none border-0 bg-paper-deep">
-              <span class="rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground">
-                {{ $t('No style chosen yet') }}
-              </span>
-            </Placeholder>
-          </div>
-          <div class="flex flex-1 flex-col justify-between gap-8 p-6">
+    <ul v-else class="space-y-4">
+      <li
+        v-for="project in projects"
+        :key="project.id"
+        class="overflow-hidden rounded-xl border border-border bg-card transition-colors hover:border-muted-foreground/60"
+      >
+        <Link :href="project.links?.view ?? '#'" class="group flex min-h-64 flex-col md:flex-row">
+          <div class="flex shrink-0 flex-col justify-between gap-8 p-6 md:w-[26rem]">
             <div class="space-y-3">
               <p class="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
                 {{ project.purposeLabel }}
               </p>
               <h2 class="font-display text-2xl leading-tight font-medium text-balance">{{ project.title }}</h2>
-              <p v-if="project.description" class="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+              <p v-if="project.description" class="line-clamp-4 text-sm leading-relaxed text-muted-foreground">
                 {{ project.description }}
               </p>
             </div>
@@ -64,6 +49,26 @@
                 <dd>{{ project.aspectRatio }}</dd>
               </div>
             </dl>
+          </div>
+
+          <div
+            class="relative min-h-48 flex-1 overflow-hidden border-t border-border bg-paper-deep md:border-t-0 md:border-l"
+          >
+            <img
+              v-if="project.coverUrl ?? project.styleReferenceUrl"
+              :src="(project.coverUrl ?? project.styleReferenceUrl) as string"
+              :alt="
+                project.coverUrl
+                  ? $t('The cast and sets of :title', { title: project.title })
+                  : $t('Style reference for :title', { title: project.title })
+              "
+              class="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+            />
+            <Placeholder v-else class="absolute inset-0 size-full rounded-none border-0 bg-paper-deep">
+              <span class="rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground">
+                {{ $t('No style chosen yet') }}
+              </span>
+            </Placeholder>
           </div>
         </Link>
       </li>
