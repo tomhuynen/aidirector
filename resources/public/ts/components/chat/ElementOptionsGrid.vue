@@ -25,13 +25,14 @@
     <ul v-else class="grid grid-cols-3 gap-3 sm:grid-cols-4" :aria-label="message.label">
       <li v-for="option in visibleOptions" :key="option.id">
         <label
-          class="flex h-full flex-col gap-2 rounded-lg border bg-card p-2 has-checked:border-signal has-checked:ring-2 has-checked:ring-signal/40 has-focus-visible:ring-2 has-focus-visible:ring-ring"
+          class="relative flex h-full flex-col gap-2 rounded-lg border bg-card p-2 has-checked:border-signal has-checked:ring-2 has-checked:ring-signal/40 has-focus-visible:ring-2 has-focus-visible:ring-ring"
           :class="[
             option.picked ? 'border-signal' : 'border-border',
             selectable(option) ? 'cursor-pointer' : 'cursor-default',
           ]"
           :title="option.description"
         >
+          <!-- The tile is the positioning context, so focusing this hidden box never scrolls the page away. -->
           <input
             v-model="selected"
             type="checkbox"
