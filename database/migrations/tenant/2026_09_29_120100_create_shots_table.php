@@ -11,7 +11,7 @@ return new class extends Migration {
     {
         Schema::create('shots', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('project_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('project_id')->constrained();
             $table->unsignedSmallInteger('position');
             $table->string('title');
             $table->text('subject');

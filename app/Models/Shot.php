@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Enums\ShotStatus;
+use App\Events\ShotDeleting;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -29,6 +30,13 @@ class Shot extends Model implements HasMedia
     public const VIDEO = 'video';
 
     protected $guarded = [];
+
+    /**
+     * Relations and files are removed by listeners, never by the database.
+     */
+    protected $dispatchesEvents = [
+        'deleting' => ShotDeleting::class,
+    ];
 
     protected $attributes = [
         'status' => ShotStatus::DRAFT->value,

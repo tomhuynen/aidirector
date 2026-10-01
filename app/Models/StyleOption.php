@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\StyleOptionStatus;
+use App\Events\StyleOptionDeleting;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -38,6 +39,13 @@ class StyleOption extends Model implements HasMedia
     public const THUMBNAIL_MAX_EDGE = 768;
 
     protected $guarded = [];
+
+    /**
+     * Relations and files are removed by listeners, never by the database.
+     */
+    protected $dispatchesEvents = [
+        'deleting' => StyleOptionDeleting::class,
+    ];
 
     /**
      * @return array{

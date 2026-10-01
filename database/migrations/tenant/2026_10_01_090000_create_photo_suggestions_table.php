@@ -11,7 +11,7 @@ return new class extends Migration {
     {
         Schema::create('photo_suggestions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('project_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('project_id')->constrained();
             $table->unsignedSmallInteger('batch');
             $table->unsignedSmallInteger('position');
             $table->string('query');
