@@ -22,6 +22,7 @@ use App\Models\ElementRound;
 use App\Models\ElementSuggestion;
 use App\Models\Project;
 use App\Support\Elements\PhotoInventory;
+use App\Support\Elements\StartElementRound;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -177,9 +178,12 @@ describe('prepared rounds', function () {
 
         expect($rounds)->toHaveCount(3)
             ->and($rounds->every(fn(ElementRound $round) => $round->isPrepared()))->toBeTrue()
-            ->and($rounds->pluck('brief')->all())->toBe(['Visitors and a guard.', 'The yard gate.', 'Hard hats and vests.']);
+            ->and($rounds->pluck('brief')->all())->toBe(['Visitors and a guard.', 'The yard gate.', 'Hard hats and vests.'])
+            ->and($rounds->pluck('status')->all())->toBe([ElementRoundStatus::SUGGESTING, ElementRoundStatus::WAITING, ElementRoundStatus::WAITING]);
 
-        Queue::assertPushed(GenerateElementSuggestions::class, 3);
+        // Only the people are written now; places and objects wait their turn.
+        Queue::assertPushed(GenerateElementSuggestions::class, 1);
+        Queue::assertPushed(GenerateElementSuggestions::class, fn(GenerateElementSuggestions $job) => $job->round->type === ElementType::PERSON);
 
         $instructions = (string) (new ProjectIntake($this->project))->instructions();
 
@@ -188,6 +192,44 @@ describe('prepared rounds', function () {
         actingAs($this->director, 'director')
             ->get(route('public.projects.setup', $this->project))
             ->assertInertia(fn($page) => $page->where('resume.messages', fn($messages) => collect($messages)->doesntContain('kind', 'element-options')));
+    });
+
+    it('queues the renders in chat order: people, then places, then objects', function () {
+        Queue::fake([GenerateElementSuggestions::class, RenderElementSuggestion::class]);
+        $people = ElementRound::factory()->for($this->project)->prepared()->status(ElementRoundStatus::SUGGESTING)->create();
+        $objects = ElementRound::factory()->for($this->project)->prepared()->type(ElementType::OBJECT)->status(ElementRoundStatus::WAITING)->create();
+        $places = ElementRound::factory()->for($this->project)->prepared()->type(ElementType::PLACE)->status(ElementRoundStatus::WAITING)->create();
+        ElementSuggester::fake(fn() => ['suggestions' => collect(range(1, 8))->map(fn(int $i) => ['name' => "Item {$i}", 'description' => 'd', 'photo' => null])->all()]);
+
+        (new GenerateElementSuggestions($people))->handle(app(StartElementRound::class));
+
+        Queue::assertPushed(RenderElementSuggestion::class, 8);
+        Queue::assertPushed(GenerateElementSuggestions::class, 1);
+        Queue::assertPushed(GenerateElementSuggestions::class, fn(GenerateElementSuggestions $job) => $job->round->is($places));
+        expect($places->fresh()->status)->toBe(ElementRoundStatus::SUGGESTING)
+            ->and($objects->fresh()->status)->toBe(ElementRoundStatus::WAITING);
+
+        (new GenerateElementSuggestions($places->fresh()))->failed(new RuntimeException('down'));
+
+        Queue::assertPushed(GenerateElementSuggestions::class, fn(GenerateElementSuggestions $job) => $job->round->is($objects));
+    });
+
+    it('writes a waiting round right away once the chat reaches it', function () {
+        Queue::fake([GenerateElementSuggestions::class]);
+        $conversationId = projectInElementStage($this->director, $this->project);
+        ElementRound::factory()->for($this->project)->prepared()->status(ElementRoundStatus::SUGGESTING)->create();
+        $places = ElementRound::factory()->for($this->project)->prepared()->type(ElementType::PLACE)->status(ElementRoundStatus::WAITING)->create();
+        ProjectIntake::fake([[
+            'reply' => 'Here are the places.', 'ask' => 'elements', 'done' => false, 'skip' => 'person',
+            'element_round' => ['type' => 'place', 'brief' => 'The gate.', 'use_prepared' => true],
+        ]]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Skip people, places look right'])
+            ->assertJsonPath('elementRound.id', $places->sqid)
+            ->assertJsonPath('elementRound.status', 'suggesting');
+
+        Queue::assertPushed(GenerateElementSuggestions::class, fn(GenerateElementSuggestions $job) => $job->round->is($places));
     });
 
     it('does not prepare a category twice', function () {
@@ -415,7 +457,7 @@ describe('background work', function () {
         $round = ElementRound::factory()->for($this->project)->status(ElementRoundStatus::SUGGESTING)->create();
         ElementSuggester::fake([['suggestions' => collect(range(1, 8))->map(fn(int $i) => ['name' => "Person {$i}", 'description' => "Look {$i}", 'photo' => $i === 1 ? 1 : ($i === 2 ? 9 : null)])->all()]]);
 
-        (new GenerateElementSuggestions($round))->handle();
+        (new GenerateElementSuggestions($round))->handle(app(StartElementRound::class));
 
         $suggestions = $round->suggestions()->get();
 

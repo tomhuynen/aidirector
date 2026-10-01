@@ -9,6 +9,7 @@ use App\Enums\ElementRoundStatus;
 use App\Enums\ElementSuggestionStatus;
 use App\Models\ElementRound;
 use App\Support\Elements\PhotoInventory;
+use App\Support\Elements\StartElementRound;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -35,7 +36,7 @@ class GenerateElementSuggestions implements ShouldQueue
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
-    public function handle(): void
+    public function handle(StartElementRound $rounds): void
     {
         $round = $this->round->load('project');
         $project = $round->project;
@@ -76,6 +77,9 @@ class GenerateElementSuggestions implements ShouldQueue
             });
 
         $round->forceFill(['status' => ElementRoundStatus::READY, 'error' => null])->save();
+
+        // Only now that these renders are queued, the next prepared category may write its own.
+        $rounds->dispatchNextWaiting($project);
     }
 
     public function failed(?Throwable $exception): void
@@ -84,5 +88,11 @@ class GenerateElementSuggestions implements ShouldQueue
             'status' => ElementRoundStatus::FAILED,
             'error' => __('The suggestions could not be written. Please ask again.'),
         ])->save();
+
+        $project = $this->round->project()->first();
+
+        if ($project !== null) {
+            app(StartElementRound::class)->dispatchNextWaiting($project);
+        }
     }
 }
