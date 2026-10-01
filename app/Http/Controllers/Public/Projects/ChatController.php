@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Public\Projects;
 
 use App\Ai\Agents\ProjectIntake;
 use App\Enums\AspectRatio;
+use App\Enums\CoverStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
 use App\Http\Requests\Public\ProjectChatRequest;
@@ -112,11 +113,13 @@ class ChatController
             'done' => $done,
             /** @var array{id: string, type: 'person'|'place'|'object', label: string, status: 'suggesting'|'ready'|'picked'|'skipped'|'failed', error: string|null, pollUrl: string, pickUrl: string, options: array<int, array{id: string, name: string, description: string, status: 'pending'|'ready'|'failed', picked: bool, fromPhoto: bool, thumbnailUrl: string|null, imageUrl: string|null}>}|null */
             'elementRound' => $round === null ? null : $this->elementRoundState->for($round),
-            /** @var array{id: string, url: string, styleRoundsUrl: string}|null */
+            /** @var array{id: string, url: string, styleRoundsUrl: string, coverUrl: string, coverStatus: 'painting'|'ready'|'failed'|null}|null */
             'project' => $project === null ? null : [
                 'id' => $project->sqid,
                 'url' => route('public.projects.view', $project),
                 'styleRoundsUrl' => route('public.projects.style.round', $project),
+                'coverUrl' => route('public.projects.cover.view', $project),
+                'coverStatus' => $project->cover_status?->value,
             ],
             /** @var array<int, array{id: string, caption: string|null}> */
             'photos' => $photos->map(fn(Media $media) => [
@@ -251,6 +254,7 @@ class ChatController
 
         // With cast and sets picked, a group picture heads the project page.
         if ($project->elements()->exists()) {
+            $project->forceFill(['cover_status' => CoverStatus::PAINTING])->save();
             GenerateProjectCover::dispatch($project);
         }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\AspectRatio;
+use App\Enums\CoverStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
 use App\Events\ProjectDeleting;
@@ -84,6 +85,7 @@ class Project extends Model implements HasMedia
      *  purpose: 'App\Enums\ProjectPurpose',
      *  aspect_ratio: 'App\Enums\AspectRatio',
      *  style: 'array',
+     *  cover_status: 'App\Enums\CoverStatus',
      *  setup_completed_at: 'datetime',
      *  archived_at: 'datetime',
      * }
@@ -94,6 +96,7 @@ class Project extends Model implements HasMedia
             'purpose' => ProjectPurpose::class,
             'aspect_ratio' => AspectRatio::class,
             'style' => 'array',
+            'cover_status' => CoverStatus::class,
             'setup_completed_at' => 'datetime',
             'archived_at' => 'datetime',
         ];
