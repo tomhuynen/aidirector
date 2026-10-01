@@ -88,6 +88,26 @@ class DetectElements implements ShouldQueue
     }
 
     /**
+     * The existing element a proposal is the same as: the one the model named,
+     * or else one of the same type with exactly the proposal's name.
+     *
+     * @param  \Illuminate\Support\Collection<string, Element>  $existing
+     */
+    private function match(\Illuminate\Support\Collection $existing, string $named, string $name, string $type): ?string
+    {
+        $key = fn(string $value) => mb_strtolower(trim($value));
+
+        $element = $existing->get($key($named));
+
+        if ($element === null) {
+            $candidate = $existing->get($key($name));
+            $element = $candidate?->type->value === $type ? $candidate : null;
+        }
+
+        return $element?->sqid;
+    }
+
+    /**
      * Keeps well-formed proposals, limits keyframes to the shot's and resolves
      * a match to the existing element's id.
      *
@@ -114,7 +134,7 @@ class DetectElements implements ShouldQueue
                     'type' => (string) $element['type'],
                     'description' => trim((string) ($element['description'] ?? '')),
                     'keyframes' => $keyframes === [] ? [1] : $keyframes,
-                    'match' => $existing->get(mb_strtolower(trim((string) ($element['match'] ?? ''))))?->sqid,
+                    'match' => $this->match($existing, (string) ($element['match'] ?? ''), (string) $element['name'], (string) $element['type']),
                 ];
             })
             ->values()

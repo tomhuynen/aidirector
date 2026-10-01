@@ -180,6 +180,23 @@ describe('detection', function () {
             && str_contains($prompt->prompt, '- Mark, the visitor (person)'));
     });
 
+    it('matches a proposal with the exact name of an existing element of the same type', function () {
+        ElementDetector::fake([['elements' => [
+            ['name' => 'mark, the visitor', 'type' => 'person', 'description' => 'A man in a navy suit.', 'keyframes' => [1], 'match' => ''],
+            ['name' => 'Main gate', 'type' => 'object', 'description' => 'A gate.', 'keyframes' => [1], 'match' => ''],
+        ]]]);
+        Image::fake(fn() => elementPng());
+
+        $mark = Element::factory()->for($this->project)->create();
+        Element::factory()->for($this->project)->place()->create();
+        $shot = castShot($this->project);
+        chooseFirstKeyframe($shot);
+
+        (new DetectElements($shot))->handle(app(KeyframePainter::class));
+
+        expect(array_column($shot->fresh()->elementProposals(), 'match'))->toBe([$mark->sqid, null]);
+    });
+
     it('goes straight on to the other keyframes when there is nothing to review', function () {
         ElementDetector::fake([['elements' => []]]);
         Image::fake(fn() => elementPng());
