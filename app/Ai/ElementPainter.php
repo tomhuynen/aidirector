@@ -88,6 +88,8 @@ class ElementPainter
                 ->attachments($attachments)
                 ->timeout(180)
                 ->generate('openrouter', $model);
+
+            $image = app(ImageReplies::class)->firstImage($response);
         } catch (Throwable $exception) {
             $element->generations()->create([
                 'director_id' => $project->director_id,
@@ -111,8 +113,6 @@ class ElementPainter
             'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
             'usage' => $response->usage->toArray(),
         ]);
-
-        $image = $response->firstImage();
 
         $element
             ->addMediaFromString($image->content())

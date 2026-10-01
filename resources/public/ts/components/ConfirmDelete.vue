@@ -13,7 +13,9 @@
           <DialogClose as-child>
             <Button type="button" variant="secondary">{{ $t('Cancel') }}</Button>
           </DialogClose>
-          <Button type="submit" variant="destructive" :disabled="form.processing">{{ $t('Delete') }}</Button>
+          <Button type="submit" variant="destructive" :disabled="form.processing">{{
+            confirmLabel ?? $t('Delete')
+          }}</Button>
         </DialogFooter>
       </form>
     </DialogContent>
@@ -39,6 +41,7 @@ const props = defineProps<{
   action: string
   title: string
   description: string
+  confirmLabel?: string
 }>()
 
 const open = ref(false)

@@ -1,70 +1,56 @@
 <template>
   <aside class="flex w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto border-r border-border p-6">
-    <div class="flex items-center justify-between">
-      <h2 class="text-xl font-semibold">{{ $t('Shot details') }}</h2>
-      <Button as-child variant="outline" size="sm">
-        <Link :href="shot.links?.update ?? '#'">
-          <Pencil class="size-4" />
-          {{ $t('Edit') }}
-        </Link>
-      </Button>
-    </div>
-
-    <Field :label="$t('Title')" :value="shot.title" />
-    <Field :label="$t('Subject')" :value="shot.subject" />
-    <Field :label="$t('Action')" :value="shot.action" />
-    <Field :label="$t('Takeaway')" :value="shot.takeaway" />
-
-    <div class="space-y-3 pt-2">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-semibold">{{ $t('Selected storyline') }}</h3>
-        <Button type="button" variant="outline" size="sm" :disabled="reopen.processing" @click="change">
-          <RefreshCw class="size-4" />
-          {{ $t('Change') }}
-        </Button>
-      </div>
-      <div v-if="storyline" class="flex gap-4 rounded-xl border border-border bg-card px-5 py-4">
-        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-signal-soft text-signal">
-          <ListOrdered class="size-4" />
-        </span>
-        <div class="min-w-0 space-y-1">
-          <p class="font-semibold">{{ storyline.title }}</p>
-          <p class="text-[15px] leading-relaxed text-muted-foreground">{{ storyline.storyline }}</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="mt-auto pt-4">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-2xl leading-tight font-semibold text-balance">{{ shot.title }}</h2>
       <ConfirmDelete
-        :action="shot.links?.destroy ?? '#'"
-        :title="$t('Delete this shot?')"
-        :description="$t('The remaining shots close the gap in the sequence.')"
+        :action="shot.links?.storylineReopen ?? '#'"
+        :title="$t('Back to the storylines?')"
+        :description="
+          $t(
+            'You choose a storyline for this shot again. Its keyframes, their images and the video are removed. The cast and sets stay in the project.',
+          )
+        "
+        :confirm-label="$t('Back to storylines')"
       >
         <template #trigger>
-          <Button type="button" variant="ghost" class="text-destructive hover:text-destructive">
-            {{ $t('Delete shot') }}
+          <Button type="button" variant="outline" size="sm">
+            <Pencil class="size-4" />
+            {{ $t('Edit') }}
           </Button>
         </template>
       </ConfirmDelete>
     </div>
+
+    <section v-if="storyline" class="space-y-2">
+      <h3 class="flex items-center gap-2 font-semibold">
+        <ListOrdered class="size-4 text-muted-foreground" />
+        {{ $t('Storyline') }}
+      </h3>
+      <p class="text-[15px] leading-relaxed text-muted-foreground">{{ storyline.storyline }}</p>
+    </section>
+    <div v-else class="space-y-3 text-[15px] leading-relaxed">
+      <p>{{ shot.subject }}</p>
+      <p>{{ shot.action }}</p>
+    </div>
+
+    <section class="space-y-2 border-t border-border pt-6">
+      <h3 class="flex items-center gap-2 font-semibold">
+        <Target class="size-4 text-muted-foreground" />
+        {{ $t('Takeaway') }}
+      </h3>
+      <p class="text-[15px] leading-relaxed">{{ shot.takeaway }}</p>
+    </section>
   </aside>
 </template>
 <script setup lang="ts">
-import { Link, useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { Button } from '@shared:ui/button'
-import { ListOrdered, Pencil, RefreshCw } from 'lucide-vue-next'
+import { ListOrdered, Pencil, Target } from 'lucide-vue-next'
 
-import Field from './Field.vue'
-
-const props = defineProps<{
+defineProps<{
   shot: Inertia.Pages.Shots.View['shot']
   storyline: { title: string; storyline: string } | null
 }>()
-
-const reopen = useForm({})
-
-const change = () => reopen.delete(props.shot.links?.storylineReopen ?? '#')
 </script>

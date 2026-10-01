@@ -2,23 +2,24 @@
   <Page
     :eyebrow="$t('Projects')"
     :title="$t('Your projects')"
-    :description="$t('Each project holds a purpose, a style and a sequence of shots.')"
+    :description="
+      projects.length === 0
+        ? $t(
+            'Each project holds a purpose, a style and a sequence of shots. Start a new project to bring your ideas to life.',
+          )
+        : $t('Each project holds a purpose, a style and a sequence of shots.')
+    "
   >
     <template #actions>
       <Button as-child>
-        <Link :href="create.url()">{{ $t('New project') }}</Link>
+        <Link :href="create.url()">
+          <Plus class="size-4" />
+          {{ $t('New project') }}
+        </Link>
       </Button>
     </template>
 
-    <EmptyState
-      v-if="projects.length === 0"
-      :title="$t('Nothing here yet')"
-      :description="$t('Start with a project. Pick what it is for, describe the look, then add the shots you need.')"
-    >
-      <Button as-child>
-        <Link :href="create.url()">{{ $t('Create your first project') }}</Link>
-      </Button>
-    </EmptyState>
+    <ProjectsEmpty v-if="projects.length === 0" :create-url="create.url()" />
 
     <ul
       v-else
@@ -74,10 +75,11 @@ import AppLayout from '@public/ts/layouts/App.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import Placeholder from '@public:components/editor/Placeholder.vue'
-import EmptyState from '@public:components/EmptyState.vue'
 import Page from '@public:components/Page.vue'
+import ProjectsEmpty from '@public:components/ProjectsEmpty.vue'
 import { create } from '@routes/public/projects'
 import { Button } from '@shared:ui/button'
+import { Plus } from 'lucide-vue-next'
 
 defineOptions({
   layout: AppLayout,

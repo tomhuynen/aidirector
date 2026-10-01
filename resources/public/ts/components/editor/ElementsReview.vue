@@ -92,11 +92,21 @@ const props = defineProps<{
 }>()
 
 /**
+ * An element of the same type with exactly the proposal's name, for proposals
+ * made before that element joined the cast and sets.
+ */
+function sameName(proposal: ElementProposal) {
+  const name = proposal.name.trim().toLowerCase()
+
+  return props.library.find((element) => element.type === proposal.type && element.name.trim().toLowerCase() === name)
+}
+
+/**
  * A matched proposal starts on its existing element, everything else on adding it.
  */
 const decisions = reactive(
   props.proposals.map((proposal) => ({
-    choice: proposal.match ?? 'add',
+    choice: proposal.match ?? sameName(proposal)?.id ?? 'add',
     get action() {
       return this.choice === 'add' || this.choice === 'skip' ? this.choice : 'existing'
     },

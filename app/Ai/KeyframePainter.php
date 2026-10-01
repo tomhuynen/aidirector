@@ -43,6 +43,8 @@ class KeyframePainter
                 ->attachments($attachments)
                 ->timeout(180)
                 ->generate('openrouter', $model);
+
+            $image = app(ImageReplies::class)->firstImage($response);
         } catch (Throwable $exception) {
             $keyframe->generations()->create([
                 'director_id' => $shot->project->director_id,
@@ -66,8 +68,6 @@ class KeyframePainter
             'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
             'usage' => $response->usage->toArray(),
         ]);
-
-        $image = $response->firstImage();
 
         $extension = match ($image->mime()) {
             'image/jpeg' => 'jpg',

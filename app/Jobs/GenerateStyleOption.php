@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Ai\ImageReplies;
 use App\Enums\StyleOptionStatus;
 use App\Models\Project;
 use App\Models\StyleOption;
@@ -55,7 +56,7 @@ class GenerateStyleOption implements ShouldQueue
             ->timeout($this->timeout)
             ->generate('openrouter', $model);
 
-        $image = $response->firstImage();
+        $image = app(ImageReplies::class)->firstImage($response);
 
         $option->generations()->create([
             'director_id' => $project->director_id,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Ai\ImageReplies;
 use App\Models\Director;
 use App\Models\Element;
 use App\Models\ElementRound;
@@ -24,9 +25,11 @@ use Dedoc\Scramble\ScrambleServiceProvider as BaseScrambleServiceProvider;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Http\Client\Events\ResponseReceived;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\ServiceProvider;
@@ -43,6 +46,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->singleton(ImageReplies::class);
         if (class_exists(BaseTelescopeServiceProvider::class)) {
             $this->app->register(TelescopeServiceProvider::class);
             $this->app->register(BaseTelescopeServiceProvider::class);
@@ -58,6 +62,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Event::listen(ResponseReceived::class, fn(ResponseReceived $event) => $this->app->make(ImageReplies::class)->record($event));
+
         $this->configureDate();
         $this->configureEloquent();
         $this->configureGates();
