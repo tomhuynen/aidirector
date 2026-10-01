@@ -51,6 +51,8 @@ class ShotResource extends JsonResource
             'storylineError' => $this->storyline_error,
             /** @var int */
             'firstKeyframeOptions' => GenerateKeyframes::optionCount(),
+            /** @var int */
+            'maxKeyframes' => (int) config('pipeline.keyframes.max'),
             'videoResolution' => $this->videoResolution(),
             /** @var array<int, string> */
             'videoResolutions' => config('pipeline.video.resolutions'),
@@ -71,6 +73,7 @@ class ShotResource extends JsonResource
                 'storylineGenerate' => route('public.shots.storyline.generate', [$this->project, $this->resource]),
                 'storylineReopen' => route('public.shots.storyline.reopen', [$this->project, $this->resource]),
                 'keyframesGenerate' => route('public.shots.keyframes.generate', [$this->project, $this->resource]),
+                'keyframesStore' => route('public.shots.keyframes.store', [$this->project, $this->resource]),
                 'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
                 'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),

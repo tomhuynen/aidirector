@@ -17,6 +17,8 @@ use Throwable;
 /**
  * Corrects the current render of a keyframe: the image model gets the render
  * itself plus the director's instruction, so only the requested detail changes.
+ * The keyframe before it is attached as context, so a missing object can be
+ * copied from where it last appeared.
  */
 #[DeleteWhenMissingModels]
 class TweakKeyframeImage implements ShouldQueue
@@ -38,8 +40,15 @@ class TweakKeyframeImage implements ShouldQueue
     {
         $keyframe = $this->keyframe->load('shot.project');
         $current = $keyframe->render() ?? throw new RuntimeException('The keyframe has no render to tweak.');
+        $previous = $keyframe->position > 1
+            ? $keyframe->shot->keyframes()->with('media')->where('position', $keyframe->position - 1)->first()?->render()
+            : null;
 
-        $painter->paint($keyframe, KeyframeImageBrief::tweak($this->instruction), [$painter->referenceFor($current)]);
+        $painter->paint(
+            $keyframe,
+            KeyframeImageBrief::tweak($this->instruction, withPreviousKeyframe: $previous !== null),
+            $previous ? [$painter->referenceFor($current), $painter->referenceFor($previous)] : [$painter->referenceFor($current)],
+        );
     }
 
     public function failed(?Throwable $exception): void

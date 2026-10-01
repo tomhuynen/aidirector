@@ -98,7 +98,13 @@ class GenerateKeyframes implements ShouldQueue
                 'position' => $index + 1,
                 'title' => $keyframe['title'],
                 'description' => $keyframe['description'],
-                'prompt' => KeyframeImageBrief::for($shot, $keyframe, $withStyleReference, withFirstKeyframe: $index > 0),
+                'prompt' => KeyframeImageBrief::for(
+                    $shot,
+                    $keyframe,
+                    $withStyleReference,
+                    withFirstKeyframe: KeyframeImageBrief::usesFirstKeyframe($index + 1),
+                    withPreviousKeyframe: KeyframeImageBrief::usesPreviousKeyframe($index + 1),
+                ),
                 'rendering' => $index === 0,
             ]));
 
