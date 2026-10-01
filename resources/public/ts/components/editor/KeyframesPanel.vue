@@ -360,7 +360,16 @@ export type PanelKeyframe = {
   thumbnailUrl: string | null
   rendering: boolean
   renderError: string | null
-  renders: { id: number; chosen: boolean; imageUrl: string; thumbnailUrl: string }[]
+  renders: {
+    id: number
+    chosen: boolean
+    imageUrl: string
+    thumbnailUrl: string
+    /** What the director asked for, when this version came from an adjustment. */
+    request?: string | null
+    /** The rewritten instruction the image model received. */
+    instruction?: string | null
+  }[]
   elements: string[]
   updateUrl: string | null
   tweakUrl: string | null

@@ -17,7 +17,10 @@ return [
 
     'models' => [
         'text' => env('AI_DIRECTOR_MODEL', 'openai/gpt-5.5'),
+        // Creates keyframes and style sheets: stays closest to the pinned style.
         'image' => env('AI_IMAGE_MODEL', 'google/gemini-3.1-flash-image-preview'),
+        // Adjusts an existing keyframe (pose, gaze, details) and leaves the rest alone.
+        'image_edit' => env('AI_IMAGE_EDIT_MODEL', 'openai/gpt-5.4-image-2'),
         'video' => env('AI_VIDEO_MODEL', 'bytedance/seedance-2.0'),
     ],
 

@@ -24,15 +24,16 @@ class KeyframePainter
 {
     /**
      * With `$choose` off the render is only added as a version, for options the director picks from later.
+     * The image model defaults to the one that creates keyframes; tweaks pass the edit model.
      *
      * @param  array<int, StoredImage>  $attachments
      *
      * @throws Throwable when the image model fails; the failure is logged on the keyframe first.
      */
-    public function paint(Keyframe $keyframe, string $prompt, array $attachments = [], bool $choose = true): Media
+    public function paint(Keyframe $keyframe, string $prompt, array $attachments = [], bool $choose = true, ?string $model = null): Media
     {
         $shot = $keyframe->shot;
-        $model = Config::get('pipeline.models.image');
+        $model ??= (string) Config::get('pipeline.models.image');
         $started = hrtime(true);
 
         try {

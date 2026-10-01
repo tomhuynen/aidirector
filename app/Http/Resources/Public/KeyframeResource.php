@@ -38,10 +38,12 @@ class KeyframeResource extends JsonResource
             'imageUrl' => $rendered ? $this->imageUrl(null, $render) : null,
             /** @var string|null */
             'thumbnailUrl' => $rendered ? $this->imageUrl(Keyframe::THUMBNAIL, $render) : null,
-            /** @var array<int, array{id: int, chosen: bool, imageUrl: string, thumbnailUrl: string}> */
+            /** @var array<int, array{id: int, chosen: bool, imageUrl: string, thumbnailUrl: string, request: string|null, instruction: string|null}> */
             'renders' => $this->renders()->map(fn(Media $media) => [
                 'id' => $media->id,
                 'chosen' => $media->id === $render?->id,
+                'request' => $media->getCustomProperty(Keyframe::TWEAK_REQUEST),
+                'instruction' => $media->getCustomProperty(Keyframe::TWEAK_INSTRUCTION),
                 'imageUrl' => $this->imageUrl(null, $media),
                 'thumbnailUrl' => $this->imageUrl(Keyframe::THUMBNAIL, $media),
             ])->values()->all(),

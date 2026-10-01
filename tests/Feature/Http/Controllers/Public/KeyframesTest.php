@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\TweakInterpreter;
 use App\Ai\ElementPainter;
 use App\Ai\KeyframePainter;
 use App\Enums\Disk;
@@ -15,9 +16,12 @@ use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Ai\Image;
+use Laravel\Ai\Prompts\AgentPrompt;
 use Laravel\Ai\Prompts\ImagePrompt;
 
 use function Pest\Laravel\actingAs;
@@ -493,6 +497,55 @@ describe('update', function () {
 });
 
 describe('tweak', function () {
+    beforeEach(function () {
+        // By default the rewrite returns the request unchanged, so the existing assertions on the prompt hold.
+        TweakInterpreter::fake(fn(AgentPrompt $prompt) => ['instruction' => Str::after($prompt->prompt, "The director's request: ")]);
+    });
+
+    it('rewrites the request from the image and shows both on the new version', function () {
+        TweakInterpreter::fake([['instruction' => 'The sign is behind him on the left of the frame. He looks back over his right shoulder at it.']]);
+        Image::fake(fn() => fakePng());
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+        $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
+
+        (new TweakKeyframeImage($keyframe, 'He should look backwards at the sign'))->handle(app(KeyframePainter::class));
+
+        $render = $keyframe->fresh()->render();
+
+        expect($render->getCustomProperty(Keyframe::TWEAK_REQUEST))->toBe('He should look backwards at the sign')
+            ->and($render->getCustomProperty(Keyframe::TWEAK_INSTRUCTION))->toBe('The sign is behind him on the left of the frame. He looks back over his right shoulder at it.');
+
+        TweakInterpreter::assertPrompted(fn(AgentPrompt $prompt) => str_contains($prompt->prompt, 'He should look backwards at the sign')
+            && $prompt->attachments->count() === 2);
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this: The sign is behind him on the left of the frame.')
+            && ! $prompt->contains('He should look backwards'));
+
+        actingAs($this->director, 'director')
+            ->get(route('public.shots.view', [$this->project, $shot]))
+            ->assertInertia(fn($page) => $page
+                ->where('keyframes.1.renders.1.request', 'He should look backwards at the sign')
+                ->where('keyframes.1.renders.1.instruction', 'The sign is behind him on the left of the frame. He looks back over his right shoulder at it.')
+                ->where('keyframes.1.renders.0.instruction', null));
+    });
+
+    it('sends the request as typed when the rewrite fails', function () {
+        TweakInterpreter::fake(fn() => throw new RuntimeException('text model down'));
+        Image::fake(fn() => fakePng());
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+        $keyframe = $shot->keyframes()->firstOrFail();
+
+        (new TweakKeyframeImage($keyframe, 'Make the sign bigger'))->handle(app(KeyframePainter::class));
+
+        expect($keyframe->fresh()->render()->getCustomProperty(Keyframe::TWEAK_INSTRUCTION))->toBe('Make the sign bigger')
+            ->and($keyframe->generations()->where('kind', 'text')->latest('id')->first()->error)->toBe('text model down');
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this: Make the sign bigger'));
+    });
+
     it('adjusts the current render and keeps the earlier version', function () {
         Image::fake(fn() => fakePng());
 
@@ -512,13 +565,30 @@ describe('tweak', function () {
             ->and($keyframe->render_id)->toBe($keyframe->render()->id)
             ->and($keyframe->rendering)->toBeFalse()
             ->and($keyframe->prompt)->toContain('pushes a white envelope')
-            ->and($keyframe->generations()->latest('id')->first()->prompt)->toContain('Change only this: Remove the lighter from his hand');
+            ->and($keyframe->generations()->latest('id')->first()->prompt)->toContain('Change only this: Remove the lighter from his hand')
+            ->and($keyframe->generations()->latest('id')->first()->model)->toBe('openai/gpt-5.4-image-2');
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Remove the lighter from his hand')
+            && $prompt->model === 'openai/gpt-5.4-image-2'
             && $prompt->contains('Edit the first attached image.')
             && $prompt->contains('The second attached image is the keyframe directly before this one')
             && $prompt->attachments->count() === 2
             && $prompt->attachments->first()->content() === base64_decode(fakePng()));
+    });
+
+    it('creates keyframes with the image model and tweaks with the edit model', function () {
+        Config::set('pipeline.models.image', 'create/model');
+        Config::set('pipeline.models.image_edit', 'edit/model');
+        Image::fake(fn() => fakePng());
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+
+        (new TweakKeyframeImage($shot->keyframes()->firstOrFail(), 'Look back at the sign'))->handle(app(KeyframePainter::class));
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model' && $prompt->contains('Look back at the sign'));
+        Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model' && ! $prompt->contains('Look back at the sign'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'create/model');
     });
 
     it('adjusts keyframe 1 without a previous keyframe', function () {

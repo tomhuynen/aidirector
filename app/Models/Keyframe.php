@@ -32,6 +32,14 @@ class Keyframe extends Model implements HasMedia
 
     public const THUMBNAIL = 'thumbnail';
 
+    /**
+     * Custom properties on a render made by an adjustment: what the director
+     * asked, and the instruction the image model actually received.
+     */
+    public const TWEAK_REQUEST = 'tweak_request';
+
+    public const TWEAK_INSTRUCTION = 'tweak_instruction';
+
     protected $guarded = [];
 
     /** @var array<string, class-string> */
