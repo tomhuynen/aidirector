@@ -178,11 +178,14 @@ class Project extends Model implements HasMedia
     }
 
     /**
-     * Whether the intake chat may finish: style pinned and every category settled.
+     * Whether the intake chat may finish: style pinned, every category
+     * settled and no round left in the chat waiting for a pick.
      */
     public function canCompleteSetup(): bool
     {
-        return $this->styleReference() !== null && count($this->settledElementTypes()) === count(ElementType::cases());
+        return $this->styleReference() !== null
+            && count($this->settledElementTypes()) === count(ElementType::cases())
+            && ! $this->elementRounds()->get()->contains(fn(ElementRound $round) => $round->isOpen());
     }
 
     /** @return HasMany<StyleOption, $this> */
