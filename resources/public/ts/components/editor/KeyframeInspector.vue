@@ -66,6 +66,24 @@
       </ul>
     </div>
 
+    <section
+      v-if="adjustment"
+      class="space-y-3 rounded-lg border border-border bg-muted/30 p-4"
+      aria-labelledby="adjustment-heading"
+    >
+      <p id="adjustment-heading" class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {{ $t('How this version was made') }}
+      </p>
+      <div class="space-y-1">
+        <p class="text-xs font-medium text-muted-foreground">{{ $t('You asked') }}</p>
+        <p class="text-sm leading-relaxed">{{ adjustment.request }}</p>
+      </div>
+      <div class="space-y-1">
+        <p class="text-xs font-medium text-muted-foreground">{{ $t('Instruction sent to the image model') }}</p>
+        <p class="text-sm leading-relaxed whitespace-pre-line">{{ adjustment.instruction }}</p>
+      </div>
+    </section>
+
     <form class="space-y-3 border-t border-border pt-6" @submit.prevent="rewrite">
       <div class="space-y-1.5">
         <Label for="keyframe-description">{{ $t('Description') }}</Label>
@@ -113,6 +131,13 @@ const props = defineProps<{
 }>()
 
 const hasRender = computed(() => props.keyframe.renders.length > 0)
+
+/** The request and rewritten instruction behind the chosen version, when it came from an adjustment. */
+const adjustment = computed(() => {
+  const chosen = props.keyframe.renders.find((render) => render.chosen)
+
+  return chosen?.request && chosen.instruction ? { request: chosen.request, instruction: chosen.instruction } : null
+})
 const canTweak = computed(() => hasRender.value && Boolean(props.keyframe.tweakUrl) && !props.keyframe.rendering)
 
 const tweak = useForm({ instruction: '' })
