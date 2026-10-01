@@ -9,12 +9,15 @@ use App\Ai\Agents\ProjectIntake;
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Http\Requests\Public\ProjectChatRequest;
+use App\Http\Resources\Public\PhotoSuggestionResource;
 use App\Models\Director;
 use App\Models\Media;
+use App\Models\PhotoSuggestion;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use App\Models\Upload;
 use App\Support\Media\ClaimUploads;
+use App\Support\PhotoSearch\SuggestPhotos;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
@@ -37,6 +40,7 @@ class ChatController
 {
     public function __construct(
         private readonly ClaimUploads $claimUploads,
+        private readonly SuggestPhotos $suggestPhotos,
     ) {}
 
     public function store(ProjectChatRequest $request): JsonResponse
@@ -89,6 +93,7 @@ class ChatController
         $conversationId = $response->conversationId;
         $data = $response->toArray();
         $project = $this->projectFor($director, $conversationId, $data);
+        $gallery = $project === null ? collect() : $this->suggestPhotos($project, $data);
 
         return response()->json([
             'conversation' => $conversationId,
@@ -105,6 +110,12 @@ class ChatController
                 'styleRoundsUrl' => route('public.projects.style.round', $project),
             ],
             /** @var array<int, array{id: string, caption: string|null}> */
+            /** @var array{batch: int, pickUrl: string, suggestions: array<int, array{id: string, thumbnailUrl: string, title: string|null, domain: string|null, sourceUrl: string|null, width: int|null, height: int|null, fromWebsite: bool, picked: bool}>}|null */
+            'gallery' => $gallery->isEmpty() || $project === null ? null : [
+                'batch' => (int) $gallery->first()->batch,
+                'pickUrl' => route('public.projects.photos.pick', $project),
+                'suggestions' => PhotoSuggestionResource::collection($gallery)->resolve($request),
+            ],
             'photos' => $photos->map(fn(Media $media) => [
                 'id' => $media->sqid,
                 'caption' => $media->getCustomProperty(Project::CAPTION),
@@ -205,6 +216,37 @@ class ChatController
             'usage' => $usage,
             'error' => $error,
         ]);
+    }
+
+    /**
+     * Keep the client's website on the project and run the photo searches
+     * the agent asked for. A failing search leaves the gallery empty; the
+     * director can still upload.
+     *
+     * @param  array<string, mixed>  $data
+     * @return Collection<int, PhotoSuggestion>
+     */
+    private function suggestPhotos(Project $project, array $data): Collection
+    {
+        $website = trim((string) ($data['website'] ?? ''));
+
+        if ($website !== '' && $website !== $project->website) {
+            $project->forceFill(['website' => Str::limit($website, 255, '')])->save();
+        }
+
+        $queries = array_values(array_filter((array) ($data['photo_searches'] ?? []), 'is_string'));
+
+        if ($queries === []) {
+            return collect();
+        }
+
+        try {
+            return $this->suggestPhotos->suggest($project, $queries);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return collect();
+        }
     }
 
     /**

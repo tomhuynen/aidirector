@@ -110,6 +110,12 @@ class Project extends Model implements HasMedia
         return $this->morphMany(Generation::class, 'generatable');
     }
 
+    /** @return HasMany<PhotoSuggestion, $this> */
+    public function photoSuggestions(): HasMany
+    {
+        return $this->hasMany(PhotoSuggestion::class)->orderBy('batch')->orderBy('position');
+    }
+
     /** @return HasMany<StyleOption, $this> */
     public function styleOptions(): HasMany
     {
