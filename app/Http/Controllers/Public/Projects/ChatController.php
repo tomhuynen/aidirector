@@ -200,8 +200,13 @@ class ChatController
     }
 
     /**
-     * Starts or skips the cast and sets category the agent asked for. Only
-     * once a style is pinned: suggestions are drawn in that style.
+     * Prepares, starts or skips the cast and sets categories the agent asked
+     * for. Only once a style is pinned: suggestions are drawn in that style.
+     *
+     * Prepared categories render in the background until the chat reaches
+     * them. A round for a settled category is an extra one the director
+     * asked for at the end; a category with a round still waiting for a
+     * pick does not get another.
      *
      * @param  array<string, mixed>  $data
      */
@@ -225,15 +230,30 @@ class ChatController
             $this->startElementRound->skip($project, $skip);
         }
 
+        foreach ((array) ($data['prepare'] ?? []) as $prepared) {
+            $type = is_array($prepared) ? ElementType::tryFrom((string) ($prepared['type'] ?? '')) : null;
+            $brief = is_array($prepared) ? trim((string) ($prepared['brief'] ?? '')) : '';
+
+            if ($type !== null && $brief !== '') {
+                $this->startElementRound->prepare($project, $type, $brief);
+            }
+        }
+
         $request = $data['element_round'] ?? null;
         $type = is_array($request) ? ElementType::tryFrom((string) ($request['type'] ?? '')) : null;
         $brief = is_array($request) ? trim((string) ($request['brief'] ?? '')) : '';
 
-        if ($type === null || $brief === '' || in_array($type, $project->settledElementTypes(), true)) {
+        if ($type === null || $project->elementRounds()->where('type', $type)->get()->contains(fn(ElementRound $round) => $round->isOpen())) {
             return null;
         }
 
-        return $this->startElementRound->start($project, $type, $brief)->setRelation('project', $project);
+        $round = (bool) ($request['use_prepared'] ?? false) ? $this->startElementRound->present($project, $type) : null;
+
+        if ($round === null && $brief !== '') {
+            $round = $this->startElementRound->start($project, $type, $brief);
+        }
+
+        return $round?->setRelation('project', $project);
     }
 
     /**
@@ -251,6 +271,11 @@ class ChatController
         }
 
         $project->forceFill(['setup_completed_at' => now()])->save();
+
+        // Rounds prepared in the background but never reached are of no use anymore.
+        $project->elementRounds()->get()
+            ->filter(fn(ElementRound $round) => $round->isPrepared())
+            ->each(fn(ElementRound $round) => $round->delete());
 
         // With cast and sets picked, a group picture heads the project page.
         if ($project->elements()->exists()) {

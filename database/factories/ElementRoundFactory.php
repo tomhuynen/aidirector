@@ -24,7 +24,16 @@ class ElementRoundFactory extends Factory
             'type' => ElementType::PERSON,
             'brief' => 'Visitors, contractors and the security guard at the Damen shipyard gate.',
             'status' => ElementRoundStatus::READY,
+            'presented_at' => now(),
         ];
+    }
+
+    /**
+     * Prepared in the background, not shown in the chat yet.
+     */
+    public function prepared(): static
+    {
+        return $this->state(fn(): array => ['presented_at' => null]);
     }
 
     public function status(ElementRoundStatus $status): static

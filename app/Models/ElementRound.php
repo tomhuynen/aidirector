@@ -20,6 +20,9 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
  * places or objects written from a brief the director confirmed, each
  * rendered in the project style for the director to pick from. A skipped
  * category is a round without suggestions.
+ *
+ * A round can be prepared in the background before the chat reaches its
+ * category; it is only part of the thread once it is presented.
  */
 class ElementRound extends Model
 {
@@ -41,6 +44,7 @@ class ElementRound extends Model
      * @return array{
      *  type: 'App\Enums\ElementType',
      *  status: 'App\Enums\ElementRoundStatus',
+     *  presented_at: 'datetime',
      * }
      */
     protected function casts(): array
@@ -48,7 +52,24 @@ class ElementRound extends Model
         return [
             'type' => ElementType::class,
             'status' => ElementRoundStatus::class,
+            'presented_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Whether the round was prepared in the background and not shown in the chat yet.
+     */
+    public function isPrepared(): bool
+    {
+        return $this->presented_at === null && $this->status !== ElementRoundStatus::SKIPPED;
+    }
+
+    /**
+     * Whether the round is shown in the chat and still waiting for the director to pick.
+     */
+    public function isOpen(): bool
+    {
+        return $this->presented_at !== null && in_array($this->status, [ElementRoundStatus::SUGGESTING, ElementRoundStatus::READY], true);
     }
 
     /** @return BelongsTo<Project, $this> */

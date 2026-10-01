@@ -16,6 +16,7 @@ return new class extends Migration {
             $table->text('brief')->nullable();
             $table->string('status', 16);
             $table->text('error')->nullable();
+            $table->timestamp('presented_at')->nullable();
             $table->timestamps();
 
             $table->index(['project_id', 'type']);

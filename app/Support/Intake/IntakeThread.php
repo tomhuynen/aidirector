@@ -96,10 +96,11 @@ class IntakeThread
                 ]]);
             });
 
+        // Rounds prepared in the background only join the thread once shown, at that moment.
         $project->elementRounds()->get()
-            ->reject(fn(ElementRound $round) => $round->status === ElementRoundStatus::SKIPPED)
+            ->reject(fn(ElementRound $round) => $round->status === ElementRoundStatus::SKIPPED || $round->presented_at === null)
             ->each(function (ElementRound $round) use ($entries, $project) {
-                $entries->push([$round->created_at, 1, [
+                $entries->push([$round->presented_at, 1, [
                     'kind' => 'element-options',
                     'role' => 'assistant',
                     'content' => '',

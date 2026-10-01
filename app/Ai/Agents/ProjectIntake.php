@@ -7,9 +7,11 @@ namespace App\Ai\Agents;
 use App\Enums\ElementRoundStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
+use App\Models\ElementRound;
 use App\Models\Project;
 use App\Support\Elements\PhotoInventory;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Concerns\RemembersConversations;
 use Laravel\Ai\Contracts\Agent;
@@ -96,13 +98,15 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             Start by asking in one short question whether the user wants to set up the recurring people, places and objects now, so every shot draws them the same way, or skip it and add them later while making shots. If they skip, set "skip_elements" to true, say in one sentence that the project is ready and set "done" to true.
             If they want to set them up:
             First check whether you know enough to suggest people, places and objects: who the audience is, where the shots take place and what happens in them. If something important is missing, ask about it in one question before you begin.
+            As soon as you know enough, set "prepare" to a first brief for every category that is "not started": two to four sentences each on what to suggest, from the description, the conversation and what the photos show. The app starts drawing those suggestions in the background, so they are ready when you get to the category. Do this once; categories that are prepared say so under "What the app knows".
             Then go through the categories one at a time, in this order: people, places, objects. For each category:
             1. Tell the user briefly what you already know for it, from the description, the conversation and the uploaded photos listed under "What the app knows", and ask whether that is right and whether they want to add anything.
             2. If the answer leaves the category unclear, ask one follow-up question: for people what kind of people and what they do (visitors, engineers, a manager, customers); for places which locations; for objects which things matter.
-            3. When the category is clear, set "element_round" to the category ("person", "place" or "object") and a "brief" of two to four sentences that describes what to suggest, with every detail the user gave and what the photos show. Say in "reply" that you are preparing {$suggestions} suggestions to pick from, drawn in the chosen style.
+            3. When the category is clear, set "element_round" to the category ("person", "place" or "object"). If the category was prepared and the user's answers did not change what to suggest, set "use_prepared" to true: the prepared suggestions are shown right away. Otherwise set "use_prepared" to false and give a new "brief" of two to four sentences with every detail the user gave and what the photos show; the prepared suggestions are replaced. Always fill "brief". Say in "reply" that here are {$suggestions} suggestions to pick from, drawn in the chosen style.
             The app renders the suggestions; the user ticks the ones to keep. Their next message says which were picked, or that they skip the category. Then move on to the next category. If the user wants to skip a category, set "skip" to that category and move on. A category is settled once it was picked from or skipped; the status is listed under "What the app knows".
             Set "ask" to "elements" on every turn in stage four.
-            When all three categories are settled, say in one sentence that the project is ready and set "done" to true. Keep "done" false until then.
+            When all three categories are settled, ask once whether anything is missing: another person, place or object that should look the same in every shot. If the user names something, set "element_round" to its category with "use_prepared" false and a "brief" for just that, and handle the pick as before. Do not ask again after that.
+            When the user has nothing to add, say in one sentence that you are finishing the project and set "done" to true. Keep "done" false until then.
 
             Rules:
             - Ask one short question at a time. Be warm and to the point: two sentences at most.
@@ -111,7 +115,7 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             - If the user gives several things at once, take them all and move on to the first missing one.
             - Reply in the language the user writes in. No markdown, no lists, no headings.
             - Earlier assistant turns in this conversation are JSON objects; the user only ever saw their "reply".
-            - "element_round", "skip" and "skip_elements" are actions for this turn only: set them only on the turn you start or skip a category, otherwise null.
+            - "prepare", "element_round", "skip" and "skip_elements" are actions for this turn only: set them only on the turn you prepare, start or skip a category, otherwise null (or false).
             {$this->knowledge()}
             INSTRUCTIONS;
     }
@@ -130,19 +134,9 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
         $rounds = $project->elementRounds()->with('suggestions')->get();
         $style = $project->styleReference() === null ? 'not chosen yet' : trim(($project->style['look'] ?? '') . ' ' . ($project->style['medium'] ?? ''));
 
-        $status = ElementType::collect()->map(function (ElementType $type) use ($rounds, $project) {
-            $round = $rounds->where('type', $type)->last();
-
-            $state = match ($round?->status) {
-                null => 'not started',
-                ElementRoundStatus::SKIPPED => 'skipped',
-                ElementRoundStatus::PICKED => 'settled, picked: ' . $project->elements()->where('type', $type)->pluck('name')->join(', '),
-                ElementRoundStatus::FAILED => 'the suggestions failed; ask the user whether to try again',
-                default => 'suggestions shown, waiting for the user to pick',
-            };
-
-            return "- {$type->plural()}: {$state}";
-        })->join("\n");
+        $status = ElementType::collect()
+            ->map(fn(ElementType $type) => "- {$type->plural()}: " . $this->categoryStatus($project, $type, $rounds->where('type', $type)))
+            ->join("\n");
 
         $photos = PhotoInventory::describe($project);
 
@@ -158,6 +152,39 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
     }
 
     /**
+     * One category's status for the agent: settled with what was picked,
+     * a round waiting for a pick, or a round prepared in the background.
+     *
+     * @param  Collection<int, ElementRound>  $rounds
+     */
+    private function categoryStatus(Project $project, ElementType $type, Collection $rounds): string
+    {
+        $picked = $project->elements()->where('type', $type)->pluck('name')->join(', ');
+        $settled = $rounds->contains(fn(ElementRound $round) => $round->status->settlesCategory());
+        $shown = $rounds->filter(fn(ElementRound $round) => $round->presented_at !== null)->last();
+        $prepared = $rounds->first(fn(ElementRound $round) => $round->isPrepared());
+
+        $parts = array_filter([
+            match (true) {
+                $settled && $picked !== '' => "settled, picked: {$picked}",
+                $settled => 'skipped',
+                default => null,
+            },
+            match (true) {
+                $shown?->isOpen() === true => 'suggestions shown, waiting for the user to pick',
+                $shown?->status === ElementRoundStatus::FAILED => 'the suggestions failed; ask the user whether to try again',
+                default => null,
+            },
+            $prepared === null ? null : match ($prepared->status) {
+                ElementRoundStatus::FAILED => 'preparing failed; give a new brief when you get here',
+                default => "prepared in the background, not shown yet, from the brief: \"{$prepared->brief}\"",
+            },
+        ]);
+
+        return $parts === [] ? 'not started' : implode('; ', $parts);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function schema(JsonSchema $schema): array
@@ -168,9 +195,14 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
             'purpose' => $schema->string()->enum(ProjectPurpose::collect()->map->value->all())->nullable()->required(),
             'title' => $schema->string()->nullable()->required(),
             'ask' => $schema->string()->enum([self::ASK_PHOTOS, self::ASK_STYLE, self::ASK_ELEMENTS])->nullable()->required(),
+            'prepare' => $schema->array()->items($schema->object([
+                'type' => $schema->string()->enum(ElementType::collect()->map->value->all())->required(),
+                'brief' => $schema->string()->required(),
+            ]))->nullable()->required(),
             'element_round' => $schema->object([
                 'type' => $schema->string()->enum(ElementType::collect()->map->value->all())->required(),
                 'brief' => $schema->string()->required(),
+                'use_prepared' => $schema->boolean()->required(),
             ])->nullable()->required(),
             'skip' => $schema->string()->enum(ElementType::collect()->map->value->all())->nullable()->required(),
             'skip_elements' => $schema->boolean()->required(),

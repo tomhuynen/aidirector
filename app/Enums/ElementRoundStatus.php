@@ -10,6 +10,13 @@ enum ElementRoundStatus: string
 {
     use EnumHelpers;
 
+    /**
+     * Prepared in the background, waiting for the categories before it to
+     * queue their renders first, so the grids fill in the order the chat
+     * shows them: people, places, objects.
+     */
+    case WAITING = 'waiting';
+
     /** The suggestions are being written. */
     case SUGGESTING = 'suggesting';
 
