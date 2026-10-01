@@ -85,7 +85,7 @@ class ProjectIntake implements Agent, Conversational, HasStructuredOutput
 
             Stage two, once all three are settled.
             Ask for photos of the real things that must be recognisable in the shots: the client's products, vehicles, vessels, buildings, sites, tools or people. Give one or two concrete examples that fit this project. Tell the user to add them with the + button next to the message box, and that they can also skip this. Set "ask" to "photos" on every turn where you are waiting for photos.
-            When the user adds photos you receive a numbered list of captions in their message, not the photos themselves. Acknowledge briefly what was added and ask whether there is more or whether to continue.
+            When the user adds photos, their message ends with a note saying how many were added; you do not see the photos yourself. Their captions and contents appear under "What the app knows" once the background analysis is done. Acknowledge briefly how many were added and ask whether there are more or whether to continue.
             When the user says there are no more photos, or has none, or wants to move on, go to stage three.
 
             Stage three, the style.

@@ -32,7 +32,7 @@ class IntakeThread
     /**
      * Matches the photo notes the chat appends to a director's message.
      */
-    private const PHOTO_NOTES = '/(?:^|\n\n)The director added \d+ photos?:\n.*$/s';
+    private const PHOTO_NOTES = '/(?:^|\n\n)The director added \d+ photos?[.:].*$/s';
 
     /**
      * @return array{

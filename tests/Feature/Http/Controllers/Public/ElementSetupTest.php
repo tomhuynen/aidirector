@@ -234,13 +234,14 @@ describe('optional stage and cover', function () {
 
 describe('background work', function () {
     it('analyses an uploaded photo', function () {
-        PhotoAnalyst::fake([['items' => [['type' => 'person', 'name' => 'Security guard', 'description' => 'Dark uniform.'], ['type' => 'object', 'name' => '', 'description' => 'nameless']]]]);
+        PhotoAnalyst::fake([['caption' => 'A guard at the main gate.', 'items' => [['type' => 'person', 'name' => 'Security guard', 'description' => 'Dark uniform.'], ['type' => 'object', 'name' => '', 'description' => 'nameless']]]]);
         $this->project->addMedia(UploadedFile::fake()->image('gate.jpg', 800, 600))->toMediaCollection(Project::CONTENT_REFERENCES);
         $photo = PhotoInventory::photos($this->project)->first();
 
         (new AnalyzePhoto($photo))->handle();
 
         expect($photo->fresh()->getCustomProperty(PhotoInventory::PROPERTY))->toEqual([['type' => 'person', 'name' => 'Security guard', 'description' => 'Dark uniform.']]);
+        expect($photo->fresh()->getCustomProperty(Project::CAPTION))->toBe('A guard at the main gate.');
 
         PhotoAnalyst::assertPrompted(fn(AgentPrompt $prompt) => $prompt->attachments->count() === 1);
 

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Projects;
 
-use App\Ai\Agents\PhotoCaptioner;
 use App\Ai\Agents\ProjectIntake;
 use App\Enums\AspectRatio;
 use App\Enums\ElementType;
@@ -67,7 +66,7 @@ class ChatController
             abort_unless($director->conversations()->whereKey($conversationId)->exists(), 403);
         }
 
-        $photos = $uploads->isEmpty() ? collect() : $this->addPhotos($director, $project, $uploads);
+        $photos = $uploads->isEmpty() ? collect() : $this->addPhotos($project, $uploads);
 
         // The agent sees the project's photos, style and cast and sets status on every turn.
         $agent = new ProjectIntake($project);
@@ -145,50 +144,26 @@ class ChatController
     }
 
     /**
-     * Claim the uploads as content references and caption them so the intake
-     * agent can reason about them as text. A failing captioner does not fail
-     * the turn: the photos are kept, without captions.
+     * Claim the uploads as content references and queue their analysis. The
+     * turn does not wait for it: each photo gets its caption and the people,
+     * places and objects in it in the background, in parallel.
      *
      * @param  Collection<int, Upload>  $uploads
      * @return Collection<int, Media>
      */
-    private function addPhotos(Director $director, Project $project, Collection $uploads): Collection
+    private function addPhotos(Project $project, Collection $uploads): Collection
     {
         $photos = $this->claimUploads->toCollection($project, $uploads, Project::CONTENT_REFERENCES);
 
-        // What each photo shows is worked out in the background for the cast and sets stage.
         $photos->each(fn(Media $photo) => AnalyzePhoto::dispatch($photo));
-        $captioner = new PhotoCaptioner($photos, (string) $project->description);
-        $model = Config::get('pipeline.models.text');
-        $started = hrtime(true);
 
-        try {
-            /** @var StructuredAgentResponse $response */
-            $response = $captioner->prompt($captioner->promptText(), attachments: $captioner->attachments(), provider: 'openrouter', model: $model);
-        } catch (Throwable $exception) {
-            $this->logGeneration($director, 'caption', $model, $started, error: $exception->getMessage());
-
-            report($exception);
-
-            return $photos;
-        }
-
-        $this->logGeneration($director, 'caption', $response->meta->model ?? $model, $started, usage: $response->usage->toArray());
-
-        $captions = collect($response->toArray()['photos'] ?? [])->pluck('caption');
-
-        return $photos->each(function (Media $media, int $index) use ($captions) {
-            $caption = trim((string) ($captions[$index] ?? ''));
-
-            if ($caption !== '') {
-                $media->setCustomProperty(Project::CAPTION, $caption)->save();
-            }
-        });
+        return $photos;
     }
 
     /**
-     * What the agent reads: the director's words plus a numbered list of
-     * the photos added this turn.
+     * What the agent reads: the director's words plus a note on how many
+     * photos were added. Their contents reach the agent through the project
+     * knowledge once the background analysis is done.
      *
      * @param  Collection<int, Media>  $photos
      */
@@ -200,13 +175,9 @@ class ChatController
             return $message;
         }
 
-        $list = $photos
-            ->map(fn(Media $media, int $index) => ($index + 1) . '. ' . ($media->getCustomProperty(Project::CAPTION) ?? __('(no description available)')))
-            ->join("\n");
+        $note = trans_choice('The director added :count photo. It is being analysed in the background.|The director added :count photos. They are being analysed in the background.', $photos->count(), ['count' => $photos->count()]);
 
-        $notes = trans_choice('The director added :count photo:|The director added :count photos:', $photos->count(), ['count' => $photos->count()]) . "\n" . $list;
-
-        return $message === '' ? $notes : $message . "\n\n" . $notes;
+        return $message === '' ? $note : $message . "\n\n" . $note;
     }
 
     /**

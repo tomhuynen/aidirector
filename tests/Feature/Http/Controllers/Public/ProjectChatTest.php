@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Ai\Agents\PhotoCaptioner;
 use App\Ai\Agents\ProjectIntake;
 use App\Enums\AspectRatio;
 use App\Enums\Disk;
@@ -201,12 +200,9 @@ describe('chat', function () {
             ];
         });
 
-        it('claims uploads as content references, captions them and tells the agent', function () {
+        it('claims uploads as content references, queues their analysis and answers without waiting for it', function () {
             ProjectIntake::fake([
-                ['reply' => 'Got the tug and the yard. More?', 'description' => 'd', 'purpose' => 'explainer', 'title' => 't', 'ask' => 'photos', 'done' => false],
-            ]);
-            PhotoCaptioner::fake([
-                ['photos' => [['caption' => 'A grey harbour tug with a red hull stripe.'], ['caption' => 'A shipyard hall with a blue gantry crane.']]],
+                ['reply' => 'Got your two photos. More?', 'description' => 'd', 'purpose' => 'explainer', 'title' => 't', 'ask' => 'photos', 'done' => false],
             ]);
 
             $response = actingAs($this->director, 'director')
@@ -216,15 +212,13 @@ describe('chat', function () {
                     'uploads' => [$this->uploads[0]->sqid, $this->uploads[1]->sqid],
                 ])
                 ->assertSuccessful()
-                ->assertJsonPath('reply', 'Got the tug and the yard. More?')
-                ->assertJsonPath('photos.0.caption', 'A grey harbour tug with a red hull stripe.')
-                ->assertJsonPath('photos.1.caption', 'A shipyard hall with a blue gantry crane.');
+                ->assertJsonPath('reply', 'Got your two photos. More?')
+                ->assertJsonPath('photos.0.caption', null);
 
             $media = $this->project->fresh()->getMedia(Project::CONTENT_REFERENCES);
 
             expect($media)->toHaveCount(2)
                 ->and($media[0]->file_name)->toBe('tug.jpg')
-                ->and($media[0]->getCustomProperty(Project::CAPTION))->toBe('A grey harbour tug with a red hull stripe.')
                 ->and($media[1]->file_name)->toBe('yard.png')
                 ->and($media[0]->sqid)->toBe($response->json('photos.0.id'))
                 ->and(Upload::query()->count())->toBe(0);
@@ -235,21 +229,15 @@ describe('chat', function () {
 
             expect(max($width, $height))->toBe(Project::REFERENCE_MAX_EDGE);
 
-            PhotoCaptioner::assertPrompted(fn(AgentPrompt $prompt) => $prompt->attachments->count() === 2);
-            ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === "Here are two\n\nThe director added 2 photos:\n1. A grey harbour tug with a red hull stripe.\n2. A shipyard hall with a blue gantry crane.");
-
-            expect(Generation::query()->where('kind', 'caption')->count())->toBe(1);
+            ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === "Here are two\n\nThe director added 2 photos. They are being analysed in the background.");
 
             Queue::assertPushed(AnalyzePhoto::class, 2);
         });
 
-        it('keeps the photos when the captioner fails', function () {
+        it('sends a note alone when photos come without text', function () {
             ProjectIntake::fake([
                 ['reply' => 'Thanks.', 'description' => 'd', 'purpose' => 'explainer', 'title' => 't', 'ask' => 'photos', 'done' => false],
             ]);
-            PhotoCaptioner::fake(function () {
-                throw new RuntimeException('Vision down');
-            });
 
             actingAs($this->director, 'director')
                 ->postJson(route('public.projects.chat'), [
@@ -257,18 +245,13 @@ describe('chat', function () {
                     'message' => '',
                     'uploads' => [$this->uploads[0]->sqid],
                 ])
-                ->assertSuccessful()
-                ->assertJsonPath('photos.0.caption', null);
+                ->assertSuccessful();
 
-            expect($this->project->fresh()->getMedia(Project::CONTENT_REFERENCES))->toHaveCount(1)
-                ->and(Generation::query()->where('kind', 'caption')->firstOrFail()->error)->toBe('Vision down');
-
-            ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === "The director added 1 photo:\n1. (no description available)");
+            ProjectIntake::assertPrompted(fn(AgentPrompt $prompt) => $prompt->prompt === 'The director added 1 photo. It is being analysed in the background.');
         });
 
         it('refuses photos before the project exists', function () {
             ProjectIntake::fake();
-            PhotoCaptioner::fake();
 
             actingAs($this->director, 'director')
                 ->postJson(route('public.projects.chat'), ['message' => 'Look', 'uploads' => [$this->uploads[0]->sqid]])

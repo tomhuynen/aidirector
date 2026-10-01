@@ -17,8 +17,8 @@ use Laravel\Ai\Responses\StructuredAgentResponse;
 use Throwable;
 
 /**
- * Lists what an uploaded photo shows, in the background, so the cast and
- * sets stage of the intake chat can build on it. The chat does not wait
+ * Captions an uploaded photo and lists what it shows, in the background,
+ * so the chat, the style sheets and the cast and sets can build on it. The chat does not wait
  * for it; a photo still being analysed is reported as such.
  */
 #[DeleteWhenMissingModels]
@@ -75,6 +75,12 @@ class AnalyzePhoto implements ShouldQueue
             ])
             ->values()
             ->all();
+
+        $caption = trim((string) ($response->toArray()['caption'] ?? ''));
+
+        if ($caption !== '') {
+            $photo->setCustomProperty(Project::CAPTION, $caption);
+        }
 
         $photo->setCustomProperty(PhotoInventory::PROPERTY, $items)->save();
     }

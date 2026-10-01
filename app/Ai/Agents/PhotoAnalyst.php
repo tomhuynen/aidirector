@@ -14,8 +14,9 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 /**
- * Lists the people, places and objects in one uploaded photo that could
- * become recurring cast and sets, described so an animator could draw them.
+ * Captions one uploaded photo and lists the people, places and objects in
+ * it that could become recurring cast and sets, described so an animator
+ * could draw them.
  * Runs in the background as soon as a photo is added.
  */
 class PhotoAnalyst implements Agent, HasStructuredOutput
@@ -35,7 +36,9 @@ class PhotoAnalyst implements Agent, HasStructuredOutput
             Project: {$this->project->title}
             Description: {$this->project->description}
 
-            For each item give:
+            First give "caption": one sentence of at most 25 words saying what the photo shows, factual, with the shapes, colours and markings an artist would need.
+
+            Then list the items. For each item give:
             - "type": "person", "place" or "object".
             - "name": two to four words, such as "Security guard", "Main gate" or "Stan Tug 1606".
             - "description": one sentence on how it looks: shape, colours, clothing, markings, materials. Factual, no opinions, no names of real people.
@@ -49,6 +52,7 @@ class PhotoAnalyst implements Agent, HasStructuredOutput
     public function schema(JsonSchema $schema): array
     {
         return [
+            'caption' => $schema->string()->required(),
             'items' => $schema->array()
                 ->items($schema->object([
                     'type' => $schema->string()->enum(ElementType::collect()->map->value->all())->required(),
