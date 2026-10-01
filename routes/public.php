@@ -9,6 +9,7 @@ use App\Http\Controllers\Public\Auth\RegisterController;
 use App\Http\Controllers\Public\Auth\ResetPasswordController;
 use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
+use App\Http\Controllers\Public\Projects\CoverController as ProjectCoverController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
@@ -67,6 +68,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('create/chat', [ProjectChatController::class, 'store'])->name('chat');
             Route::get('{project}', [ProjectViewController::class, 'view'])->name('view');
             Route::get('{project}/setup', [ProjectCreateController::class, 'resume'])->name('setup');
+            Route::get('{project}/cover', [ProjectCoverController::class, 'show'])->name('cover.view');
             Route::get('{project}/update', [ProjectUpdateController::class, 'update'])->name('update');
             Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
             Route::post('{project}/outputs', [ProjectOutputsController::class, 'store'])->name('outputs');

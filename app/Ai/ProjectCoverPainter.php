@@ -15,9 +15,9 @@ use Laravel\Ai\Image;
 use Throwable;
 
 /**
- * Draws the project's cover: the people of the cast together in one
- * friendly group pose, in one of its places, with a few of its objects
- * around them, in the project style. Every element is attached by its
+ * Draws the project's cover: poster-like key art with the people of the
+ * cast as one lively group in a wide landscape built from one of its
+ * places, with a few of its objects around them, in the project style. Every element is attached by its
  * reference image so the picture matches what the shots will use.
  */
 class ProjectCoverPainter
@@ -62,12 +62,15 @@ class ProjectCoverPainter
 
         $prompt = implode("\n", array_filter([
             'Visual style: ' . ($style['look'] ?? '') . '. Medium: ' . ($style['medium'] ?? '') . '. Mood: ' . ($style['mood'] ?? '') . '. Palette: ' . ($style['palette'] ?? '') . '.',
-            "A wide, cheerful group picture for the project \"{$project->title}\": the cast together, as on a film poster.",
+            "Key art for the project \"{$project->title}\", the way a poster for an animated film presents its cast: the characters together as one lively group in the middle of a wide landscape.",
             $people->isNotEmpty()
-                ? 'All the people stand together in the foreground in a natural, friendly group pose, each fully visible and recognisable, looking at the viewer.'
-                : 'There are no people in this picture.',
-            $place !== null ? "The setting is {$place->name}, filling the background." : 'The background is a calm, simple setting that fits the project.',
-            $objects->isNotEmpty() ? 'The objects are placed around the group where they naturally belong, clearly visible.' : null,
+                ? 'The people form one tight, overlapping group in the lower middle of the picture, at different depths: some in front, some behind, some leaning in. Each has a pose and expression that shows who they are, such as waving, pointing or holding their tools, and each stays fully recognisable. Never a row of people standing side by side.'
+                : 'There are no people in this picture; the objects are the heroes in front of the landscape.',
+            $place !== null
+                ? "Behind and around the group stretches {$place->name} as a wide landscape with depth: a foreground, a middle ground and a far horizon with open sky, seen from a slightly low angle."
+                : 'Behind the group stretches a wide landscape that fits the project, with depth and an open sky.',
+            $objects->isNotEmpty() ? 'The objects belong to the scene around the group; some are held or used by the characters.' : null,
+            'Let the composition, energy and light follow the visual style and mood: playful and bouncy for a cartoon look, calm and grounded for a serious one.',
             'Draw every person, place and object exactly as in its attached image: same faces, clothes, shapes and colours.',
             $listing,
             $styleSheet !== null ? 'The last attached image is the project\'s style reference sheet. Match its rendering style exactly; do not copy its subjects or layout.' : null,

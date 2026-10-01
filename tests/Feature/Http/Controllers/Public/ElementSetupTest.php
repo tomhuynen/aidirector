@@ -7,6 +7,7 @@ use App\Ai\Agents\PhotoAnalyst;
 use App\Ai\Agents\ProjectIntake;
 use App\Ai\ElementPainter;
 use App\Ai\ProjectCoverPainter;
+use App\Enums\CoverStatus;
 use App\Enums\Disk;
 use App\Enums\ElementRoundStatus;
 use App\Enums\ElementSuggestionStatus;
@@ -186,9 +187,30 @@ describe('optional stage and cover', function () {
 
         actingAs($this->director, 'director')
             ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Thanks'])
-            ->assertJsonPath('done', true);
+            ->assertJsonPath('done', true)
+            ->assertJsonPath('project.coverStatus', 'painting')
+            ->assertJsonPath('project.coverUrl', route('public.projects.cover.view', $this->project));
 
         Queue::assertPushed(GenerateProjectCover::class, fn(GenerateProjectCover $job) => $job->project->is($this->project));
+
+        actingAs($this->director, 'director')
+            ->getJson(route('public.projects.cover.view', $this->project))
+            ->assertSuccessful()
+            ->assertExactJson(['status' => 'painting']);
+    });
+
+    it('forbids polling another director\'s cover', function () {
+        actingAs(Director::factory()->create(), 'director')
+            ->getJson(route('public.projects.cover.view', $this->project))
+            ->assertForbidden();
+    });
+
+    it('marks the cover failed when drawing fails, so the chat stops waiting', function () {
+        $this->project->forceFill(['cover_status' => CoverStatus::PAINTING])->save();
+
+        (new GenerateProjectCover($this->project))->failed(new RuntimeException('model down'));
+
+        expect($this->project->fresh()->cover_status)->toBe(CoverStatus::FAILED);
     });
 
     it('paints the cast in one picture with the place behind them and shows it on the project page', function () {
@@ -206,11 +228,13 @@ describe('optional stage and cover', function () {
 
         (new GenerateProjectCover($this->project))->handle(app(ProjectCoverPainter::class));
 
-        expect($this->project->fresh()->getFirstMedia(Project::COVER))->not->toBeNull();
+        expect($this->project->fresh()->getFirstMedia(Project::COVER))->not->toBeNull()
+            ->and($this->project->fresh()->cover_status)->toBe(CoverStatus::READY);
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->attachments->count() === 5
             && $prompt->size === '16:9'
-            && $prompt->contains('The setting is Main gate')
+            && $prompt->contains('stretches Main gate as a wide landscape')
+            && $prompt->contains('Never a row of people standing side by side')
             && $prompt->contains('Attached image 1: Guard (person)')
             && ! $prompt->contains('Unrendered'));
 
@@ -228,7 +252,8 @@ describe('optional stage and cover', function () {
         (new GenerateProjectCover($this->project))->handle(app(ProjectCoverPainter::class));
 
         Image::assertNothingGenerated();
-        expect($this->project->fresh()->getFirstMedia(Project::COVER))->toBeNull();
+        expect($this->project->fresh()->getFirstMedia(Project::COVER))->toBeNull()
+            ->and($this->project->fresh()->cover_status)->toBeNull();
     });
 });
 

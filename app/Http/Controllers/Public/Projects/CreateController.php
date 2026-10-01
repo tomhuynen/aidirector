@@ -50,7 +50,7 @@ class CreateController
             'greeting' => ProjectIntake::greeting(),
             'chatUrl' => route('public.projects.chat'),
             'uploadUrl' => route('public.uploads.store'),
-            /** @var array{conversation: string, ask: string|null, project: array{id: string, url: string, styleRoundsUrl: string}, messages: array<int, array<string, mixed>>}|null */
+            /** @var array{conversation: string, ask: string|null, project: array{id: string, url: string, styleRoundsUrl: string, coverUrl: string, coverStatus: 'painting'|'ready'|'failed'|null}, messages: array<int, array<string, mixed>>}|null */
             'resume' => [
                 'conversation' => (string) $project->conversation_id,
                 'ask' => $state['ask'],
@@ -58,6 +58,8 @@ class CreateController
                     'id' => $project->sqid,
                     'url' => route('public.projects.view', $project),
                     'styleRoundsUrl' => route('public.projects.style.round', $project),
+                    'coverUrl' => route('public.projects.cover.view', $project),
+                    'coverStatus' => $project->cover_status?->value,
                 ],
                 'messages' => $state['messages'],
             ],

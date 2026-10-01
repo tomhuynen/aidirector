@@ -31,7 +31,7 @@
 
     <p v-if="done" class="flex items-center gap-2 text-sm text-muted-foreground">
       <LoaderCircle class="size-4 animate-spin" />
-      {{ $t('Project ready. Opening it…') }}
+      {{ doneNotice }}
     </p>
   </div>
 </template>
@@ -66,6 +66,7 @@ const { account } = usePage()
 const userInitial = computed(() => account.value?.name.trim().charAt(0).toUpperCase() ?? '')
 
 const done = ref(false)
+const doneNotice = ref($t('Project ready. Opening it…'))
 const ask = ref<ChatTurn['ask']>(props.resume?.ask ?? null)
 const project = ref<ChatTurn['project']>(props.resume?.project ?? null)
 /** What the style exploration is doing right now, shown in the chat; null when idle. */
@@ -141,7 +142,7 @@ const { messages, busy, error, send, push, pushText } = useChat({
 
     if (turn.done && turn.project) {
       done.value = true
-      router.visit(turn.project.url)
+      openProject(turn.project)
     } else if (turn.ask === 'style' && !hasStyleRound.value) {
       void startRound()
     }
@@ -337,4 +338,48 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => polls.forEach((timer) => clearInterval(timer)))
+
+/** The longest the chat waits for the group picture before opening the project anyway. */
+const COVER_WAIT_MS = 4 * 60 * 1000
+
+/*
+ * With cast and sets picked, the project page is headed by a group picture
+ * that is drawn after setup. Wait for it, so the page opens with its header.
+ */
+const openProject = (finished: NonNullable<ChatTurn['project']>) => {
+  if (finished.coverStatus !== 'painting') {
+    router.visit(finished.url)
+
+    return
+  }
+
+  doneNotice.value = $t('Drawing your cast and sets together for the project header…')
+  const giveUpAt = Date.now() + COVER_WAIT_MS
+
+  const timer = setInterval(async () => {
+    let status: string | null = 'painting'
+
+    try {
+      const response = await fetch(finished.coverUrl, {
+        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+      })
+
+      if (response.ok) {
+        status = ((await response.json()) as { status: string | null }).status
+      }
+    } catch {
+      // Keep waiting; a transient failure should not skip the header.
+    }
+
+    if (status !== 'painting' || Date.now() > giveUpAt) {
+      clearInterval(timer)
+      polls.delete(timer)
+      doneNotice.value = $t('Project ready. Opening it…')
+      router.visit(finished.url)
+    }
+  }, 3000)
+
+  polls.add(timer)
+}
 </script>

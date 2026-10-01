@@ -23,6 +23,7 @@ return new class extends Migration {
             $table->string('video_resolution', 8)->nullable();
             $table->json('video_outputs')->nullable();
             $table->timestamp('setup_completed_at')->nullable();
+            $table->string('cover_status', 16)->nullable();
             $table->timestamp('archived_at')->nullable();
             $table->timestamps();
         });
