@@ -21,6 +21,7 @@ use App\Http\Controllers\Public\Shots\Keyframes\FirstController as FirstKeyframe
 use App\Http\Controllers\Public\Shots\Keyframes\GenerateController as KeyframesGenerateController;
 use App\Http\Controllers\Public\Shots\Keyframes\ImageController as KeyframeImageController;
 use App\Http\Controllers\Public\Shots\Keyframes\RenderController as KeyframeRenderController;
+use App\Http\Controllers\Public\Shots\Keyframes\StoreController as KeyframeStoreController;
 use App\Http\Controllers\Public\Shots\Keyframes\TweakController as KeyframeTweakController;
 use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpdateController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
@@ -90,6 +91,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/storyline/choose', [StorylineChooseController::class, 'store'])->name('storyline.choose');
             Route::post('{shot}/storyline/generate', [StorylineGenerateController::class, 'store'])->name('storyline.generate');
             Route::delete('{shot}/storyline/choose', [StorylineChooseController::class, 'destroy'])->name('storyline.reopen');
+            Route::post('{shot}/keyframes', [KeyframeStoreController::class, 'store'])->name('keyframes.store');
             Route::post('{shot}/keyframes/generate', [KeyframesGenerateController::class, 'store'])->name('keyframes.generate');
             Route::post('{shot}/keyframes/first/choose', [FirstKeyframeController::class, 'choose'])->name('keyframes.first.choose');
             Route::post('{shot}/keyframes/first/more', [FirstKeyframeController::class, 'more'])->name('keyframes.first.more');

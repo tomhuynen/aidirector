@@ -46,6 +46,10 @@
             chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
             moreUrl: shot.links?.firstKeyframeMore ?? '#',
           }"
+          :new-keyframe="{
+            storeUrl: shot.links?.keyframesStore ?? '#',
+            max: shot.maxKeyframes,
+          }"
           :video="{
             url: shot.videoUrl,
             error: shot.videoError,

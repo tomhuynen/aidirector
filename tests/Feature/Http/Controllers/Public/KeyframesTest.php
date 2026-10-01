@@ -122,15 +122,25 @@ describe('job', function () {
             && $prompt->contains('A man in a navy suit stands at a red mailbox'));
     });
 
-    it('uses the first render as the reference for the following keyframes', function () {
-        Image::fake(fn() => fakePng());
+    it('uses keyframe 1 and the keyframe before as references for the following keyframes', function () {
+        Image::fake(fn() => numberedPng());
 
-        renderAllKeyframes(plannedShot($this->project));
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+        [$first, $second] = $shot->keyframes()->with('media')->get();
+        $bytes = fn(Keyframe $keyframe) => Storage::disk(Disk::TENANT->value)->get($keyframe->render()->getPathRelativeToRoot());
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox') && $prompt->attachments->isEmpty());
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope') && $prompt->attachments->count() === 1);
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('gives a thumbs up') && $prompt->attachments->count() === 1);
-        Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox') && $prompt->contains('earlier keyframe'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
+            && $prompt->contains('first attached image is keyframe 1 of this shot')
+            && ! $prompt->contains('directly before this one')
+            && $prompt->attachments->count() === 1);
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('gives a thumbs up')
+            && $prompt->contains('first attached image is keyframe 1 of this shot')
+            && $prompt->contains('second attached image is the keyframe directly before this one')
+            && $prompt->attachments->count() === 2
+            && $prompt->attachments->first()->content() === $bytes($first)
+            && $prompt->attachments->last()->content() === $bytes($second));
     });
 
     it('attaches the pinned style sheet ahead of the first keyframe', function () {
@@ -147,12 +157,15 @@ describe('job', function () {
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('stands at a red mailbox')
             && $prompt->contains('first attached image is the project\'s style reference sheet')
-            && ! $prompt->contains('earlier keyframe')
+            && ! $prompt->contains('keyframe 1 of this shot')
             && $prompt->attachments->count() === 1);
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
             && $prompt->contains('first attached image is the project\'s style reference sheet')
-            && $prompt->contains('second attached image is an earlier keyframe')
+            && $prompt->contains('second attached image is keyframe 1 of this shot')
             && $prompt->attachments->count() === 2);
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('gives a thumbs up')
+            && $prompt->contains('third attached image is the keyframe directly before this one')
+            && $prompt->attachments->count() === 3);
 
         $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
 
@@ -321,6 +334,72 @@ describe('first keyframe', function () {
     });
 });
 
+describe('add', function () {
+    it('adds a keyframe at the end and renders it to match keyframe 1', function () {
+        Image::fake(fn() => numberedPng());
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+        $shot->forceFill(['status' => ShotStatus::KEYFRAMES_READY])->save();
+
+        Queue::fake();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Walks away', 'description' => 'The man walks away from the mailbox, smiling.'])
+            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+
+        $added = $shot->keyframes()->where('position', 4)->firstOrFail();
+
+        expect($added->title)->toBe('Walks away')
+            ->and($added->rendering)->toBeTrue()
+            ->and($added->prompt)->toContain('The man walks away from the mailbox, smiling.')
+            ->and($added->prompt)->toContain('keyframe 1 of this shot')
+            ->and($added->prompt)->toContain('the keyframe directly before this one')
+            ->and($shot->fresh()->storylineKeyframes()[3])->toEqual(['title' => 'Walks away', 'description' => 'The man walks away from the mailbox, smiling.', 'prompt' => 'The man walks away from the mailbox, smiling.']);
+
+        Queue::assertPushed(GenerateKeyframeImage::class, fn(GenerateKeyframeImage $job) => $job->keyframe->is($added));
+    });
+
+    it('requires a title and a description', function () {
+        $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => '', 'description' => ''])
+            ->assertSessionHasErrors(['title', 'description']);
+    });
+
+    it('only adds keyframes once the shot is rendered and has room', function () {
+        Image::fake(fn() => numberedPng());
+        Queue::fake();
+
+        $choosing = plannedShot($this->project, ['status' => ShotStatus::FIRST_KEYFRAME_READY]);
+        Keyframe::factory()->for($choosing)->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.store', [$this->project, $choosing]), ['title' => 'Extra', 'description' => 'More.'])
+            ->assertSessionHasErrors('description');
+
+        config(['pipeline.keyframes.max' => 3]);
+        $full = plannedShot($this->project);
+        renderAllKeyframes($full);
+        $full->forceFill(['status' => ShotStatus::KEYFRAMES_READY])->save();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.store', [$this->project, $full]), ['title' => 'Extra', 'description' => 'More.'])
+            ->assertSessionHasErrors('description');
+
+        Queue::assertNotPushed(GenerateKeyframeImage::class);
+    });
+
+    it('forbids adding to another director\'s shot', function () {
+        $shot = plannedShot(Project::factory()->create(), ['status' => ShotStatus::KEYFRAMES_READY]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.store', [$shot->project, $shot]), ['title' => 'Extra', 'description' => 'More.'])
+            ->assertForbidden();
+    });
+});
+
 describe('update', function () {
     beforeEach(fn() => Queue::fake());
 
@@ -336,7 +415,8 @@ describe('update', function () {
 
         expect($keyframe->description)->toBe('He drops the envelope in the slot and smiles.')
             ->and($keyframe->prompt)->toContain('He drops the envelope in the slot and smiles.')
-            ->and($keyframe->prompt)->toContain('an earlier keyframe of the same shot')
+            ->and($keyframe->prompt)->toContain('keyframe 1 of this shot')
+            ->and($keyframe->prompt)->not->toContain('directly before this one')
             ->and($keyframe->rendering)->toBeTrue()
             ->and($keyframe->render_error)->toBeNull()
             ->and($shot->fresh()->storylineKeyframes()[1])->toEqual(['title' => 'Posting', 'description' => 'He drops the envelope in the slot and smiles.', 'prompt' => 'He drops the envelope in the slot and smiles.']);
@@ -421,8 +501,24 @@ describe('tweak', function () {
             ->and($keyframe->generations()->latest('id')->first()->prompt)->toContain('Change only this: Remove the lighter from his hand');
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Remove the lighter from his hand')
-            && $prompt->attachments->count() === 1
+            && $prompt->contains('Edit the first attached image.')
+            && $prompt->contains('The second attached image is the keyframe directly before this one')
+            && $prompt->attachments->count() === 2
             && $prompt->attachments->first()->content() === base64_decode(fakePng()));
+    });
+
+    it('adjusts keyframe 1 without a previous keyframe', function () {
+        Image::fake(fn() => fakePng());
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+
+        (new TweakKeyframeImage($shot->keyframes()->firstOrFail(), 'Make the sign bigger'))->handle(app(KeyframePainter::class));
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Make the sign bigger')
+            && $prompt->contains('Edit the attached image.')
+            && ! $prompt->contains('second attached image')
+            && $prompt->attachments->count() === 1);
     });
 
     it('queues the adjustment from the inspector', function () {

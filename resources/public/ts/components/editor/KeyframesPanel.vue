@@ -42,7 +42,7 @@
             :style="{ aspectRatio: aspectRatio.replace(':', ' / ') }"
           />
           <img
-            v-else-if="!showVideo && selected?.imageUrl"
+            v-else-if="!showVideo && !adding && selected?.imageUrl"
             :src="selected.imageUrl"
             :alt="selected.title"
             :class="
@@ -75,6 +75,12 @@
             >
               {{ $t('No video yet. Render it from the keyframes.') }}
             </p>
+            <p
+              v-else-if="adding"
+              class="rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-muted-foreground"
+            >
+              {{ $t('New keyframe :n. Describe it on the right.', { n: String(keyframes.length + 1) }) }}
+            </p>
             <div
               v-else-if="selected"
               class="max-w-md space-y-2 rounded-lg border border-border bg-background/90 px-5 py-4 text-center"
@@ -94,6 +100,12 @@
       </section>
 
       <FirstKeyframeInspector v-if="choosing.active && keyframes[0]" :keyframe="keyframes[0]" />
+      <NewKeyframeInspector
+        v-else-if="adding"
+        :position="keyframes.length + 1"
+        :store-url="newKeyframe.storeUrl"
+        @added="adding = false"
+      />
       <VideoInspector
         v-else-if="showVideo"
         :resolution="video.resolution"
@@ -154,7 +166,7 @@
               :class="
                 cn(
                   'relative block h-28 w-full overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-muted-foreground/60',
-                  !showVideo && i === selectedIndex && 'border-signal ring-2 ring-signal/40',
+                  !showVideo && !adding && i === selectedIndex && 'border-signal ring-2 ring-signal/40',
                 )
               "
               @click="selectKeyframe(i)"
@@ -178,7 +190,7 @@
                 :class="
                   cn(
                     'flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold tabular-nums',
-                    !showVideo && i === selectedIndex && 'bg-signal text-primary-foreground',
+                    !showVideo && !adding && i === selectedIndex && 'bg-signal text-primary-foreground',
                   )
                 "
               >
@@ -189,6 +201,24 @@
                 <p class="text-xs text-muted-foreground tabular-nums">{{ timeAt(i) }}</p>
               </div>
             </div>
+          </li>
+          <li class="w-44 shrink-0">
+            <button
+              type="button"
+              :disabled="!canAdd"
+              :class="
+                cn(
+                  'flex h-28 w-full items-center justify-center rounded-lg border border-dashed border-border bg-card/60 text-muted-foreground transition-colors enabled:hover:border-muted-foreground/60 enabled:hover:text-foreground disabled:opacity-50',
+                  adding && 'border-solid border-signal text-signal ring-2 ring-signal/40',
+                )
+              "
+              @click="startAdding"
+            >
+              <Plus class="size-6" />
+            </button>
+            <p :class="cn('mt-2 px-1 text-sm text-muted-foreground', adding && 'font-semibold text-foreground')">
+              {{ $t('Add keyframe') }}
+            </p>
           </li>
         </ul>
       </section>
@@ -239,7 +269,7 @@
                 showVideo && 'border-signal ring-2 ring-signal/40',
               )
             "
-            @click="showVideo = true"
+            @click="selectVideo"
           >
             <video
               v-if="video.url"
@@ -300,12 +330,13 @@ import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { ChevronLeft, ChevronRight, Clapperboard, Film, LoaderCircle, Play, RefreshCw } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Clapperboard, Film, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
 import FirstKeyframeChooser from './FirstKeyframeChooser.vue'
 import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
 import KeyframeInspector from './KeyframeInspector.vue'
+import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import VideoInspector from './VideoInspector.vue'
 
@@ -331,6 +362,11 @@ export type PanelChoosing = {
   moreUrl: string
 }
 
+export type PanelNewKeyframe = {
+  storeUrl: string
+  max: number
+}
+
 export type PanelVideo = {
   url: string | null
   error: string | null
@@ -349,13 +385,25 @@ const props = defineProps<{
   imagesUrl: string
   video: PanelVideo
   choosing: PanelChoosing
+  newKeyframe: PanelNewKeyframe
 }>()
 
 const selectedIndex = ref(0)
 const showVideo = ref(Boolean(props.video.url || props.video.pending))
 
+const adding = ref(false)
+
 const selectKeyframe = (index: number) => {
   selectedIndex.value = index
+  showVideo.value = false
+  adding.value = false
+}
+
+/**
+ * Selects the empty slot at the end of the strip; the right column becomes the form for it.
+ */
+const startAdding = () => {
+  adding.value = true
   showVideo.value = false
 }
 
@@ -388,8 +436,12 @@ watch(
 
 watch(
   () => props.keyframes.length,
-  (length) => {
-    if (selectedIndex.value >= length) selectedIndex.value = 0
+  (length, previous) => {
+    if (previous !== undefined && length > previous && !props.choosing.active) {
+      selectKeyframe(length - 1)
+    } else if (selectedIndex.value >= length) {
+      selectedIndex.value = 0
+    }
   },
 )
 
@@ -414,6 +466,21 @@ const timeAt = (index: number) => {
 
   return `${((props.duration * index) / count).toFixed(1)} s`
 }
+
+const selectVideo = () => {
+  showVideo.value = true
+  adding.value = false
+}
+
+const canAdd = computed(
+  () =>
+    !props.choosing.active &&
+    !props.generating &&
+    !props.video.pending &&
+    props.keyframes.length > 0 &&
+    props.keyframes.length < props.newKeyframe.max &&
+    props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.updateUrl && !keyframe.rendering),
+)
 
 const retry = useForm({})
 const videoForm = useForm<{ video?: string }>({})

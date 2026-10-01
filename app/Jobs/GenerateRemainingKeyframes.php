@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
-use App\Models\Keyframe;
 use App\Models\Shot;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -17,7 +17,8 @@ use Throwable;
 
 /**
  * Renders keyframes 2 to N once the director has chosen keyframe 1, each with
- * the style sheet and the chosen first keyframe as references.
+ * the style sheet, the chosen first keyframe and the keyframe just before it
+ * as references.
  */
 #[DeleteWhenMissingModels]
 class GenerateRemainingKeyframes implements ShouldQueue
@@ -39,14 +40,19 @@ class GenerateRemainingKeyframes implements ShouldQueue
         $shot = $this->shot->load(['project', 'keyframes.media']);
         $first = $shot->keyframes->first()?->render() ?? throw new RuntimeException('Choose the first keyframe before rendering the others.');
 
-        $references = array_values(array_filter([
-            $painter->styleReferenceFor($shot->project),
-            $painter->referenceFor($first),
-        ]));
+        $style = $painter->styleReferenceFor($shot->project);
+        $firstReference = $painter->referenceFor($first);
+        $previous = $first;
 
-        $shot->keyframes
-            ->skip(1)
-            ->each(fn(Keyframe $keyframe) => $painter->paint($keyframe->setRelation('shot', $shot), $keyframe->prompt, $references));
+        foreach ($shot->keyframes->skip(1) as $keyframe) {
+            $references = array_values(array_filter([
+                $style,
+                $firstReference,
+                KeyframeImageBrief::usesPreviousKeyframe($keyframe->position) ? $painter->referenceFor($previous) : null,
+            ]));
+
+            $previous = $painter->paint($keyframe->setRelation('shot', $shot), $keyframe->prompt, $references);
+        }
 
         $shot->forceFill([
             'storyline_error' => null,
