@@ -78,38 +78,7 @@
       </div>
     </section>
 
-    <section class="space-y-4">
-      <div class="flex items-baseline justify-between gap-4">
-        <h2 class="text-xl font-semibold">
-          {{ $t('Reference images') }}
-          <span class="font-normal text-muted-foreground tabular-nums">({{ references.length }})</span>
-        </h2>
-        <p class="text-sm text-muted-foreground">{{ $t('The real things that must be recognisable in the shots.') }}</p>
-      </div>
-      <p
-        v-if="references.length === 0"
-        class="rounded-xl border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground"
-      >
-        {{ $t('No reference images yet.') }}
-      </p>
-      <ul v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <li v-for="reference in references" :key="reference.id" class="space-y-2">
-          <a
-            :href="reference.url"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="block aspect-[4/3] overflow-hidden rounded-lg border border-border bg-paper-deep transition-colors hover:border-muted-foreground/60"
-          >
-            <img :src="reference.url" :alt="reference.caption ?? ''" class="size-full object-cover" loading="lazy" />
-          </a>
-          <p v-if="reference.caption" class="line-clamp-2 text-sm leading-snug text-muted-foreground">
-            {{ reference.caption }}
-          </p>
-        </li>
-      </ul>
-    </section>
-
-    <section class="space-y-4">
+    <section v-if="elements.length > 0" class="space-y-4">
       <div class="flex items-baseline justify-between gap-4">
         <h2 class="text-xl font-semibold">
           {{ $t('Cast & sets') }}
@@ -119,13 +88,7 @@
           {{ $t('People, places and objects that look the same in every shot.') }}
         </p>
       </div>
-      <p
-        v-if="elements.length === 0"
-        class="rounded-xl border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground"
-      >
-        {{ $t('None yet. They are added when you review the cast and sets of a shot.') }}
-      </p>
-      <ul v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <li
           v-for="element in elements"
           :key="element.id"
@@ -159,7 +122,7 @@
       </ul>
     </section>
 
-    <section class="space-y-4">
+    <section v-if="shots.length > 0" class="space-y-4">
       <h2 class="text-xl font-semibold">
         {{ $t('Shots') }}
         <span class="font-normal text-muted-foreground tabular-nums">({{ shots.length }})</span>

@@ -138,12 +138,11 @@ describe('create and update', function () {
 });
 
 describe('view and destroy', function () {
-    it('shows the project overview with its style, references and shots', function () {
+    it('shows the project overview with its style and shots', function () {
         Storage::fake(Disk::TENANT->value);
 
         $project = Project::factory()->ownedBy($this->director)->create(['website' => 'https://damen.com', 'video_resolution' => '480p']);
         $shots = Shot::factory()->for($project)->count(2)->sequence(['position' => 1], ['position' => 2])->create();
-        $project->addMediaFromString(pngBytes())->usingFileName('vessel.png')->withCustomProperties([Project::CAPTION => 'A tug at the quay'])->toMediaCollection(Project::CONTENT_REFERENCES);
         $project->addMediaFromString(pngBytes())->usingFileName('sheet.png')->toMediaCollection(Project::STYLE_REFERENCES);
 
         $response = actingAs($this->director, 'director')
@@ -156,13 +155,12 @@ describe('view and destroy', function () {
                 ->where('project.videoResolution', '480p')
                 ->where('project.styleReferenceUrl', fn(string $url) => str_contains($url, 'signature='))
                 ->where('project.links.editor', route('public.shots.view', [$project, $shots->first()]))
-                ->has('references', 1)
-                ->where('references.0.caption', 'A tug at the quay')
+                ->missing('references')
                 ->has('shots', 2)
                 ->where('shots.1.url', route('public.shots.view', [$project, $shots->last()])));
 
         actingAs($this->director, 'director')
-            ->get($response->viewData('page')['props']['references'][0]['url'])
+            ->get($response->viewData('page')['props']['project']['styleReferenceUrl'])
             ->assertSuccessful();
     });
 
@@ -175,7 +173,6 @@ describe('view and destroy', function () {
             ->assertInertia(fn($page) => $page
                 ->component('projects/view')
                 ->has('shots', 0)
-                ->has('references', 0)
                 ->where('project.links.editor', route('public.shots.create', $project)));
     });
 

@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Public\Projects;
 
 use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\ProjectResource;
-use App\Http\Resources\Public\ReferenceImageResource;
 use App\Http\Resources\Public\ShotListItemResource;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
@@ -16,7 +15,7 @@ use Inertia\Inertia;
 class ViewController
 {
     /**
-     * The project overview: its style, reference images and shots, with the
+     * The project overview: its style, cast and sets and shots, with the
      * way into the editor. A project still in setup goes back to its intake chat.
      */
     public function view(Project $project)
@@ -31,7 +30,6 @@ class ViewController
 
         return Inertia::render('projects/view', [
             'project' => fn() => ProjectResource::make($project),
-            'references' => fn() => ReferenceImageResource::collection($project->getMedia(Project::CONTENT_REFERENCES)),
             'shots' => fn() => ShotListItemResource::collection($project->shots),
             'elements' => fn() => ElementResource::collection(
                 $project->elements()->with(['project', 'media', 'keyframes.shot.project'])->get()

@@ -3,6 +3,8 @@
 
   <!-- Absolutely positioned inside <main>, so the chat is exactly as tall as the content area and only its thread scrolls. -->
   <div class="absolute inset-x-6 inset-y-12 flex flex-col gap-4 md:inset-y-16">
+    <PageBackdrop :image="backdrop" fade="center" />
+
     <Chat
       class="min-h-0 flex-1"
       :messages="messages"
@@ -29,6 +31,7 @@
 </template>
 <script setup lang="ts">
 import { Head, router, useHttp } from '@inertiajs/vue3'
+import backdrop from '@public/images/chat.webp'
 import { usePage } from '@public/ts/composables/page'
 import AppLayout from '@public/ts/layouts/App.vue'
 import { $t } from '@public/ts/shared/i18n'
@@ -37,6 +40,7 @@ import Chat from '@public:components/chat/Chat.vue'
 import StyleOptionsGrid from '@public:components/chat/StyleOptionsGrid.vue'
 import type { ChatMessage, NewChatMessage, StyleOptionTile } from '@public:components/chat/types'
 import { useChat } from '@public:components/chat/useChat'
+import PageBackdrop from '@public:components/PageBackdrop.vue'
 import { LoaderCircle } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
