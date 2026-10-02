@@ -16,19 +16,19 @@
         :disabled="pending"
         @click="selectedId = option.id"
       >
-        <span class="relative inline-flex max-h-full max-w-full">
+        <!-- Sized like the placeholders: one side fills the cell and the ratio sets the other, so the frame hugs the image. -->
+        <span class="relative inline-flex max-h-full max-w-full" :style="tileSize">
           <img
             :src="option.imageUrl"
             :alt="$t('Option :n', { n: String(i + 1) })"
             :class="
               cn(
-                'max-h-full max-w-full rounded-xl border border-border bg-card object-contain transition',
+                'size-full rounded-xl border border-border bg-card object-cover transition',
                 option.id === selectedId
                   ? 'border-signal ring-4 ring-signal/40'
                   : 'group-hover:border-muted-foreground/60',
               )
             "
-            :style="{ aspectRatio: aspectRatio.replace(':', ' / ') }"
           />
           <span
             :class="
@@ -45,14 +45,7 @@
       </button>
 
       <div v-for="n in placeholders" :key="`pending-${n}`" class="flex min-h-0 items-center justify-center">
-        <Placeholder
-          class="max-h-full max-w-full rounded-xl bg-card"
-          :style="{
-            aspectRatio: aspectRatio.replace(':', ' / '),
-            height: isPortrait ? '100%' : undefined,
-            width: isPortrait ? undefined : '100%',
-          }"
-        >
+        <Placeholder class="max-h-full max-w-full rounded-xl bg-card" :style="tileSize">
           <LoaderCircle class="size-6 animate-spin text-signal" />
         </Placeholder>
       </div>
@@ -115,6 +108,12 @@ const isPortrait = computed(() => {
 
   return h >= w
 })
+
+const tileSize = computed(() => ({
+  aspectRatio: props.aspectRatio.replace(':', ' / '),
+  height: isPortrait.value ? '100%' : undefined,
+  width: isPortrait.value ? undefined : '100%',
+}))
 
 const choice = useForm<{ render: number | null }>({ render: null })
 const more = useForm({})

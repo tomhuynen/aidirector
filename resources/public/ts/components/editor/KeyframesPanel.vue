@@ -38,8 +38,8 @@
             autoplay
             loop
             playsinline
-            class="max-h-full max-w-full rounded-xl border border-border bg-black"
-            :style="{ aspectRatio: aspectRatio.replace(':', ' / ') }"
+            class="max-h-full max-w-full rounded-xl border border-border bg-black object-cover"
+            :style="frameSize"
           />
           <img
             v-else-if="!showVideo && !adding && selected?.imageUrl"
@@ -47,21 +47,13 @@
             :alt="selected.title"
             :class="
               cn(
-                'max-h-full max-w-full rounded-xl border border-border bg-card object-contain',
+                'max-h-full max-w-full rounded-xl border border-border bg-card object-cover',
                 selected.rendering && 'opacity-50',
               )
             "
-            :style="{ aspectRatio: aspectRatio.replace(':', ' / ') }"
+            :style="frameSize"
           />
-          <Placeholder
-            v-else
-            class="max-h-full max-w-full rounded-xl bg-card"
-            :style="{
-              aspectRatio: aspectRatio.replace(':', ' / '),
-              height: isPortrait ? '100%' : undefined,
-              width: isPortrait ? undefined : '100%',
-            }"
-          >
+          <Placeholder v-else class="max-h-full max-w-full rounded-xl bg-card" :style="frameSize">
             <p
               v-if="showVideo && video.pending"
               class="flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
@@ -491,6 +483,16 @@ const isPortrait = computed(() => {
 
   return h >= w
 })
+
+/**
+ * One side fills the stage and the ratio sets the other, so the frame hugs
+ * the image or video instead of letterboxing it.
+ */
+const frameSize = computed(() => ({
+  aspectRatio: props.aspectRatio.replace(':', ' / '),
+  height: isPortrait.value ? '100%' : undefined,
+  width: isPortrait.value ? undefined : '100%',
+}))
 
 const timeAt = (index: number) => {
   const count = Math.max(props.keyframes.length - 1, 1)
