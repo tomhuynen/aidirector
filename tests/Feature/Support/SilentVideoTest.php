@@ -13,7 +13,7 @@ it('removes the audio track and keeps the picture', function () {
         $this->markTestSkipped('ffmpeg is not installed.');
     }
 
-    Config::set('pipeline.video.ffmpeg', $ffmpeg);
+    Config::set('pipeline.ffmpeg.binary', $ffmpeg);
     $clip = tempnam(sys_get_temp_dir(), 'test-') . '.mp4';
     Process::run([$ffmpeg, '-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:d=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-shortest', '-c:v', 'libx264', '-c:a', 'aac', $clip])->throw();
 

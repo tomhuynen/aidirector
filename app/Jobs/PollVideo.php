@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Enums\ShotStatus;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
+use App\Support\Shots\MergeShots;
 use App\Support\Video\OpenRouterVideoClient;
 use App\Support\Video\SilentVideo;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -90,6 +91,13 @@ class PollVideo implements ShouldQueue
 
         GenerationFinished::ready(__('The video of “:shot” is ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
             ->sendTo($shot->project);
+
+        // A part of a merged shot: the merged video is joined again with the new clip.
+        $merged = $shot->mergedInto()->first();
+
+        if ($merged !== null) {
+            app(MergeShots::class)->rejoin($merged);
+        }
     }
 
     public function failed(?Throwable $exception): void

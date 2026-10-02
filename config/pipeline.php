@@ -113,6 +113,15 @@ return [
         'bytedance-seed/seedream-5-0-flash',
     ],
 
+    /*
+     * Joins the clips of merged shots. Both must be installed on the servers
+     * that run the queue.
+     */
+    'ffmpeg' => [
+        'binary' => env('FFMPEG_BINARY', 'ffmpeg'),
+        'ffprobe' => env('FFPROBE_BINARY', 'ffprobe'),
+    ],
+
     'video' => [
         'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
         // The default for projects without their own; the lowest the model offers, for quick tests.
@@ -122,8 +131,6 @@ return [
         'min_duration' => 4,
         'max_duration' => 15,
         'poll_seconds' => 20,
-        // Strips the audio some models add even when asked for none.
-        'ffmpeg' => env('FFMPEG_PATH', 'ffmpeg'),
         'max_wait_minutes' => 30,
     ],
 

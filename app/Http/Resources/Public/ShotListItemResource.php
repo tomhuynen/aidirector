@@ -32,6 +32,12 @@ class ShotListItemResource extends JsonResource
             'duration' => $this->durationInSeconds(),
             /** @var int */
             'keyframesCount' => $this->keyframes_count ?? 0,
+            /**
+             * How many shots this one was merged from; 0 for an ordinary shot.
+             *
+             * @var int
+             */
+            'partsCount' => $this->parts_count ?? 0,
             /** @var string|null */
             'thumbnailUrl' => $this->thumbnailUrl(),
             'url' => route('public.shots.view', [$this->project, $this->resource]),
@@ -43,6 +49,14 @@ class ShotListItemResource extends JsonResource
      */
     private function thumbnailUrl(): ?string
     {
+        // A merged shot has no keyframes of its own; its first part stands in.
+        if ($this->relationLoaded('parts') && $this->parts->isNotEmpty()) {
+            /** @var Shot $part */
+            $part = $this->parts->first();
+
+            return (new self($part->setRelation('project', $this->project)))->thumbnailUrl();
+        }
+
         if (! $this->relationLoaded('keyframes')) {
             return null;
         }

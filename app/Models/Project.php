@@ -121,8 +121,34 @@ class Project extends Model implements HasMedia
         return $this->belongsTo(Conversation::class);
     }
 
-    /** @return HasMany<Shot, $this> */
+    /**
+     * The shots in the sequence. Shots merged into another are left out:
+     * they live on as parts of the merged shot.
+     *
+     * @return HasMany<Shot, $this>
+     */
     public function shots(): HasMany
+    {
+        return $this->hasMany(Shot::class)->whereNull('merged_into_id')->orderBy('position');
+    }
+
+    /**
+     * Shots in routes are looked up among all shots, so the parts of a
+     * merged shot keep their own pages.
+     *
+     * @param  string  $childType
+     */
+    protected function childRouteBindingRelationshipName($childType): string
+    {
+        return $childType === 'shot' ? 'allShots' : parent::childRouteBindingRelationshipName($childType);
+    }
+
+    /**
+     * Every shot, including the parts of merged shots.
+     *
+     * @return HasMany<Shot, $this>
+     */
+    public function allShots(): HasMany
     {
         return $this->hasMany(Shot::class)->orderBy('position');
     }

@@ -31,6 +31,8 @@ return new class extends Migration {
             $table->text('video_prompt')->nullable();
             $table->string('video_job_id', 128)->nullable();
             $table->text('video_error')->nullable();
+            $table->unsignedBigInteger('merged_into_id')->nullable()->index();
+            $table->string('merge_transition', 16)->nullable();
             $table->timestamps();
 
             $table->index(['project_id', 'position']);

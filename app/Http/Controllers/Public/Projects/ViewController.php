@@ -28,7 +28,7 @@ class ViewController
             return redirect()->route('public.projects.setup', $project);
         }
 
-        $project->load(['media', 'shots' => fn($shots) => $shots->with(['project', 'keyframes.media'])->withCount('keyframes')]);
+        $project->load(['media', 'shots' => fn($shots) => $shots->with(['project', 'keyframes.media', 'parts.keyframes.media'])->withCount(['keyframes', 'parts'])]);
 
         return Inertia::render('projects/view', [
             'project' => fn() => ProjectResource::make($project),

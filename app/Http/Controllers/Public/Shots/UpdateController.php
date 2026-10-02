@@ -36,7 +36,7 @@ class UpdateController
                 $project->elements()->with('media')->get()->each->setRelation('project', $project)
             ),
             'siblings' => fn() => ShotListItemResource::collection(
-                $project->shots()->with(['project', 'keyframes.media'])->withCount('keyframes')->get()
+                $project->shots()->with(['project', 'keyframes.media', 'parts.keyframes.media'])->withCount(['keyframes', 'parts'])->get()
             ),
         ]);
     }

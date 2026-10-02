@@ -21,7 +21,7 @@ class SilentVideo
      */
     public function strip(string $video): string
     {
-        $ffmpeg = (string) Config::get('pipeline.video.ffmpeg');
+        $ffmpeg = (string) Config::get('pipeline.ffmpeg.binary');
         $name = Str::uuid()->toString();
         $input = sys_get_temp_dir() . "/clip-{$name}.mp4";
         $output = sys_get_temp_dir() . "/silent-{$name}.mp4";

@@ -8,6 +8,7 @@ use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
+use App\Enums\ShotTransition;
 use App\Events\ShotDeleting;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -54,6 +55,7 @@ class Shot extends Model implements HasMedia
      *  storyline_options: 'array',
      *  chosen_storyline: 'array',
      *  storyline: 'array',
+     *  merge_transition: 'App\Enums\ShotTransition',
      * }
      */
     protected function casts(): array
@@ -66,7 +68,37 @@ class Shot extends Model implements HasMedia
             'storyline_options' => 'array',
             'chosen_storyline' => 'array',
             'storyline' => 'array',
+            'merge_transition' => ShotTransition::class,
         ];
+    }
+
+    /**
+     * The shots this one was merged from, in their order. They are hidden
+     * from the shot list but kept as they were, so the merge can be undone.
+     *
+     * @return HasMany<Shot, $this>
+     */
+    public function parts(): HasMany
+    {
+        return $this->hasMany(self::class, 'merged_into_id')->orderBy('position');
+    }
+
+    /**
+     * The merged shot this one is part of, if any.
+     *
+     * @return BelongsTo<Shot, $this>
+     */
+    public function mergedInto(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'merged_into_id');
+    }
+
+    /**
+     * Whether this shot was made by merging others: its video is their clips joined.
+     */
+    public function isMerged(): bool
+    {
+        return $this->merge_transition !== null;
     }
 
     /** @return HasMany<Keyframe, $this> */

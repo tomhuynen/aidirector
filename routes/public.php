@@ -36,6 +36,7 @@ use App\Http\Controllers\Public\Shots\Keyframes\ReorderController as KeyframeReo
 use App\Http\Controllers\Public\Shots\Keyframes\StoreController as KeyframeStoreController;
 use App\Http\Controllers\Public\Shots\Keyframes\TweakController as KeyframeTweakController;
 use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpdateController;
+use App\Http\Controllers\Public\Shots\MergeController as ShotMergeController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
 use App\Http\Controllers\Public\Shots\Storyline\ChooseController as StorylineChooseController;
 use App\Http\Controllers\Public\Shots\Storyline\GenerateController as StorylineGenerateController;
@@ -120,6 +121,9 @@ Route::middleware('auth:director')->group(function () {
             Route::get('create', [ShotUpdateController::class, 'update'])->name('create');
             Route::post('create', [ShotUpdateController::class, 'store'])->name('store');
             Route::post('reorder', [ShotReorderController::class, 'store'])->name('reorder');
+            Route::post('merge', [ShotMergeController::class, 'store'])->name('merge');
+            Route::post('{shot}/merge', [ShotMergeController::class, 'update'])->name('merge.update');
+            Route::delete('{shot}/merge', [ShotMergeController::class, 'destroy'])->name('unmerge');
             Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
             Route::post('{shot}/storyline/suggest', [StorylineSuggestController::class, 'store'])->name('storyline.suggest');
             Route::post('{shot}/storyline/choose', [StorylineChooseController::class, 'store'])->name('storyline.choose');
