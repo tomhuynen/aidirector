@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Keyframe;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Contracts\Agent;
@@ -19,9 +21,10 @@ use Stringable;
  * the character turns and what should become visible, which image models
  * cannot work out from a vague request.
  */
-class TweakInterpreter implements Agent, HasStructuredOutput
+class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     /**
      * @param  list<Image>  $images  the current render, then the keyframe before it if there is one

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ElementRoundStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
@@ -29,10 +31,11 @@ use Stringable;
  * Every turn is stored in the tenant conversation tables, so the same
  * conversation can continue once the project exists.
  */
-class ProjectIntake implements Agent, Conversational, HasStructuredOutput
+class ProjectIntake implements Agent, Conversational, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
     use RemembersConversations;
+    use SetsReasoningEffort;
 
     /**
      * The agent is waiting for photos; the chat shows how to add them.

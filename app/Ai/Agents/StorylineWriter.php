@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Briefs\PurposeBrief;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Shot;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Config;
@@ -17,9 +19,10 @@ use Stringable;
  * Turns the chosen storyline of a shot into keyframes: an ordered list of
  * clearly readable moments the image and video models can work from.
  */
-class StorylineWriter implements Agent, HasStructuredOutput
+class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     public function __construct(
         private readonly Shot $shot,
@@ -57,6 +60,8 @@ class StorylineWriter implements Agent, HasStructuredOutput
             - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
             - Keep the same subject, environment and objects across all keyframes. Do not introduce new characters or props that the storyline does not imply.
             - Staging, because the video model animates cleanest this way: the character stands in the foreground in front of one calm, even backdrop surface that fills the area directly behind them from head to feet, such as a building facade, the side of a container, a fence panel, a wall, or open sky or water. Nothing crosses or touches the figure: no railings, pillars, poles, barriers or machines behind or in front of the character. The wider setting, indoors or outdoors, may be visible around and above that backdrop and in the distance, such as buildings, cranes, a quay or the sky, kept simpler than the character. Context the story needs, such as a sign, sits on the backdrop to one side of the character, clearly readable and not touching them; use at most two such objects. The ground near the character's feet is plain. The setting, the backdrop, the context objects and the camera stay identical in every keyframe, and the character never walks behind anything.
+            - Props: use as few hand-held objects as the story needs, ideally one per character. Leave out anything that does not change what the viewer learns, such as a lighter when the point is putting the cigarette away.
+            - Readable props, because the video model can only animate what it can read and turns an unclear object into a copy of the main one: every object the story needs is large enough to recognise at a glance and has a colour that stands out from the clothing and backdrop behind it. Hold it away from the body, clear of other objects. When a character holds two objects, keep the hands apart and make the objects clearly different in shape and colour. Say in the description and the prompt which hand holds which object, and keep it in that hand in every keyframe unless the story moves it.
             - No camera language, no text or captions in frame, no sound.
             - Write in English.
             INSTRUCTIONS;

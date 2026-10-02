@@ -13,6 +13,9 @@ use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 use function Pest\Laravel\actingAs;
@@ -120,6 +123,30 @@ describe('jobs', function () {
             ->and($shot->generations()->where('kind', 'text')->count())->toBe(1);
     });
 
+    it('asks OpenRouter for the configured reasoning effort', function () {
+        Config::set('pipeline.reasoning_effort.storyline_options_writer', 'low');
+
+        Http::fake(['openrouter.ai/api/v1/chat/completions' => Http::response([
+            'model' => 'openai/gpt-5.5',
+            'choices' => [['message' => ['content' => json_encode(['options' => suggestedStorylines()])], 'finish_reason' => 'stop']],
+            'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 10],
+        ])]);
+
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::OPTIONS_PENDING]);
+
+        (new GenerateStorylineOptions($shot))->handle();
+
+        expect($shot->fresh()->storylineOptions())->toBe(suggestedStorylines());
+
+        Http::assertSent(fn(Request $request) => $request['reasoning'] === ['effort' => 'low']);
+    });
+
+    it('leaves the reasoning effort to the model when none is configured', function () {
+        Config::set('pipeline.reasoning_effort.storyline_options_writer', null);
+
+        expect((new StorylineOptionsWriter(Shot::factory()->for($this->project)->create()))->providerOptions('openrouter'))->toBe([]);
+    });
+
     it('includes the current suggestions and feedback when asked for new ones', function () {
         StorylineOptionsWriter::fake([['options' => suggestedStorylines()]]);
 
@@ -206,5 +233,15 @@ describe('jobs', function () {
             ->toContain('in front of one calm, even backdrop surface that fills the area directly behind them')
             ->toContain('Nothing crosses or touches the figure')
             ->toContain('The wider setting, indoors or outdoors, may be visible around and above that backdrop');
+    });
+
+    it('asks the keyframe writer for few, readable props so the video model cannot mistake them', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        expect((string) (new StorylineWriter($shot->load('project')))->instructions())
+            ->toContain('use as few hand-held objects as the story needs, ideally one per character')
+            ->toContain('turns an unclear object into a copy of the main one')
+            ->toContain('keep the hands apart and make the objects clearly different in shape and colour')
+            ->toContain('which hand holds which object');
     });
 });

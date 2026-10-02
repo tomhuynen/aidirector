@@ -170,7 +170,7 @@ const form = useForm<ProjectForm>({
   title: props.project.title ?? '',
   purpose: props.project.purpose ?? 'explainer',
   description: props.project.description ?? '',
-  aspectRatio: props.project.aspectRatio ?? '16:9',
+  aspectRatio: props.project.aspectRatio ?? '9:16',
   defaultDuration: props.project.defaultDuration ?? 5,
   style: {
     look: props.project.style?.look ?? '',

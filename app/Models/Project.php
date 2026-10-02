@@ -75,7 +75,7 @@ class Project extends Model implements HasMedia
 
     protected $attributes = [
         'purpose' => ProjectPurpose::EXPLAINER->value,
-        'aspect_ratio' => AspectRatio::LANDSCAPE->value,
+        'aspect_ratio' => AspectRatio::PORTRAIT->value,
         'style' => '[]',
         'default_duration' => 5,
     ];

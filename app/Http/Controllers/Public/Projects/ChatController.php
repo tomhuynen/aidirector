@@ -316,7 +316,7 @@ class ChatController
                 'title' => $title,
                 'description' => $description,
                 'purpose' => $purpose,
-                'aspect_ratio' => $purpose === ProjectPurpose::SOCIAL_SHORT ? AspectRatio::PORTRAIT : AspectRatio::LANDSCAPE,
+                'aspect_ratio' => AspectRatio::PORTRAIT,
             ]);
 
             Conversation::query()->whereKey($conversationId)->update(['title' => $title]);

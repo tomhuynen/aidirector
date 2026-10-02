@@ -409,7 +409,7 @@ describe('optional stage and cover', function () {
             ->and($this->project->fresh()->cover_status)->toBe(CoverStatus::READY);
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->attachments->count() === 5
-            && $prompt->size === '16:9'
+            && $prompt->size === ProjectCoverPainter::ASPECT_RATIO
             && $prompt->contains('stretches Main gate as a wide landscape')
             && $prompt->contains('Never a row of people standing side by side')
             && $prompt->contains('Attached image 1: Guard (person)')

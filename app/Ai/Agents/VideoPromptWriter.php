@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -18,9 +20,10 @@ use Stringable;
  * must stay consistent. The fixed rules against inventing anything are added
  * by {@see \App\Ai\Prompts\VideoPrompt}, not by the model.
  */
-class VideoPromptWriter implements Agent, HasStructuredOutput
+class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     public function __construct(
         private readonly Shot $shot,

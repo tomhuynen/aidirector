@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Project;
 use App\Models\StyleOption;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -19,9 +21,10 @@ use Stringable;
  * round spreads across the whole spectrum from photoreal to flat cartoon;
  * later rounds stay close to the style the director picked.
  */
-class StyleOptionsWriter implements Agent, HasStructuredOutput
+class StyleOptionsWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     public function __construct(
         private readonly Project $project,

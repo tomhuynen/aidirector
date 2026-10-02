@@ -94,10 +94,11 @@ describe('format', function () {
                     ['value' => '9:16', 'name' => 'Portrait'],
                     ['value' => '1:1', 'name' => 'Square'],
                 ])
-                ->where('videoFormats.resolutions', ['480p', '720p', '1080p', '4K'])
+                ->where('videoFormats.resolutions', ['480p', '720p', '1080p'])
                 ->where('videoFormats.sizes.16:9 480p', ['width' => 854, 'height' => 480])
                 ->where('videoFormats.sizes.9:16 1080p', ['width' => 1080, 'height' => 1920])
-                ->where('videoFormats.sizes.1:1 4K', ['width' => 2160, 'height' => 2160])
+                ->where('videoFormats.sizes.1:1 720p', ['width' => 720, 'height' => 720])
+                ->missing('videoFormats.sizes.1:1 4K')
                 ->where('project.aspectRatio', '9:16')
                 ->where('project.videoResolution', '480p')
                 ->where('project.links.format', route('public.projects.format', $project)));
@@ -246,4 +247,8 @@ describe('view and destroy', function () {
 
         $this->assertModelMissing($project);
     });
+});
+
+it('makes a new project portrait unless told otherwise', function () {
+    expect((new Project())->aspect_ratio)->toBe(AspectRatio::PORTRAIT);
 });

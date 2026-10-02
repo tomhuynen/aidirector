@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Element;
 use App\Models\ElementRound;
 use App\Support\Elements\PhotoInventory;
@@ -19,9 +21,10 @@ use Stringable;
  * places or objects that fit the director's confirmed brief, the project
  * and the uploaded photos, each described so it can be drawn.
  */
-class ElementSuggester implements Agent, HasStructuredOutput
+class ElementSuggester implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     public function __construct(
         private readonly ElementRound $round,

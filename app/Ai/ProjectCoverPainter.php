@@ -26,6 +26,12 @@ class ProjectCoverPainter
 
     public const MAX_OBJECTS = 3;
 
+    /**
+     * A wide banner: the project page shows it full width at the height of
+     * the project cards on the overview, and the cards crop its sides.
+     */
+    public const ASPECT_RATIO = '4:1';
+
     public function __construct(
         private readonly KeyframePainter $keyframes,
     ) {}
@@ -62,9 +68,9 @@ class ProjectCoverPainter
 
         $prompt = implode("\n", array_filter([
             'Visual style: ' . ($style['look'] ?? '') . '. Medium: ' . ($style['medium'] ?? '') . '. Mood: ' . ($style['mood'] ?? '') . '. Palette: ' . ($style['palette'] ?? '') . '.',
-            "Key art for the project \"{$project->title}\", the way a poster for an animated film presents its cast: the characters together as one lively group in the middle of a wide landscape.",
+            "Key art for the project \"{$project->title}\" as a very wide panoramic banner, the way a poster for an animated film presents its cast: the characters together as one lively group in the centre of a wide landscape. Keep the group in the middle third so it survives when the sides are cropped, and keep everyone's head well inside the frame.",
             $people->isNotEmpty()
-                ? 'The people form one tight, overlapping group in the lower middle of the picture, at different depths: some in front, some behind, some leaning in. Each has a pose and expression that shows who they are, such as waving, pointing or holding their tools, and each stays fully recognisable. Never a row of people standing side by side.'
+                ? 'The people form one tight, overlapping group in the centre of the picture, at different depths: some in front, some behind, some leaning in. Each has a pose and expression that shows who they are, such as waving, pointing or holding their tools, and each stays fully recognisable. Never a row of people standing side by side.'
                 : 'There are no people in this picture; the objects are the heroes in front of the landscape.',
             $place !== null
                 ? "Behind and around the group stretches {$place->name} as a wide landscape with depth: a foreground, a middle ground and a far horizon with open sky, seen from a slightly low angle."
@@ -82,7 +88,7 @@ class ProjectCoverPainter
 
         try {
             $response = Image::of($prompt)
-                ->size('16:9')
+                ->size(self::ASPECT_RATIO)
                 ->quality(Config::get('pipeline.image_quality'))
                 ->attachments($attachments)
                 ->timeout(180)
