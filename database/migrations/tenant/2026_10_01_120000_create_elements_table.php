@@ -19,6 +19,9 @@ return new class extends Migration {
             $table->string('type', 16);
             $table->string('name');
             $table->text('description');
+            $table->unsignedBigInteger('reference_id')->nullable();
+            $table->boolean('rendering')->default(false);
+            $table->text('render_error')->nullable();
             $table->timestamps();
 
             $table->index(['project_id', 'type']);

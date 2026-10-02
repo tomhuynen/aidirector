@@ -6,8 +6,8 @@ namespace App\Http\Controllers\Public\Shots\Keyframes;
 
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\KeyframeRenderRequest;
-use App\Jobs\DetectElements;
 use App\Jobs\GenerateKeyframes;
+use App\Jobs\GenerateRemainingKeyframes;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
@@ -21,7 +21,7 @@ use Illuminate\Validation\ValidationException;
 class FirstController
 {
     /**
-     * Choose an option for keyframe 1; its cast and sets are found next, then the other keyframes render.
+     * Choose an option for keyframe 1 and render the other keyframes from it.
      */
     public function choose(KeyframeRenderRequest $request, Project $project, Shot $shot)
     {
@@ -35,12 +35,7 @@ class FirstController
 
         $first->forceFill(['render_id' => $render->id])->save();
 
-        $shot->forceFill([
-            'status' => ShotStatus::ELEMENTS_PENDING,
-            'storyline_error' => null,
-        ])->save();
-
-        DetectElements::dispatch($shot);
+        GenerateRemainingKeyframes::startFor($shot);
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

@@ -50,7 +50,6 @@ class Shot extends Model implements HasMedia
      *  storyline_options: 'array',
      *  chosen_storyline: 'array',
      *  storyline: 'array',
-     *  element_proposals: 'array',
      * }
      */
     protected function casts(): array
@@ -62,7 +61,6 @@ class Shot extends Model implements HasMedia
             'storyline_options' => 'array',
             'chosen_storyline' => 'array',
             'storyline' => 'array',
-            'element_proposals' => 'array',
         ];
     }
 
@@ -96,16 +94,6 @@ class Shot extends Model implements HasMedia
     public function chosenStoryline(): ?array
     {
         return $this->chosen_storyline;
-    }
-
-    /**
-     * The cast and sets found in the shot that wait for the director's review.
-     *
-     * @return list<array{name: string, type: string, description: string, keyframes: list<int>, match: string|null}>
-     */
-    public function elementProposals(): array
-    {
-        return array_values($this->element_proposals ?? []);
     }
 
     /**

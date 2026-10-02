@@ -55,6 +55,7 @@ class ProjectResource extends JsonResource
                 'view' => route('public.projects.view', $this->resource),
                 'format' => route('public.projects.format', $this->resource),
                 'elementsStore' => route('public.projects.elements.store', $this->resource),
+                'elementsCreate' => route('public.projects.elements.create', $this->resource),
                 /** The editor opens on the first shot, or on a new shot when there are none. Only with the shots loaded. */
                 'editor' => $this->when($this->resource->relationLoaded('shots'), fn() => $this->editorUrl()),
                 'update' => route('public.projects.update', $this->resource),

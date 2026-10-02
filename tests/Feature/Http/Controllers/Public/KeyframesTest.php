@@ -6,7 +6,6 @@ use App\Ai\Agents\TweakInterpreter;
 use App\Ai\KeyframePainter;
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
-use App\Jobs\DetectElements;
 use App\Jobs\GenerateKeyframeImage;
 use App\Jobs\GenerateKeyframeOption;
 use App\Jobs\GenerateKeyframes;
@@ -334,14 +333,10 @@ describe('first keyframe', function () {
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
         expect($first->fresh()->render()->id)->toBe($chosen->id)
-            ->and($shot->fresh()->status)->toBe(ShotStatus::ELEMENTS_PENDING);
-
-        Queue::assertPushed(DetectElements::class, fn(DetectElements $job) => $job->shot->is($shot));
-
-        GenerateRemainingKeyframes::startFor($shot->fresh());
-
-        expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
+            ->and($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
             ->and($shot->keyframes()->where('position', 2)->first()->rendering)->toBeTrue();
+
+        Queue::assertPushed(GenerateRemainingKeyframes::class, fn(GenerateRemainingKeyframes $job) => $job->shot->is($shot));
 
         (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
 

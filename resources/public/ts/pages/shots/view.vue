@@ -46,13 +46,6 @@
             chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
             moreUrl: shot.links?.firstKeyframeMore ?? '#',
           }"
-          :reviewing="{
-            active: shot.status === 'elements-pending' || shot.status === 'elements-ready',
-            pending: shot.status === 'elements-pending',
-            proposals: shot.elementProposals,
-            library: elements.map((element) => ({ id: element.id, type: element.type, name: element.name })),
-            reviewUrl: shot.links?.elementsReview ?? '#',
-          }"
           :new-keyframe="{
             storeUrl: shot.links?.keyframesStore ?? '#',
             max: shot.maxKeyframes,
@@ -110,8 +103,6 @@ const state = computed<State>(() => {
     case 'storyline-ready':
     case 'first-keyframe-pending':
     case 'first-keyframe-ready':
-    case 'elements-pending':
-    case 'elements-ready':
     case 'keyframes-pending':
     case 'keyframes-ready':
     case 'video-pending':
@@ -163,7 +154,6 @@ const busy = computed(
     state.value === 'suggesting' ||
     state.value === 'planning' ||
     props.shot.status === 'first-keyframe-pending' ||
-    props.shot.status === 'elements-pending' ||
     props.shot.status === 'keyframes-pending' ||
     props.shot.status === 'video-pending' ||
     props.keyframes.some((keyframe) => keyframe.rendering),

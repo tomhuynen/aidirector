@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots;
 
-use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\KeyframeResource;
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotListItemResource;
@@ -29,7 +28,6 @@ class ViewController
             'keyframes' => fn() => KeyframeResource::collection(
                 $shot->keyframes()->with(['media', 'elements'])->get()->each->setRelation('shot', $shot)
             ),
-            'elements' => fn() => ElementResource::collection($project->elements()->with('media')->get()),
             'siblings' => fn() => ShotListItemResource::collection(
                 $project->shots()->with(['project', 'keyframes.media'])->withCount('keyframes')->get()
             ),

@@ -100,14 +100,6 @@
       </section>
 
       <FirstKeyframeInspector v-if="choosing.active && keyframes[0]" :keyframe="keyframes[0]" />
-      <ElementsReview
-        v-else-if="reviewing.active"
-        :key="reviewing.pending ? 'pending' : 'ready'"
-        :proposals="reviewing.proposals"
-        :library="reviewing.library"
-        :pending="reviewing.pending"
-        :review-url="reviewing.reviewUrl"
-      />
       <NewKeyframeInspector
         v-else-if="adding"
         :position="keyframes.length + 1"
@@ -137,9 +129,6 @@
               }}</template>
               <template v-else-if="choosing.active">{{
                 $t('Choose the first keyframe. The others are drawn to match it.')
-              }}</template>
-              <template v-else-if="reviewing.active">{{
-                $t('Check the cast and sets before the other keyframes are drawn.')
               }}</template>
               <template v-else>{{
                 $t('Review and edit the keyframes. These will be used to generate the final video.')
@@ -344,7 +333,6 @@ import { Button } from '@shared:ui/button'
 import { ChevronLeft, ChevronRight, Clapperboard, Film, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
-import ElementsReview, { type ElementProposal, type LibraryElement } from './ElementsReview.vue'
 import FirstKeyframeChooser from './FirstKeyframeChooser.vue'
 import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
 import KeyframeInspector from './KeyframeInspector.vue'
@@ -374,14 +362,6 @@ export type PanelKeyframe = {
   updateUrl: string | null
   tweakUrl: string | null
   chooseRenderUrl: string | null
-}
-
-export type PanelReviewing = {
-  active: boolean
-  pending: boolean
-  proposals: ElementProposal[]
-  library: LibraryElement[]
-  reviewUrl: string
 }
 
 export type PanelChoosing = {
@@ -415,7 +395,6 @@ const props = defineProps<{
   imagesUrl: string
   video: PanelVideo
   choosing: PanelChoosing
-  reviewing: PanelReviewing
   newKeyframe: PanelNewKeyframe
 }>()
 
@@ -479,7 +458,7 @@ watch(
 const selected = computed(() => props.keyframes[selectedIndex.value])
 
 watch(
-  () => props.choosing.active || props.reviewing.active,
+  () => props.choosing.active,
   (active) => {
     if (active) selectKeyframe(0)
   },
@@ -506,7 +485,6 @@ const selectVideo = () => {
 const canAdd = computed(
   () =>
     !props.choosing.active &&
-    !props.reviewing.active &&
     !props.generating &&
     !props.video.pending &&
     props.keyframes.length > 0 &&

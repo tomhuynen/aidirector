@@ -18,8 +18,7 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Renders keyframes 2 to N once keyframe 1 is chosen and its cast and sets
- * reviewed. Elements without a reference image get one first, side by side
+ * Renders keyframes 2 to N once keyframe 1 is chosen. Elements without a reference image get one first, side by side
  * in a batch of {@see GenerateElementReference} jobs; then every
  * keyframe renders with the style sheet, its elements, the chosen first
  * keyframe and the keyframe just before it as references.
@@ -105,7 +104,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
     }
 
     /**
-     * Starts rendering keyframes 2 to N, once keyframe 1 and its cast and sets are settled.
+     * Starts rendering keyframes 2 to N, once keyframe 1 is chosen.
      */
     public static function startFor(Shot $shot): void
     {
@@ -114,7 +113,6 @@ class GenerateRemainingKeyframes implements ShouldQueue
         $shot->forceFill([
             'status' => ShotStatus::KEYFRAMES_PENDING,
             'storyline_error' => null,
-            'element_proposals' => null,
         ])->save();
 
         self::dispatch($shot);

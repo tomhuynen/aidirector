@@ -21,7 +21,8 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 /**
  * A recurring person, place or object of a project. Its description is
  * repeated word for word in every prompt and its reference image is attached
- * to every keyframe it appears in, so it looks the same in every shot.
+ * to every keyframe it appears in, so it looks the same in every shot. Every
+ * version of that image is kept; reference_id points at the chosen one.
  */
 class Element extends Model implements HasMedia
 {
@@ -35,6 +36,11 @@ class Element extends Model implements HasMedia
 
     public const THUMBNAIL = 'thumbnail';
 
+    /**
+     * On a version made by a change request: what the director asked for.
+     */
+    public const CHANGE_REQUEST = 'change_request';
+
     protected $guarded = [];
 
     /** @var array<string, class-string> */
@@ -45,12 +51,14 @@ class Element extends Model implements HasMedia
     /**
      * @return array{
      *  type: 'App\Enums\ElementType',
+     *  rendering: 'boolean',
      * }
      */
     protected function casts(): array
     {
         return [
             'type' => ElementType::class,
+            'rendering' => 'boolean',
         ];
     }
 
@@ -72,9 +80,24 @@ class Element extends Model implements HasMedia
         return $this->morphMany(Generation::class, 'generatable');
     }
 
+    /**
+     * Every version of the reference image, oldest first.
+     *
+     * @return \Illuminate\Support\Collection<int, BaseMedia>
+     */
+    public function references(): \Illuminate\Support\Collection
+    {
+        return $this->getMedia(self::REFERENCE);
+    }
+
+    /**
+     * The chosen version of the reference image: the one the director picked, or else the newest.
+     */
     public function reference(): ?BaseMedia
     {
-        return $this->getFirstMedia(self::REFERENCE);
+        $references = $this->references();
+
+        return $references->firstWhere('id', $this->reference_id) ?? $references->last();
     }
 
     /**
@@ -87,7 +110,7 @@ class Element extends Model implements HasMedia
 
     public function registerMediaCollections(): void
     {
-        $this->addMediaCollection(self::REFERENCE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::REFERENCE)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
     }
 
     public function registerMediaConversions(?BaseMedia $media = null): void

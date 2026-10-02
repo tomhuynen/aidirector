@@ -56,7 +56,7 @@
       </div>
     </section>
 
-    <CastAndSets :elements="elements" :types="elementTypes" :store-url="project.links?.elementsStore ?? '#'" />
+    <CastAndSets :elements="elements" :types="elementTypes" :create-url="project.links?.elementsCreate ?? '#'" />
   </Page>
 </template>
 <script setup lang="ts">

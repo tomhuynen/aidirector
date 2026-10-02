@@ -42,7 +42,7 @@ class ViewController
                 'plural' => $type->plural(),
             ], ElementType::cases()),
             'elements' => fn() => ElementResource::collection(
-                $project->elements()->with('media')->get()
+                $project->elements()->with('media')->get()->each->setRelation('project', $project)
             ),
         ]);
     }

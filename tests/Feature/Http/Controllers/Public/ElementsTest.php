@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Ai\Agents\ElementDetector;
 use App\Ai\Agents\StorylineOptionsWriter;
 use App\Ai\Agents\StorylineWriter;
 use App\Ai\ElementPainter;
@@ -10,16 +9,17 @@ use App\Ai\KeyframePainter;
 use App\Enums\Disk;
 use App\Enums\ElementType;
 use App\Enums\ShotStatus;
-use App\Jobs\DetectElements;
 use App\Jobs\GenerateElementReference;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
+use App\Jobs\UpdateElementImage;
 use App\Models\Director;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Bus\PendingBatch;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -84,16 +84,6 @@ function chooseFirstKeyframe(Shot $shot): Keyframe
     return $first;
 }
 
-function detectorProposals(): array
-{
-    return ['elements' => [
-        ['name' => 'Security guard', 'type' => 'person', 'description' => 'A tall woman in a dark blue uniform and cap.', 'keyframes' => [1, 3, 9], 'match' => ''],
-        ['name' => 'Visitor in navy suit', 'type' => 'person', 'description' => 'A man in a navy suit.', 'keyframes' => [1], 'match' => 'Mark, the visitor'],
-        ['name' => 'Red mailbox', 'type' => 'object', 'description' => 'A red steel mailbox on a post.', 'keyframes' => [], 'match' => ''],
-        ['name' => 'Spaceship', 'type' => 'vehicle', 'description' => 'Not a valid type.', 'keyframes' => [1], 'match' => ''],
-    ]];
-}
-
 describe('writing', function () {
     it('offers the cast and sets to the writers without forcing them', function () {
         Element::factory()->for($this->project)->create();
@@ -156,153 +146,6 @@ describe('linking', function () {
             && $prompt->contains('The third attached image is the reference for Crate 3 (object)')
             && ! $prompt->contains('the reference for Crate 4')
             && $prompt->attachments->count() === 4);
-    });
-});
-
-describe('detection', function () {
-    it('proposes new elements and near misses for review', function () {
-        ElementDetector::fake([detectorProposals()]);
-
-        $mark = Element::factory()->for($this->project)->create();
-        $shot = castShot($this->project);
-        Image::fake(fn() => elementPng());
-        chooseFirstKeyframe($shot);
-
-        (new DetectElements($shot))->handle(app(KeyframePainter::class));
-
-        $shot->refresh();
-
-        expect($shot->status)->toBe(ShotStatus::ELEMENTS_READY)
-            ->and($shot->elementProposals())->toEqual([
-                ['name' => 'Security guard', 'type' => 'person', 'description' => 'A tall woman in a dark blue uniform and cap.', 'keyframes' => [1, 3], 'match' => null],
-                ['name' => 'Visitor in navy suit', 'type' => 'person', 'description' => 'A man in a navy suit.', 'keyframes' => [1], 'match' => $mark->sqid],
-                ['name' => 'Red mailbox', 'type' => 'object', 'description' => 'A red steel mailbox on a post.', 'keyframes' => [1], 'match' => null],
-            ]);
-
-        ElementDetector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '2. Posting: The envelope slides into the slot. Named elements: Mark, the visitor.')
-            && str_contains($prompt->prompt, '- Mark, the visitor (person)'));
-    });
-
-    it('matches a proposal with the exact name of an existing element of the same type', function () {
-        ElementDetector::fake([['elements' => [
-            ['name' => 'mark, the visitor', 'type' => 'person', 'description' => 'A man in a navy suit.', 'keyframes' => [1], 'match' => ''],
-            ['name' => 'Main gate', 'type' => 'object', 'description' => 'A gate.', 'keyframes' => [1], 'match' => ''],
-        ]]]);
-        Image::fake(fn() => elementPng());
-
-        $mark = Element::factory()->for($this->project)->create();
-        Element::factory()->for($this->project)->place()->create();
-        $shot = castShot($this->project);
-        chooseFirstKeyframe($shot);
-
-        (new DetectElements($shot))->handle(app(KeyframePainter::class));
-
-        expect(array_column($shot->fresh()->elementProposals(), 'match'))->toBe([$mark->sqid, null]);
-    });
-
-    it('goes straight on to the other keyframes when there is nothing to review', function () {
-        ElementDetector::fake([['elements' => []]]);
-        Image::fake(fn() => elementPng());
-
-        $shot = castShot($this->project);
-        chooseFirstKeyframe($shot);
-        Queue::fake();
-
-        (new DetectElements($shot))->handle(app(KeyframePainter::class));
-
-        expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING);
-        Queue::assertPushed(GenerateRemainingKeyframes::class, fn(GenerateRemainingKeyframes $job) => $job->shot->is($shot));
-    });
-
-    it('does not block rendering when detection fails', function () {
-        Queue::fake();
-
-        $shot = castShot($this->project, ['status' => ShotStatus::ELEMENTS_PENDING]);
-
-        (new DetectElements($shot))->failed(new RuntimeException('Provider down'));
-
-        expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
-            ->and($shot->generations()->whereNotNull('error')->count())->toBe(1);
-        Queue::assertPushed(GenerateRemainingKeyframes::class);
-    });
-});
-
-describe('review', function () {
-    beforeEach(function () {
-        $this->mark = Element::factory()->for($this->project)->create();
-        $this->shot = castShot($this->project, ['status' => ShotStatus::ELEMENTS_READY, 'element_proposals' => [
-            ['name' => 'Security guard', 'type' => 'person', 'description' => 'A tall woman in a dark blue uniform.', 'keyframes' => [1, 3], 'match' => null],
-            ['name' => 'Visitor in navy suit', 'type' => 'person', 'description' => 'A man in a navy suit.', 'keyframes' => [1], 'match' => $this->mark->sqid],
-            ['name' => 'Red mailbox', 'type' => 'object', 'description' => 'A red steel mailbox.', 'keyframes' => [1], 'match' => null],
-        ]]);
-
-        foreach (range(1, 3) as $position) {
-            Keyframe::factory()->for($this->shot)->create(['position' => $position]);
-        }
-
-        Queue::fake();
-    });
-
-    it('adds, swaps and skips as the director decides, then renders the rest', function () {
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.elements.review', [$this->project, $this->shot]), ['decisions' => [
-                ['action' => 'add'],
-                ['action' => 'existing', 'element' => $this->mark->sqid],
-                ['action' => 'skip'],
-            ]])
-            ->assertRedirect(route('public.shots.view', [$this->project, $this->shot]));
-
-        $guard = Element::query()->where('name', 'Security guard')->firstOrFail();
-        [$first, , $third] = $this->shot->keyframes()->get();
-
-        expect($guard->type)->toBe(ElementType::PERSON)
-            ->and($guard->project_id)->toBe($this->project->id)
-            ->and($first->elements()->pluck('name')->sort()->values()->all())->toBe(['Mark, the visitor', 'Security guard'])
-            ->and($third->elements()->pluck('name')->all())->toBe(['Security guard'])
-            ->and(Element::query()->where('name', 'Red mailbox')->exists())->toBeFalse()
-            ->and($this->shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
-            ->and($this->shot->fresh()->element_proposals)->toBeNull();
-
-        Queue::assertPushed(GenerateRemainingKeyframes::class);
-    });
-
-    it('needs a decision for every proposal', function () {
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.elements.review', [$this->project, $this->shot]), ['decisions' => [['action' => 'skip']]])
-            ->assertSessionHasErrors('decisions');
-
-        Queue::assertNothingPushed();
-    });
-
-    it('only swaps to elements of the same project', function () {
-        $foreign = Element::factory()->create();
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.elements.review', [$this->project, $this->shot]), ['decisions' => [
-                ['action' => 'existing', 'element' => $foreign->sqid],
-                ['action' => 'skip'],
-                ['action' => 'skip'],
-            ]])
-            ->assertSessionHasErrors('decisions.0.element');
-
-        expect($this->shot->keyframes()->first()->elements()->count())->toBe(0);
-        Queue::assertNothingPushed();
-    });
-
-    it('only reviews while proposals are waiting', function () {
-        $this->shot->forceFill(['status' => ShotStatus::KEYFRAMES_READY])->save();
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.elements.review', [$this->project, $this->shot]), ['decisions' => [['action' => 'skip'], ['action' => 'skip'], ['action' => 'skip']]])
-            ->assertSessionHasErrors('decisions');
-    });
-
-    it('forbids reviewing another director\'s shot', function () {
-        $shot = castShot(Project::factory()->create(), ['status' => ShotStatus::ELEMENTS_READY]);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.elements.review', [$shot->project, $shot]), ['decisions' => [['action' => 'skip']]])
-            ->assertForbidden();
     });
 });
 
@@ -389,21 +232,16 @@ describe('reference images', function () {
 });
 
 describe('pages', function () {
-    it('shows the proposals, the library and the elements per keyframe in the editor', function () {
+    it('shows the elements per keyframe in the editor', function () {
         $mark = withReference(Element::factory()->for($this->project)->create());
-        $shot = castShot($this->project, ['status' => ShotStatus::ELEMENTS_READY, 'element_proposals' => [
-            ['name' => 'Security guard', 'type' => 'person', 'description' => 'A tall woman.', 'keyframes' => [1], 'match' => null],
-        ]]);
+        $shot = castShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
         Keyframe::factory()->for($shot)->create()->elements()->attach($mark);
 
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
             ->assertInertia(fn($page) => $page
-                ->where('shot.elementProposals.0.name', 'Security guard')
-                ->where('shot.links.elementsReview', route('public.shots.elements.review', [$this->project, $shot]))
-                ->where('elements.0.id', $mark->sqid)
-                ->where('elements.0.typeLabel', 'Person')
-                ->where('elements.0.imageUrl', fn(string $url) => str_contains($url, 'signature='))
+                ->missing('shot.elementProposals')
+                ->missing('elements')
                 ->where('keyframes.0.elements', ['Mark, the visitor']));
     });
 
@@ -424,19 +262,21 @@ describe('pages', function () {
 });
 
 describe('adding', function () {
-    it('adds an element to a category and draws its reference image', function () {
+    it('adds an element to a category, draws its image and opens its page', function () {
         Queue::fake();
 
-        actingAs($this->director, 'director')
-            ->post(route('public.projects.elements.store', $this->project), ['type' => 'place', 'name' => 'Main gate', 'description' => 'A grey gatehouse with a yellow barrier.'])
-            ->assertRedirect(route('public.projects.view', $this->project));
+        $response = actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'place', 'name' => 'Main gate', 'description' => 'A grey gatehouse with a yellow barrier.']);
 
         $gate = Element::query()->where('name', 'Main gate')->firstOrFail();
 
+        $response->assertRedirect(route('public.projects.elements.view', [$this->project, $gate]));
+
         expect($gate->type)->toBe(ElementType::PLACE)
+            ->and($gate->rendering)->toBeTrue()
             ->and($gate->project_id)->toBe($this->project->id);
 
-        Queue::assertPushed(GenerateElementReference::class, fn(GenerateElementReference $job) => $job->element->is($gate) && $job->source === null);
+        Queue::assertPushed(UpdateElementImage::class, fn(UpdateElementImage $job) => $job->element->is($gate) && $job->instruction === null);
     });
 
     it('validates the category, name and description', function () {
@@ -463,6 +303,211 @@ describe('adding', function () {
                     ['value' => 'object', 'label' => 'Object', 'plural' => 'Objects'],
                 ])
                 ->where('project.links.elementsStore', route('public.projects.elements.store', $this->project)));
+    });
+});
+
+describe('element page', function () {
+    it('opens an empty page to create an element of a type', function () {
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.elements.create', [$this->project, 'type' => 'object']))
+            ->assertSuccessful()
+            ->assertInertia(fn($page) => $page
+                ->component('elements/edit')
+                ->where('element', null)
+                ->where('type', ['value' => 'object', 'label' => 'Object', 'plural' => 'Objects'])
+                ->where('saveUrl', route('public.projects.elements.store', $this->project)));
+    });
+
+    it('shows an element with its picture and form', function () {
+        $mark = withReference(Element::factory()->for($this->project)->create());
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.elements.view', [$this->project, $mark]))
+            ->assertSuccessful()
+            ->assertInertia(fn($page) => $page
+                ->component('elements/edit')
+                ->where('element.id', $mark->sqid)
+                ->where('element.name', 'Mark, the visitor')
+                ->where('element.rendering', false)
+                ->where('element.imageUrl', fn(string $url) => str_contains($url, 'signature='))
+                ->where('type.value', 'person')
+                ->where('saveUrl', route('public.projects.elements.update', [$this->project, $mark])));
+    });
+
+    it('saves a new name without drawing the picture again', function () {
+        Queue::fake();
+        $mark = withReference(Element::factory()->for($this->project)->create());
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.update', [$this->project, $mark]), ['name' => 'Mark', 'description' => $mark->description, 'change' => ''])
+            ->assertRedirect(route('public.projects.elements.view', [$this->project, $mark]));
+
+        expect($mark->fresh())->name->toBe('Mark')->rendering->toBeFalse();
+        Queue::assertNotPushed(UpdateElementImage::class);
+    });
+
+    it('edits the picture with the requested change', function () {
+        Queue::fake();
+        $mark = withReference(Element::factory()->for($this->project)->create());
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.update', [$this->project, $mark]), ['name' => $mark->name, 'description' => $mark->description, 'change' => 'Give him glasses']);
+
+        expect($mark->fresh()->rendering)->toBeTrue();
+        Queue::assertPushed(UpdateElementImage::class, fn(UpdateElementImage $job) => $job->element->is($mark) && $job->instruction === 'Give him glasses');
+    });
+
+    it('draws the picture again when the description changes', function () {
+        Queue::fake();
+        $mark = withReference(Element::factory()->for($this->project)->create());
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.update', [$this->project, $mark]), ['name' => $mark->name, 'description' => 'A young man in a grey suit.']);
+
+        expect($mark->fresh())->description->toBe('A young man in a grey suit.')->rendering->toBeTrue();
+        Queue::assertPushed(UpdateElementImage::class, fn(UpdateElementImage $job) => $job->instruction === null);
+    });
+
+    it('edits the current picture with the edit model', function () {
+        config(['pipeline.models.image_edit' => 'openai/gpt-5.4-image-2']);
+        Image::fake(fn() => elementPng());
+
+        $mark = withReference(Element::factory()->for($this->project)->create(['rendering' => true]));
+        $current = $mark->reference()->getPathRelativeToRoot();
+
+        (new UpdateElementImage($mark, 'Give him glasses'))->handle(app(ElementPainter::class));
+
+        expect($mark->fresh())->rendering->toBeFalse()->render_error->toBeNull();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'openai/gpt-5.4-image-2'
+            && $prompt->contains('Change only this: Give him glasses')
+            && $prompt->attachments->count() === 1
+            && $prompt->attachments->first()->path === $current);
+    });
+
+    it('draws a new element from its description with the edit model', function () {
+        config(['pipeline.models.image_edit' => 'openai/gpt-5.4-image-2']);
+        Image::fake(fn() => elementPng());
+
+        $gate = Element::factory()->for($this->project)->place()->create(['rendering' => true]);
+
+        (new UpdateElementImage($gate))->handle(app(ElementPainter::class));
+
+        expect($gate->fresh())->rendering->toBeFalse()->reference()->not->toBeNull();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'openai/gpt-5.4-image-2'
+            && $prompt->contains('Show only this place')
+            && $prompt->contains('Main gate (place)'));
+    });
+
+    it('reports a failed picture on the page with the reason', function () {
+        $mark = Element::factory()->for($this->project)->create(['rendering' => true]);
+
+        (new UpdateElementImage($mark, 'Anything'))->failed(new RuntimeException('Provider down'));
+
+        expect($mark->fresh())->rendering->toBeFalse()
+            ->render_error->toBe('The image could not be generated. Please try again. Provider down');
+    });
+
+    it('never lets a stale attempt overwrite a picture that was drawn', function () {
+        $mark = Element::factory()->for($this->project)->create(['rendering' => false, 'render_error' => null]);
+
+        (new UpdateElementImage($mark, 'Anything'))->failed(new MaxAttemptsExceededException('App\\Jobs\\UpdateElementImage has been attempted too many times.'));
+
+        expect($mark->fresh())->rendering->toBeFalse()->render_error->toBeNull();
+    });
+
+    it('explains a job that was stopped for running too long', function () {
+        $mark = Element::factory()->for($this->project)->create(['rendering' => true]);
+
+        (new UpdateElementImage($mark, 'Anything'))->failed(new MaxAttemptsExceededException('attempted too many times'));
+
+        expect($mark->fresh()->render_error)->toEndWith('It ran longer than the queue allows and was stopped.');
+    });
+
+    it('keeps elements to their own project and director', function () {
+        $mark = Element::factory()->for($this->project)->create();
+        $otherProject = Project::factory()->ownedBy($this->director)->create();
+        $foreign = Element::factory()->create();
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.elements.view', [$otherProject, $mark]))
+            ->assertNotFound();
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.elements.view', [$foreign->project, $foreign]))
+            ->assertForbidden();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.update', [$foreign->project, $foreign]), ['name' => 'X', 'description' => 'Y'])
+            ->assertForbidden();
+    });
+});
+
+describe('versions', function () {
+    it('keeps the earlier picture and records the change on the new version', function () {
+        Image::fake(fn() => elementPng());
+
+        $mark = withReference(Element::factory()->for($this->project)->create(['rendering' => true]));
+        $first = $mark->reference();
+
+        (new UpdateElementImage($mark, 'Give him glasses'))->handle(app(ElementPainter::class));
+
+        $mark->refresh();
+
+        expect($mark->references())->toHaveCount(2)
+            ->and($mark->reference()->id)->not->toBe($first->id)
+            ->and($mark->reference_id)->toBe($mark->reference()->id)
+            ->and($mark->reference()->getCustomProperty(Element::CHANGE_REQUEST))->toBe('Give him glasses')
+            ->and($mark->references()->first()->id)->toBe($first->id);
+    });
+
+    it('makes an earlier version the chosen picture again', function () {
+        Image::fake(fn() => elementPng());
+
+        $mark = withReference(Element::factory()->for($this->project)->create());
+        $first = $mark->reference();
+        (new UpdateElementImage($mark, 'Give him glasses'))->handle(app(ElementPainter::class));
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.version', [$this->project, $mark]), ['version' => $first->id])
+            ->assertRedirect(route('public.projects.elements.view', [$this->project, $mark]));
+
+        expect($mark->fresh()->reference()->id)->toBe($first->id);
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.elements.view', [$this->project, $mark]))
+            ->assertInertia(fn($page) => $page
+                ->has('element.versions', 2)
+                ->where('element.versions.0.chosen', true)
+                ->where('element.versions.1.chosen', false)
+                ->where('element.versions.1.request', 'Give him glasses')
+                ->where('element.versionUrl', route('public.projects.elements.version', [$this->project, $mark])));
+    });
+
+    it('only chooses versions of the same element', function () {
+        $mark = withReference(Element::factory()->for($this->project)->create());
+        $gate = withReference(Element::factory()->for($this->project)->place()->create());
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.version', [$this->project, $mark]), ['version' => $gate->reference()->id])
+            ->assertSessionHasErrors('version');
+    });
+
+    it('attaches the chosen version to keyframe renders', function () {
+        Image::fake(fn() => elementPng());
+
+        $mark = withReference(Element::factory()->for($this->project)->create());
+        $first = $mark->reference();
+        (new UpdateElementImage($mark, 'Give him glasses'))->handle(app(ElementPainter::class));
+        $mark->forceFill(['reference_id' => $first->id])->save();
+
+        $shot = castShot($this->project);
+        chooseFirstKeyframe($shot);
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
+            && $prompt->attachments->first()->path === $first->getPathRelativeToRoot());
     });
 });
 

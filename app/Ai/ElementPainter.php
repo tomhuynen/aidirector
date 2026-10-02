@@ -17,6 +17,8 @@ use Throwable;
  * Draws the reference image of a cast or set element, so later shots can
  * attach it. An element that appears in keyframe 1 is isolated from that
  * render; otherwise it is drawn from its description in the project style.
+ * The director can change it afterwards. Element images use the edit model,
+ * the same one that adjusts keyframes.
  */
 class ElementPainter
 {
@@ -32,7 +34,6 @@ class ElementPainter
         $project = $element->project;
         $style = $project->style;
         $render = $source?->render();
-        $model = Config::get('pipeline.models.image');
 
         $styleSheet = $render === null ? $this->keyframes->styleReferenceFor($project) : null;
         $attachments = match (true) {
@@ -51,6 +52,42 @@ class ElementPainter
             'No text, captions, logos or watermarks in the image.',
         ]));
 
+        $this->generate($element, $prompt, $attachments);
+    }
+
+    /**
+     * Changes the element's current reference image as the director asks,
+     * keeping everything else as it is.
+     *
+     * @throws Throwable when the image model fails; the failure is logged on the element first.
+     */
+    public function edit(Element $element, string $instruction): void
+    {
+        $current = $element->reference() ?? throw new \RuntimeException('The element has no image to change yet.');
+
+        $prompt = implode("\n", [
+            'Edit the attached image.',
+            "Change only this: {$instruction}",
+            "It shows {$element->promptLine()}",
+            'Keep everything else exactly as it is: the shapes, colours, style, framing and the plain background.',
+            'No text, captions, logos or watermarks in the image.',
+        ]);
+
+        $this->generate($element, $prompt, [$this->keyframes->referenceFor($current)], $instruction);
+    }
+
+    /**
+     * Generates the element's reference image with the edit model, the one
+     * keyframe adjustments use, logs the call and stores the result.
+     *
+     * @param  list<\Laravel\Ai\Files\StoredImage>  $attachments
+     *
+     * @throws Throwable when the image model fails; the failure is logged on the element first.
+     */
+    private function generate(Element $element, string $prompt, array $attachments, ?string $request = null): void
+    {
+        $project = $element->project;
+        $model = (string) Config::get('pipeline.models.image_edit');
         $started = hrtime(true);
 
         try {
@@ -86,14 +123,17 @@ class ElementPainter
             'usage' => $response->usage->toArray(),
         ]);
 
-        $element
+        $version = $element
             ->addMediaFromString($image->content())
             ->usingFileName('element-' . $element->sqid . match ($image->mime()) {
                 'image/jpeg' => '.jpg',
                 'image/webp' => '.webp',
                 default => '.png',
             })
+            ->withCustomProperties(array_filter([Element::CHANGE_REQUEST => $request]))
             ->toMediaCollection(Element::REFERENCE);
+
+        $element->forceFill(['reference_id' => $version->id])->save();
     }
 
     /**

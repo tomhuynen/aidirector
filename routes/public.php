@@ -15,6 +15,9 @@ use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyCont
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
 use App\Http\Controllers\Public\Projects\Elements\RoundController as ElementRoundController;
 use App\Http\Controllers\Public\Projects\Elements\StoreController as ElementStoreController;
+use App\Http\Controllers\Public\Projects\Elements\UpdateController as ElementUpdateController;
+use App\Http\Controllers\Public\Projects\Elements\VersionController as ElementVersionController;
+use App\Http\Controllers\Public\Projects\Elements\ViewController as ElementViewController;
 use App\Http\Controllers\Public\Projects\FormatController as ProjectFormatController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
@@ -22,7 +25,6 @@ use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundCont
 use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
-use App\Http\Controllers\Public\Shots\Elements\ReviewController as ElementReviewController;
 use App\Http\Controllers\Public\Shots\Keyframes\FirstController as FirstKeyframeController;
 use App\Http\Controllers\Public\Shots\Keyframes\GenerateController as KeyframesGenerateController;
 use App\Http\Controllers\Public\Shots\Keyframes\ImageController as KeyframeImageController;
@@ -76,7 +78,16 @@ Route::middleware('auth:director')->group(function () {
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
 
-    Route::post('projects/{project}/elements', [ElementStoreController::class, 'store'])->name('projects.elements.store');
+    Route::prefix('projects/{project}/elements')
+        ->name('projects.elements.')
+        ->scopeBindings()
+        ->group(function () {
+            Route::get('create', [ElementViewController::class, 'create'])->name('create');
+            Route::post('/', [ElementStoreController::class, 'store'])->name('store');
+            Route::get('{element}', [ElementViewController::class, 'view'])->name('view');
+            Route::post('{element}', [ElementUpdateController::class, 'store'])->name('update');
+            Route::post('{element}/version', [ElementVersionController::class, 'store'])->name('version');
+        });
 
     Route::prefix('projects/{project}/elements/rounds')
         ->name('projects.elements.rounds.')
@@ -113,7 +124,6 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/keyframes/generate', [KeyframesGenerateController::class, 'store'])->name('keyframes.generate');
             Route::post('{shot}/keyframes/first/choose', [FirstKeyframeController::class, 'choose'])->name('keyframes.first.choose');
             Route::post('{shot}/keyframes/first/more', [FirstKeyframeController::class, 'more'])->name('keyframes.first.more');
-            Route::post('{shot}/elements/review', [ElementReviewController::class, 'store'])->name('elements.review');
             Route::post('{shot}/keyframes/{keyframe}/update', [KeyframeUpdateController::class, 'store'])->name('keyframes.update');
             Route::post('{shot}/keyframes/{keyframe}/tweak', [KeyframeTweakController::class, 'store'])->name('keyframes.tweak');
             Route::post('{shot}/keyframes/{keyframe}/render', [KeyframeRenderController::class, 'store'])->name('keyframes.render');
