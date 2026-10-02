@@ -9,6 +9,7 @@ use App\Ai\Prompts\VideoPrompt;
 use App\Enums\ShotStatus;
 use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Notifications\Public\GenerationFinished;
 use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -95,6 +96,9 @@ class GenerateVideo implements ShouldQueue
             'status' => ShotStatus::KEYFRAMES_READY,
             'video_error' => __('The video could not be started. Please try again.'),
         ])->save();
+
+        GenerationFinished::failed(__('The video of “:shot” could not be started', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
+            ->sendTo($this->shot->project);
     }
 
     /**

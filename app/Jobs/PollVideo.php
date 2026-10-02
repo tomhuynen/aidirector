@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Models\Shot;
+use App\Notifications\Public\GenerationFinished;
 use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -85,6 +86,9 @@ class PollVideo implements ShouldQueue
             'status' => ShotStatus::VIDEO_READY,
             'video_error' => null,
         ])->save();
+
+        GenerationFinished::ready(__('The video of “:shot” is ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
+            ->sendTo($shot->project);
     }
 
     public function failed(?Throwable $exception): void
@@ -103,5 +107,8 @@ class PollVideo implements ShouldQueue
             'status' => ShotStatus::KEYFRAMES_READY,
             'video_error' => __('The video could not be rendered. Please try again.'),
         ])->save();
+
+        GenerationFinished::failed(__('The video of “:shot” could not be rendered', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
+            ->sendTo($this->shot->project);
     }
 }

@@ -9,6 +9,7 @@ use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Keyframe;
+use App\Notifications\Public\GenerationFinished;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -66,6 +67,15 @@ class TweakKeyframeImage implements ShouldQueue
         $render->setCustomProperty(Keyframe::TWEAK_REQUEST, $this->instruction)
             ->setCustomProperty(Keyframe::TWEAK_INSTRUCTION, $instruction)
             ->save();
+
+        $shot = $keyframe->shot;
+
+        GenerationFinished::ready(
+            __('Keyframe :number of “:shot” is adjusted', ['number' => $keyframe->position, 'shot' => $shot->title]),
+            route('public.shots.view', [$shot->project, $shot]),
+            $render,
+            Keyframe::THUMBNAIL,
+        )->sendTo($shot->project);
     }
 
     /**
@@ -117,5 +127,12 @@ class TweakKeyframeImage implements ShouldQueue
     public function failed(?Throwable $exception): void
     {
         $this->markRenderFailed($this->keyframe, __('The image could not be adjusted. Please try again.'), $exception);
+
+        $shot = $this->keyframe->shot()->with('project')->first();
+
+        if ($shot !== null) {
+            GenerationFinished::failed(__('Keyframe :number of “:shot” could not be adjusted', ['number' => $this->keyframe->position, 'shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
+                ->sendTo($shot->project);
+        }
     }
 }

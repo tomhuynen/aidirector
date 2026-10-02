@@ -9,6 +9,7 @@ use App\Enums\ShotStatus;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Notifications\Public\GenerationFinished;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -61,6 +62,9 @@ class GenerateRemainingKeyframes implements ShouldQueue
             'storyline_error' => null,
             'status' => ShotStatus::KEYFRAMES_READY,
         ])->save();
+
+        GenerationFinished::ready(__('All keyframes of “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $siblings->last()?->render(), Keyframe::THUMBNAIL)
+            ->sendTo($shot->project);
     }
 
     /**
@@ -129,5 +133,8 @@ class GenerateRemainingKeyframes implements ShouldQueue
             'storyline_error' => __('The other keyframes could not be rendered. Please try again.'),
             'status' => ShotStatus::FIRST_KEYFRAME_READY,
         ])->save();
+
+        GenerationFinished::failed(__('The keyframes of “:shot” could not be rendered', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
+            ->sendTo($this->shot->project);
     }
 }

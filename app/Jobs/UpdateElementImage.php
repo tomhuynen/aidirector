@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Ai\ElementPainter;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Element;
+use App\Notifications\Public\GenerationFinished;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -44,10 +45,24 @@ class UpdateElementImage implements ShouldQueue
             : $painter->paint($element);
 
         $element->forceFill(['rendering' => false, 'render_error' => null])->save();
+
+        GenerationFinished::ready(
+            __('The image of “:name” is ready', ['name' => $element->name]),
+            route('public.projects.elements.view', [$element->project, $element]),
+            $element->reference(),
+            Element::THUMBNAIL,
+        )->sendTo($element->project);
     }
 
     public function failed(?Throwable $exception): void
     {
         $this->markRenderFailed($this->element, __('The image could not be generated. Please try again.'), $exception);
+
+        $project = $this->element->project()->first();
+
+        if ($project !== null) {
+            GenerationFinished::failed(__('The image of “:name” could not be drawn', ['name' => $this->element->name]), route('public.projects.elements.view', [$project, $this->element]))
+                ->sendTo($project);
+        }
     }
 }

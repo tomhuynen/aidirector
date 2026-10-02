@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Ai\ProjectCoverPainter;
 use App\Enums\CoverStatus;
 use App\Models\Project;
+use App\Notifications\Public\GenerationFinished;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -43,10 +44,19 @@ class GenerateProjectCover implements ShouldQueue
 
         $painter->paint($this->project);
         $this->project->forceFill(['cover_status' => CoverStatus::READY])->save();
+
+        GenerationFinished::ready(
+            __('The cover of “:title” is ready', ['title' => $this->project->title]),
+            route('public.projects.view', $this->project),
+            $this->project->getFirstMedia(Project::COVER),
+        )->sendTo($this->project);
     }
 
     public function failed(?Throwable $exception): void
     {
         $this->project->forceFill(['cover_status' => CoverStatus::FAILED])->save();
+
+        GenerationFinished::failed(__('The cover of “:title” could not be drawn', ['title' => $this->project->title]), route('public.projects.view', $this->project))
+            ->sendTo($this->project);
     }
 }

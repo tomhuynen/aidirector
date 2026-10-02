@@ -53,7 +53,7 @@ class HandleInertiaRequests extends Middleware
     }
 
     /**
-     * @return array{name: string, email: string, links: array{projects: string, logout: string}}|null
+     * @return array{name: string, email: string, links: array{projects: string, logout: string, notifications: string, notificationsRead: string}}|null
      */
     private function account(Request $request): ?array
     {
@@ -67,6 +67,8 @@ class HandleInertiaRequests extends Middleware
             'links' => [
                 'projects' => route('public.projects.index'),
                 'logout' => route('public.auth.logout'),
+                'notifications' => route('public.notifications.index'),
+                'notificationsRead' => route('public.notifications.read'),
             ],
         ];
     }
