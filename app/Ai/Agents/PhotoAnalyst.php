@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ElementType;
 use App\Models\Project;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -11,6 +13,7 @@ use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\HasStructuredOutput;
 use Laravel\Ai\Files\Image;
 use Laravel\Ai\Promptable;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Stringable;
 
 /**
@@ -19,14 +22,29 @@ use Stringable;
  * could draw them.
  * Runs in the background as soon as a photo is added.
  */
-class PhotoAnalyst implements Agent, HasStructuredOutput
+class PhotoAnalyst implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     public function __construct(
         private readonly Project $project,
         private readonly Image $photo,
     ) {}
+
+    /**
+     * The uploaded photo as sent to the model: the downsized reference copy
+     * when it has been generated, otherwise the original.
+     */
+    public static function imageOf(Media $photo): Image
+    {
+        $reference = $photo->hasGeneratedConversion(Project::REFERENCE);
+
+        return Image::fromStorage(
+            $reference ? $photo->getPathRelativeToRoot(Project::REFERENCE) : $photo->getPathRelativeToRoot(),
+            $reference ? ($photo->conversions_disk ?? $photo->disk) : $photo->disk,
+        );
+    }
 
     public function instructions(): Stringable|string
     {

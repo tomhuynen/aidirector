@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Briefs\PurposeBrief;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Shot;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Config;
@@ -18,9 +20,10 @@ use Stringable;
  * idea, written as short prose, for the director to choose from before any
  * keyframes are planned.
  */
-class StorylineOptionsWriter implements Agent, HasStructuredOutput
+class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     public function __construct(
         private readonly Shot $shot,

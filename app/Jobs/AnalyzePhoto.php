@@ -12,7 +12,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Config;
-use Laravel\Ai\Files\Image;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use Throwable;
 
@@ -44,13 +43,7 @@ class AnalyzePhoto implements ShouldQueue
             return;
         }
 
-        $photo = $this->photo;
-        $image = Image::fromStorage(
-            $photo->hasGeneratedConversion(Project::REFERENCE) ? $photo->getPathRelativeToRoot(Project::REFERENCE) : $photo->getPathRelativeToRoot(),
-            $photo->hasGeneratedConversion(Project::REFERENCE) ? ($photo->conversions_disk ?? $photo->disk) : $photo->disk,
-        );
-
-        $analyst = new PhotoAnalyst($project, $image);
+        $analyst = new PhotoAnalyst($project, PhotoAnalyst::imageOf($this->photo));
         $model = (string) Config::get('pipeline.models.text');
         $started = hrtime(true);
 
@@ -79,10 +72,10 @@ class AnalyzePhoto implements ShouldQueue
         $caption = trim((string) ($response->toArray()['caption'] ?? ''));
 
         if ($caption !== '') {
-            $photo->setCustomProperty(Project::CAPTION, $caption);
+            $this->photo->setCustomProperty(Project::CAPTION, $caption);
         }
 
-        $photo->setCustomProperty(PhotoInventory::PROPERTY, $items)->save();
+        $this->photo->setCustomProperty(PhotoInventory::PROPERTY, $items)->save();
     }
 
     public function failed(?Throwable $exception): void

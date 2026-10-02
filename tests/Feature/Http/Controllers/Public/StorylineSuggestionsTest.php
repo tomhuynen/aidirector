@@ -13,6 +13,9 @@ use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 use function Pest\Laravel\actingAs;
@@ -118,6 +121,30 @@ describe('jobs', function () {
             ->and($shot->status)->toBe(ShotStatus::OPTIONS_READY)
             ->and($shot->storyline_error)->toBeNull()
             ->and($shot->generations()->where('kind', 'text')->count())->toBe(1);
+    });
+
+    it('asks OpenRouter for the configured reasoning effort', function () {
+        Config::set('pipeline.reasoning_effort.storyline_options_writer', 'low');
+
+        Http::fake(['openrouter.ai/api/v1/chat/completions' => Http::response([
+            'model' => 'openai/gpt-5.5',
+            'choices' => [['message' => ['content' => json_encode(['options' => suggestedStorylines()])], 'finish_reason' => 'stop']],
+            'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 10],
+        ])]);
+
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::OPTIONS_PENDING]);
+
+        (new GenerateStorylineOptions($shot))->handle();
+
+        expect($shot->fresh()->storylineOptions())->toBe(suggestedStorylines());
+
+        Http::assertSent(fn(Request $request) => $request['reasoning'] === ['effort' => 'low']);
+    });
+
+    it('leaves the reasoning effort to the model when none is configured', function () {
+        Config::set('pipeline.reasoning_effort.storyline_options_writer', null);
+
+        expect((new StorylineOptionsWriter(Shot::factory()->for($this->project)->create()))->providerOptions('openrouter'))->toBe([]);
     });
 
     it('includes the current suggestions and feedback when asked for new ones', function () {

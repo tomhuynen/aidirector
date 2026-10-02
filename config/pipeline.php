@@ -33,6 +33,34 @@ return [
     'options_count' => 3,
 
     /*
+     * Reasoning effort per agent, keyed by its class name in snake case: none,
+     * minimal, low, medium or high, or null to leave it to the model. Measure a
+     * change with `php artisan ai:bench`. Low keeps the storyline suggestions
+     * as good as the default and finishes in about 7 seconds instead of 10 to
+     * 30 (benchmarked 2026-10-02).
+     */
+    'reasoning_effort' => [
+        'storyline_options_writer' => env('AI_STORYLINE_OPTIONS_REASONING', 'low'),
+        'storyline_writer' => null,
+        'style_options_writer' => null,
+        'element_suggester' => null,
+        'element_detector' => null,
+        'photo_analyst' => null,
+        'project_intake' => null,
+        'tweak_interpreter' => null,
+        'video_prompt_writer' => null,
+        'bench_judge' => 'low',
+    ],
+
+    /*
+     * Blind judges that score the outputs of `php artisan ai:bench`. Two
+     * judges from different labs keep either from favouring its own models.
+     */
+    'bench' => [
+        'judges' => ['anthropic/claude-opus-5.5', 'openai/gpt-5.6-sol'],
+    ],
+
+    /*
      * Tiles per round of the style exploration.
      */
     'style_options_count' => 4,

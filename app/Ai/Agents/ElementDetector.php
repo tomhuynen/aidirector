@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ElementType;
 use App\Models\Keyframe;
 use App\Models\Shot;
@@ -21,9 +23,10 @@ use Stringable;
  * existing element the plan did not name. It looks at the chosen keyframe 1,
  * so the descriptions match what was actually drawn.
  */
-class ElementDetector implements Agent, HasStructuredOutput
+class ElementDetector implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     /**
      * @param  Collection<int, Keyframe>  $keyframes  with elements loaded

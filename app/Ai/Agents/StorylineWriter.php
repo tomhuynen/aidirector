@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Briefs\PurposeBrief;
+use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Shot;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Config;
@@ -17,9 +19,10 @@ use Stringable;
  * Turns the chosen storyline of a shot into keyframes: an ordered list of
  * clearly readable moments the image and video models can work from.
  */
-class StorylineWriter implements Agent, HasStructuredOutput
+class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
     use Promptable;
+    use SetsReasoningEffort;
 
     public function __construct(
         private readonly Shot $shot,
