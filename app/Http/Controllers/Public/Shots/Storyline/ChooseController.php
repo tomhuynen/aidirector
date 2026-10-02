@@ -15,14 +15,17 @@ use Illuminate\Support\Facades\Gate;
 class ChooseController
 {
     /**
-     * Save the chosen storyline and start planning its keyframes.
+     * Save the chosen storyline, name the shot after it and start planning its keyframes.
      */
     public function store(StorylineChoiceRequest $request, Project $project, Shot $shot)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
+        $chosen = $shot->storylineOptions()[$request->integer('option')];
+
         $shot->forceFill([
-            'chosen_storyline' => $shot->storylineOptions()[$request->integer('option')],
+            'title' => $chosen['title'],
+            'chosen_storyline' => $chosen,
             'storyline' => null,
             'storyline_error' => null,
             'status' => ShotStatus::STORYLINE_PENDING,

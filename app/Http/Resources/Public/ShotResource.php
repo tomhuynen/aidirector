@@ -6,6 +6,7 @@ namespace App\Http\Resources\Public;
 
 use App\Http\Resources\Concerns\AuthorizesResource;
 use App\Jobs\GenerateKeyframes;
+use App\Models\Element;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Shot;
 use Illuminate\Http\Request;
@@ -28,11 +29,15 @@ class ShotResource extends JsonResource
             /** @var int */
             'position' => $this->position,
             'title' => $this->title,
-            'subject' => $this->subject,
-            'action' => $this->action,
             'takeaway' => $this->takeaway,
             /** @var string|null */
             'notes' => $this->notes,
+            /**
+             * The ids of the cast and sets the storylines must use.
+             *
+             * @var array<int, string>
+             */
+            'preferredElements' => $this->preferredElementSqids(),
             'status' => $this->status,
             'statusLabel' => $this->status->description(),
             /** @var string|null */
@@ -94,5 +99,17 @@ class ShotResource extends JsonResource
         }
 
         return URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $media]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function preferredElementSqids(): array
+    {
+        if (blank($this->preferred_elements) || ! $this->resource->exists) {
+            return [];
+        }
+
+        return $this->preferredElements()->map(fn(Element $element) => $element->sqid)->values()->all();
     }
 }

@@ -10,6 +10,7 @@ use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateStoryline;
 use App\Jobs\GenerateStorylineOptions;
 use App\Models\Director;
+use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
@@ -65,7 +66,7 @@ describe('suggest', function () {
 });
 
 describe('choose', function () {
-    it('saves the chosen storyline and starts planning its keyframes', function () {
+    it('saves the chosen storyline, names the shot after it and starts planning its keyframes', function () {
         $shot = Shot::factory()->for($this->project)->create([
             'status' => ShotStatus::OPTIONS_READY,
             'storyline_options' => suggestedStorylines(),
@@ -78,6 +79,7 @@ describe('choose', function () {
         $shot->refresh();
 
         expect($shot->chosenStoryline())->toBe(suggestedStorylines()[1])
+            ->and($shot->title)->toBe('Hesitation')
             ->and($shot->status)->toBe(ShotStatus::STORYLINE_PENDING)
             ->and($shot->storyline)->toBeNull();
 
@@ -167,11 +169,38 @@ describe('jobs', function () {
         $instructions = (string) (new StorylineOptionsWriter($shot->load('project')))->instructions();
 
         expect($instructions)
-            ->toContain('different interpretation of the same idea')
-            ->toContain('The takeaway is fixed')
-            ->toContain('not 3 takes of the same scene')
+            ->toContain('Each storyline is a different scene that lands the same takeaway')
             ->toContain('Change the situation, not the wording')
+            ->toContain('Vary who does what')
             ->toContain('a different angle on the same scene does not count as a different storyline');
+    });
+
+    it('writes from the takeaway, the context and the cast and sets the director picked', function () {
+        StorylineOptionsWriter::fake([['options' => suggestedStorylines()]]);
+
+        $visitor = Element::factory()->for($this->project)->create();
+        $shot = Shot::factory()->for($this->project)->create([
+            'status' => ShotStatus::OPTIONS_PENDING,
+            'takeaway' => 'Smoking is prohibited on the shipyard',
+            'notes' => 'During the morning shift',
+            'preferred_elements' => [$visitor->id],
+        ]);
+
+        (new GenerateStorylineOptions($shot))->handle();
+
+        StorylineOptionsWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Takeaway: Smoking is prohibited on the shipyard')
+            && str_contains($prompt->prompt, 'Context from the director: During the morning shift')
+            && str_contains($prompt->prompt, '- ' . $visitor->promptLine())
+            && ! str_contains($prompt->prompt, 'Subject:'));
+    });
+
+    it('lists the other shots so a new one does not repeat their scene', function () {
+        Shot::factory()->for($this->project)->create(['title' => 'At the gate', 'takeaway' => 'Wear a helmet']);
+        $shot = Shot::factory()->for($this->project)->create(['position' => 2]);
+
+        expect((string) (new StorylineOptionsWriter($shot->load('project')))->instructions())
+            ->toContain("Do not repeat their scene:\n- At the gate: Wear a helmet")
+            ->not->toContain("- {$shot->title}: {$shot->takeaway}");
     });
 
     it('offers the teaching angles of e-learning projects as inspiration', function () {

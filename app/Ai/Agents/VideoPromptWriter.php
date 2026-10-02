@@ -79,7 +79,7 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
         return implode("\n\n", array_filter([
             "Write the video prompt for this shot of about {$duration} seconds.",
             "Visual style of the project: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
-            "Shot: {$shot->title}. Subject: {$shot->subject}. Takeaway: {$shot->takeaway}.",
+            "Shot: {$shot->title}. Takeaway: {$shot->takeaway}.",
             $storyline ? "Storyline the keyframes were planned from: {$storyline['storyline']}" : null,
             "Keyframes, in order:\n{$frames}",
         ]));

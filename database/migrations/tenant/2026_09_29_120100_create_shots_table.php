@@ -14,10 +14,11 @@ return new class extends Migration {
             $table->foreignId('project_id')->constrained();
             $table->unsignedSmallInteger('position');
             $table->string('title');
-            $table->text('subject');
-            $table->text('action');
+            $table->text('subject')->nullable();
+            $table->text('action')->nullable();
             $table->text('takeaway');
             $table->text('notes')->nullable();
+            $table->json('preferred_elements')->nullable();
             $table->string('status', 32);
             $table->string('purpose_override', 32)->nullable();
             $table->string('aspect_ratio_override', 8)->nullable();

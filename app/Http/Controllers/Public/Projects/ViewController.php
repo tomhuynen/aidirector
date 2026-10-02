@@ -36,11 +36,7 @@ class ViewController
             /** @var array{aspectRatios: array<int, array{value: string, name: string}>, resolutions: array<int, string>, sizes: array<string, array{width: int, height: int}>} */
             'videoFormats' => fn() => VideoFormats::catalogue(),
             /** @var array<int, array{value: string, label: string, plural: string}> */
-            'elementTypes' => fn() => array_map(fn(ElementType $type) => [
-                'value' => $type->value,
-                'label' => $type->description(),
-                'plural' => $type->plural(),
-            ], ElementType::cases()),
+            'elementTypes' => fn() => ElementType::catalogue(),
             'elements' => fn() => ElementResource::collection(
                 $project->elements()->with('media')->get()->each->setRelation('project', $project)
             ),

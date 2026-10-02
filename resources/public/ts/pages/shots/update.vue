@@ -7,7 +7,13 @@
     <ShotList :shots="shotList" :current-id="shot.id" :create-url="project.links?.shotsCreate ?? '#'" />
 
     <main class="flex min-w-0 flex-1 flex-col">
-      <BriefForm :project="project" :shot="shot" :cancel-url="shot.links?.view ?? project.links?.view" />
+      <BriefForm
+        :project="project"
+        :shot="shot"
+        :elements="elements"
+        :element-types="elementTypes"
+        :cancel-url="shot.links?.view ?? project.links?.view"
+      />
     </main>
   </div>
 </template>

@@ -16,8 +16,8 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 /**
- * Turns a shot brief into a handful of different interpretations of the same
- * idea, written as short prose, for the director to choose from before any
+ * Turns a takeaway, with the project's context and its cast and sets, into a
+ * handful of different storylines for the director to choose from before any
  * keyframes are planned.
  */
 class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructuredOutput
@@ -36,39 +36,37 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
         $count = $this->count();
 
         return <<<INSTRUCTIONS
-            You are an experienced film director planning a single shot for an animated production.
-            Your job is to propose {$count} storylines for the shot. Each storyline is a different interpretation of the same idea, so the director can pick a direction before keyframes are planned.
+            You are the storyteller of an animated production. From the director's takeaway and context you propose {$count} storylines for one shot. Each storyline is a different scene that lands the same takeaway, so the director can pick a direction before keyframes are planned.
 
             {$this->purposeBrief()}
 
             Project: {$project->title}
             Project description: {$project->description}
             Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.
-            Shot length: about {$this->shot->durationInSeconds()} seconds.
+            Format: {$this->shot->aspectRatio()->value}, about {$this->shot->durationInSeconds()} seconds for this shot.
 
             Cast and sets of this project, recurring people, places and objects:
             {$project->elementsBrief()}
-            Reuse one of these when this shot is about that person, place or object, and then call it by its exact name and describe it with its description word for word. Introduce new people, places or objects whenever the story needs someone or something else; never force an existing one into a story where it does not belong.
 
-            What the brief is:
-            - The brief is an idea, not a script. The takeaway is fixed. The subject and action describe one way of showing it; treat them as the first interpretation the writer thought of, not the only one.
-            - Each storyline is a different scene that lands the same takeaway. If all {$count} were filmed, a viewer should see {$count} different scenes, not {$count} takes of the same scene.
+            How to use the cast and sets:
+            - Tell the stories with these. Refer to each one by its name from the list, used as a noun with "the", as in "the visitor in hi-vis walks onto the quay". Never write "a man", "a woman" or "a person" for someone from the list, and never double the article.
+            - When the director names people, places or objects they want in the shot, every storyline uses all of them.
+            - Introduce a new person, place or recurring object only when a story needs one worth keeping for other shots, and describe it once in a few words. Small props such as a cigarette, a sign or a bin are plain words, never new cast.
+
+            {$this->otherShots()}
 
             How to make the storylines differ:
-            - Change the situation, not the wording. Between any two storylines at least two of these must differ: the moment the shot starts in, where exactly in the setting it plays, which object or cue carries the point, who else is present and what they do, how the shot resolves.
-            - Stay inside the project's world: the same kind of people, the same location, the same visual style. You may bring in objects, vehicles or a second person that would naturally be there when a scene needs them.
-            - Not different enough: the same person in the same spot doing the same thing, once correctly, once after a nudge, once with the focus on the sign.
-            - Different enough: one storyline at the entrance, one at the desk, one on the way in; or one following a single person, one a driver, one a group.
+            - Change the situation, not the wording. Between any two storylines at least two of these differ: the moment the shot starts in, the place, which object or cue carries the point, who else is present, how it resolves.
+            - Vary who does what: do not give the same person the same role in every storyline.
             - Before answering, describe each storyline to yourself in one line. If two of those lines read like takes of the same scene, replace one.
 
-            Angles that suit this project's purpose. Use them as inspiration where they fit the idea; a different angle on the same scene does not count as a different storyline:
+            Angles that suit this project's purpose, as inspiration where they fit; a different angle on the same scene does not count as a different storyline:
             {$this->storylineAngles()}
 
             Output:
             - Produce exactly {$count} storylines.
-            - Title: two to four words naming what sets this interpretation apart, such as the place, the person or the moment. Not the name of an angle.
-            - Storyline: two to four sentences, in present tense, describing what happens from beginning to end. Name the subject, the key object and how the shot resolves.
-            - Every storyline must land the takeaway and fit within the shot length.
+            - Title: two to four words naming what sets this storyline apart, such as the place, the person or the moment. It also names the shot once chosen. Not the name of an angle.
+            - Storyline: two to four sentences, in present tense, from beginning to end. Every storyline has one clear, visible action a viewer can follow in the shot length, not a still moment, and lands the takeaway.
             - No camera language, no text or captions in frame, no sound.
             - Write in English.
             INSTRUCTIONS;
@@ -100,16 +98,7 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
         $shot = $this->shot;
         $count = $this->count();
 
-        $brief = <<<BRIEF
-            Shot title: {$shot->title}
-            Subject: {$shot->subject}
-            Action: {$shot->action}
-            Takeaway: {$shot->takeaway}
-            BRIEF;
-
-        if (filled($shot->notes)) {
-            $brief .= "\nNotes from the director: {$shot->notes}";
-        }
+        $brief = $shot->brief();
 
         $current = $shot->storylineOptions();
 
@@ -131,6 +120,25 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
 
             Feedback from the director: {$feedback}
             PROMPT;
+    }
+
+    /**
+     * The other shots of the project by their takeaway, so a new shot does not
+     * repeat their scene.
+     */
+    private function otherShots(): string
+    {
+        $others = $this->shot->project->shots()
+            ->when($this->shot->exists, fn($shots) => $shots->whereKeyNot($this->shot->getKey()))
+            ->get(['id', 'title', 'takeaway']);
+
+        if ($others->isEmpty()) {
+            return 'This is the first shot of the project.';
+        }
+
+        $lines = $others->map(fn(Shot $other) => "- {$other->title}: {$other->takeaway}")->join("\n");
+
+        return "Other shots in this project, for continuity. Do not repeat their scene:\n{$lines}";
     }
 
     private function count(): int

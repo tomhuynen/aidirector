@@ -93,16 +93,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     {
         $shot = $this->shot;
 
-        $brief = <<<BRIEF
-            Shot title: {$shot->title}
-            Subject: {$shot->subject}
-            Action: {$shot->action}
-            Takeaway: {$shot->takeaway}
-            BRIEF;
-
-        if (filled($shot->notes)) {
-            $brief .= "\nNotes from the director: {$shot->notes}";
-        }
+        $brief = "Shot title: {$shot->title}\n{$shot->brief()}";
 
         if ($chosen = $shot->chosenStoryline()) {
             $brief .= "\n\nChosen storyline ({$chosen['title']}): {$chosen['storyline']}";

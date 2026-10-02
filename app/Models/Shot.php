@@ -8,6 +8,7 @@ use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Enums\ShotStatus;
 use App\Events\ShotDeleting;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -47,6 +48,7 @@ class Shot extends Model implements HasMedia
      *  status: 'App\Enums\ShotStatus',
      *  purpose_override: 'App\Enums\ProjectPurpose',
      *  aspect_ratio_override: 'App\Enums\AspectRatio',
+     *  preferred_elements: 'array',
      *  storyline_options: 'array',
      *  chosen_storyline: 'array',
      *  storyline: 'array',
@@ -58,6 +60,7 @@ class Shot extends Model implements HasMedia
             'status' => ShotStatus::class,
             'purpose_override' => ProjectPurpose::class,
             'aspect_ratio_override' => AspectRatio::class,
+            'preferred_elements' => 'array',
             'storyline_options' => 'array',
             'chosen_storyline' => 'array',
             'storyline' => 'array',
@@ -84,6 +87,53 @@ class Shot extends Model implements HasMedia
     public function storylineOptions(): array
     {
         return array_values($this->storyline_options ?? []);
+    }
+
+    /**
+     * The director's brief as the writers read it: the takeaway, the context
+     * and the cast and sets the director asked for. Older shots also carry a
+     * subject and action written by hand.
+     */
+    public function brief(): string
+    {
+        $lines = ["Takeaway: {$this->takeaway}"];
+
+        if (filled($this->subject)) {
+            $lines[] = "Subject: {$this->subject}";
+        }
+
+        if (filled($this->action)) {
+            $lines[] = "Action: {$this->action}";
+        }
+
+        if (filled($this->notes)) {
+            $lines[] = "Context from the director: {$this->notes}";
+        }
+
+        $preferred = $this->preferredElements();
+
+        if ($preferred->isNotEmpty()) {
+            $lines[] = "The director wants these in the shot:\n" . $preferred->map(fn(Element $element) => '- ' . $element->promptLine())->join("\n");
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The cast and sets the director wants the storylines to use, in the
+     * library's order. Elements deleted since are left out.
+     *
+     * @return Collection<int, Element>
+     */
+    public function preferredElements(): Collection
+    {
+        $ids = $this->preferred_elements ?? [];
+
+        if ($ids === []) {
+            return new Collection();
+        }
+
+        return $this->project->elements()->whereKey($ids)->get();
     }
 
     /**

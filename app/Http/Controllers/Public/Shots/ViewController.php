@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots;
 
+use App\Enums\ElementType;
+use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\KeyframeResource;
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotListItemResource;
@@ -27,6 +29,12 @@ class ViewController
             'shot' => fn() => ShotResource::make($shot),
             'keyframes' => fn() => KeyframeResource::collection(
                 $shot->keyframes()->with(['media', 'elements'])->get()->each->setRelation('shot', $shot)
+            ),
+            /** @var array<int, array{value: string, label: string, plural: string}> */
+            'elementTypes' => fn() => ElementType::catalogue(),
+            /** The cast and sets the director can ask the storylines to use. */
+            'elements' => fn() => ElementResource::collection(
+                $project->elements()->with('media')->get()->each->setRelation('project', $project)
             ),
             'siblings' => fn() => ShotListItemResource::collection(
                 $project->shots()->with(['project', 'keyframes.media'])->withCount('keyframes')->get()

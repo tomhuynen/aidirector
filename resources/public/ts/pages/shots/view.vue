@@ -60,7 +60,7 @@
           }"
         />
       </template>
-      <BriefForm v-else :project="project" :shot="shot" />
+      <BriefForm v-else :project="project" :shot="shot" :elements="elements" :element-types="elementTypes" />
     </main>
   </div>
 </template>

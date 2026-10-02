@@ -92,9 +92,11 @@ describe('writing', function () {
         foreach ([new StorylineWriter($shot), new StorylineOptionsWriter($shot)] as $writer) {
             expect((string) $writer->instructions())
                 ->toContain('Cast and sets of this project')
-                ->toContain('- Mark, the visitor (person): A middle-aged man')
-                ->toContain('never force an existing one into a story where it does not belong');
+                ->toContain('- Mark, the visitor (person): A middle-aged man');
         }
+
+        expect((string) (new StorylineWriter($shot))->instructions())->toContain('never force an existing one into a story where it does not belong')
+            ->and((string) (new StorylineOptionsWriter($shot))->instructions())->toContain('Introduce a new person, place or recurring object only when a story needs one worth keeping');
 
         expect((string) (new StorylineWriter($shot))->instructions())->toContain('Elements: the exact names of the cast and sets listed above');
     });
@@ -241,8 +243,22 @@ describe('pages', function () {
             ->get(route('public.shots.view', [$this->project, $shot]))
             ->assertInertia(fn($page) => $page
                 ->missing('shot.elementProposals')
-                ->missing('elements')
                 ->where('keyframes.0.elements', ['Mark, the visitor']));
+    });
+
+    it('offers the cast and sets to pick from in the shot brief', function () {
+        $mark = withReference(Element::factory()->for($this->project)->create());
+
+        actingAs($this->director, 'director')
+            ->get(route('public.shots.create', $this->project))
+            ->assertInertia(fn($page) => $page
+                ->component('shots/update')
+                ->where('elementTypes.0', ['value' => 'person', 'label' => 'Person', 'plural' => 'People'])
+                ->has('elementTypes', 3)
+                ->where('elements.0.id', $mark->sqid)
+                ->where('elements.0.type', 'person')
+                ->where('elements.0.name', 'Mark, the visitor')
+                ->where('shot.preferredElements', []));
     });
 
     it('lists the cast and sets on the project overview', function () {

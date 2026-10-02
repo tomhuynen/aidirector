@@ -22,8 +22,6 @@ class ShotFactory extends Factory
             'project_id' => Project::factory(),
             'position' => 1,
             'title' => fake()->sentence(3),
-            'subject' => 'A businessman in a navy suit',
-            'action' => 'Walks to a red mailbox and posts a white envelope',
             'takeaway' => 'Sending the letter is easy and final',
             'notes' => null,
             'status' => ShotStatus::DRAFT,

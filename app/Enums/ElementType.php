@@ -41,6 +41,20 @@ enum ElementType: string
     }
 
     /**
+     * The categories for the frontend, in display order.
+     *
+     * @return array<int, array{value: string, label: string, plural: string}>
+     */
+    public static function catalogue(): array
+    {
+        return array_map(fn(self $type) => [
+            'value' => $type->value,
+            'label' => $type->description(),
+            'plural' => $type->plural(),
+        ], self::cases());
+    }
+
+    /**
      * How the element's reference image is staged, so it can be reused on its own.
      */
     public function referenceStaging(): string

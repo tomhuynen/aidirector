@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateStorylineOptions;
 use App\Models\Director;
+use App\Models\Element;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Facades\Queue;
@@ -21,11 +22,9 @@ beforeEach(function () {
 function validShot(array $overrides = []): array
 {
     return [
-        'title' => 'Posting the letter',
-        'subject' => 'A businessman in a navy suit',
-        'action' => 'Walks to the mailbox and posts an envelope',
         'takeaway' => 'Sending is quick and final',
         'notes' => null,
+        'preferredElements' => [],
         'purposeOverride' => null,
         'aspectRatioOverride' => null,
         'duration' => null,
@@ -39,23 +38,56 @@ describe('create', function () {
 
         $response = actingAs($this->director, 'director')->post(route('public.shots.store', $this->project), validShot());
 
-        $shot = Shot::query()->where('title', 'Posting the letter')->firstOrFail();
+        $shot = Shot::query()->where('takeaway', 'Sending is quick and final')->firstOrFail();
 
         $response->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
         expect($shot->position)->toBe(2)
-            ->and($shot->status)->toBe(ShotStatus::OPTIONS_PENDING);
+            ->and($shot->status)->toBe(ShotStatus::OPTIONS_PENDING)
+            ->and($shot->title)->toBe('Sending is quick and final')
+            ->and($shot->subject)->toBeNull()
+            ->and($shot->action)->toBeNull();
 
         Queue::assertPushed(GenerateStorylineOptions::class, fn(GenerateStorylineOptions $job) => $job->shot->is($shot));
     });
 
-    it('validates the structured intent', function (array $overrides, string $field) {
+    it('keeps the cast and sets the director wants in the storylines', function () {
+        $visitor = Element::factory()->for($this->project)->create();
+        $quay = Element::factory()->for($this->project)->place()->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.store', $this->project), validShot([
+                'notes' => 'It happens during the morning shift.',
+                'preferredElements' => [$quay->sqid, $visitor->sqid],
+            ]))
+            ->assertSessionHasNoErrors();
+
+        $shot = Shot::query()->firstOrFail();
+
+        expect($shot->preferredElements()->modelKeys())->toEqualCanonicalizing([$visitor->id, $quay->id])
+            ->and($shot->brief())
+            ->toContain('Takeaway: Sending is quick and final')
+            ->toContain('Context from the director: It happens during the morning shift.')
+            ->toContain("The director wants these in the shot:\n- ")
+            ->toContain($visitor->promptLine())
+            ->not->toContain('Subject:');
+    });
+
+    it('rejects cast and sets from another project', function () {
+        $foreign = Element::factory()->for(Project::factory())->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.store', $this->project), validShot(['preferredElements' => [$foreign->sqid]]))
+            ->assertSessionHasErrors('preferredElements');
+
+        expect(Shot::query()->count())->toBe(0);
+    });
+
+    it('validates the brief', function (array $overrides, string $field) {
         actingAs($this->director, 'director')
             ->post(route('public.shots.store', $this->project), validShot($overrides))
             ->assertSessionHasErrors($field);
     })->with([
-        'missing subject' => [['subject' => ''], 'subject'],
-        'missing action' => [['action' => ''], 'action'],
         'missing takeaway' => [['takeaway' => ''], 'takeaway'],
         'unknown purpose override' => [['purposeOverride' => 'poetry'], 'purposeOverride'],
     ]);
@@ -87,10 +119,10 @@ describe('view and update', function () {
         $shot = Shot::factory()->for($this->project)->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.update', [$this->project, $shot]), validShot(['title' => 'Renamed', 'duration' => 8]))
+            ->post(route('public.shots.update', [$this->project, $shot]), validShot(['takeaway' => 'Posting is easy', 'duration' => 8]))
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
-        expect($shot->fresh())->title->toBe('Renamed')->duration->toBe(8);
+        expect($shot->fresh())->takeaway->toBe('Posting is easy')->title->toBe('Posting is easy')->duration->toBe(8);
     });
 
     it('does not resolve a shot through a project it does not belong to', function () {

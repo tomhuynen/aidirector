@@ -28,10 +28,6 @@
       </h3>
       <p class="text-[15px] leading-relaxed text-muted-foreground">{{ storyline.storyline }}</p>
     </section>
-    <div v-else class="space-y-3 text-[15px] leading-relaxed">
-      <p>{{ shot.subject }}</p>
-      <p>{{ shot.action }}</p>
-    </div>
 
     <section class="space-y-2 border-t border-border pt-6">
       <h3 class="flex items-center gap-2 font-semibold">
