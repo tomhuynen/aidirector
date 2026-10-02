@@ -24,7 +24,7 @@
             ? $t('The cast and sets of :title', { title: project.title })
             : $t('Style reference for :title', { title: project.title })
         "
-        class="aspect-[21/9] w-full object-cover"
+        class="h-48 w-full object-cover md:h-64"
       />
     </figure>
 
