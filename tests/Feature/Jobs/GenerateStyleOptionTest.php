@@ -47,7 +47,8 @@ it('renders the sheet from the reference photos and stores it', function () {
 
     Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->prompt === 'A 2x2 style sheet in Soft 3D cartoon.'
         && $prompt->attachments->count() === 2
-        && $prompt->size === '1:1');
+        && $prompt->size === '1:1'
+        && $prompt->quality === 'low');
 });
 
 it('marks the option failed and logs the error', function () {

@@ -53,6 +53,7 @@ class GenerateStyleOption implements ShouldQueue
         $response = Image::of($option->prompt)
             ->attachments($attachments)
             ->square()
+            ->quality(Config::get('pipeline.image_quality'))
             ->timeout($this->timeout)
             ->generate('openrouter', $model);
 
