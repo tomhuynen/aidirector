@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Ai\Agents\TweakInterpreter;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
+use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Keyframe;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -29,6 +30,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class TweakKeyframeImage implements ShouldQueue
 {
+    use MarksRenderFailures;
     use Queueable;
 
     public int $tries = 1;
@@ -114,9 +116,6 @@ class TweakKeyframeImage implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
-        $this->keyframe->forceFill([
-            'rendering' => false,
-            'render_error' => __('The image could not be adjusted. Please try again.'),
-        ])->save();
+        $this->markRenderFailed($this->keyframe, __('The image could not be adjusted. Please try again.'), $exception);
     }
 }
