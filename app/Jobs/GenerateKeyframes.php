@@ -6,7 +6,9 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Models\Element;
+use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Notifications\Public\GenerationFinished;
 use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -88,6 +90,13 @@ class GenerateKeyframes implements ShouldQueue
             },
             'status' => $hasOptions ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
+
+        $url = route('public.shots.view', [$shot->project, $shot]);
+
+        ($hasOptions
+            ? GenerationFinished::ready(__('Options for the first keyframe of “:shot” are ready', ['shot' => $shot->title]), $url, $first->renders()->last(), Keyframe::THUMBNAIL)
+            : GenerationFinished::failed(__('The first keyframe of “:shot” could not be drawn', ['shot' => $shot->title]), $url))
+            ->sendTo($shot->project);
     }
 
     public function failed(?Throwable $exception): void
@@ -105,6 +114,9 @@ class GenerateKeyframes implements ShouldQueue
                 : __('The keyframe images could not be generated. Please try again.'),
             'status' => $hasOptions ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
+
+        GenerationFinished::failed(__('The first keyframe of “:shot” could not be drawn', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
+            ->sendTo($this->shot->project);
     }
 
     public static function optionCount(): int

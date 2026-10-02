@@ -21,6 +21,7 @@
     </nav>
 
     <div class="flex shrink-0 items-center gap-2">
+      <NotificationsMenu v-if="account" :account="account" />
       <AccountMenu v-if="account" :account="account" />
       <Button v-if="closeHref" as-child variant="ghost" size="icon-sm" :aria-label="$t('Close')">
         <Link :href="closeHref"><X class="size-5" /></Link>
@@ -32,6 +33,7 @@
 import { Link } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import AccountMenu from '@public:components/AccountMenu.vue'
+import NotificationsMenu from '@public:components/NotificationsMenu.vue'
 import { Button } from '@shared:ui/button'
 import { ChevronRight, X } from 'lucide-vue-next'
 

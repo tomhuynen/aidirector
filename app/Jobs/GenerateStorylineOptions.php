@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Ai\Agents\StorylineOptionsWriter;
 use App\Enums\ShotStatus;
 use App\Models\Shot;
+use App\Notifications\Public\GenerationFinished;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -58,6 +59,9 @@ class GenerateStorylineOptions implements ShouldQueue
             'storyline_error' => null,
             'status' => ShotStatus::OPTIONS_READY,
         ])->save();
+
+        GenerationFinished::ready(__('Storylines for “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
+            ->sendTo($shot->project);
     }
 
     public function failed(?Throwable $exception): void
@@ -74,5 +78,8 @@ class GenerateStorylineOptions implements ShouldQueue
             'storyline_error' => __('The storylines could not be suggested. Please try again.'),
             'status' => $this->shot->storylineOptions() === [] ? ShotStatus::DRAFT : ShotStatus::OPTIONS_READY,
         ])->save();
+
+        GenerationFinished::failed(__('The storylines for “:shot” could not be written', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
+            ->sendTo($this->shot->project);
     }
 }

@@ -12,7 +12,10 @@
             }}</Link>
           </nav>
         </div>
-        <AccountMenu v-if="account" :account="account" />
+        <div v-if="account" class="flex items-center gap-2">
+          <NotificationsMenu :account="account" />
+          <AccountMenu :account="account" />
+        </div>
       </div>
     </header>
 
@@ -26,6 +29,7 @@
 import { Link } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import AccountMenu from '@public:components/AccountMenu.vue'
+import NotificationsMenu from '@public:components/NotificationsMenu.vue'
 import { Toaster } from 'vue-sonner'
 
 import { usePage } from '../composables/page'

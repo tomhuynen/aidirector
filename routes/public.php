@@ -8,6 +8,8 @@ use App\Http\Controllers\Public\Auth\LoginController;
 use App\Http\Controllers\Public\Auth\RegisterController;
 use App\Http\Controllers\Public\Auth\ResetPasswordController;
 use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
+use App\Http\Controllers\Public\Notifications\IndexController as NotificationIndexController;
+use App\Http\Controllers\Public\Notifications\ReadController as NotificationReadController;
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CoverController as ProjectCoverController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
@@ -62,6 +64,9 @@ Route::name('auth.')->group(function () {
 });
 
 Route::middleware('auth:director')->group(function () {
+    Route::get('notifications', [NotificationIndexController::class, 'index'])->name('notifications.index');
+    Route::post('notifications/read', [NotificationReadController::class, 'store'])->name('notifications.read');
+
     Route::prefix('projects')
         ->name('projects.')
         ->group(function () {
