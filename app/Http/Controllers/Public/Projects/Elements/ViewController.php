@@ -34,6 +34,12 @@ class ViewController
             'type' => fn() => ['value' => $type->value, 'label' => $type->description(), 'plural' => $type->plural()],
             /** @var string */
             'saveUrl' => fn() => route('public.projects.elements.store', $project),
+            /** @var array<int, array{value: string, label: string, plural: string}> */
+            'elementTypes' => fn() => ElementType::catalogue(),
+            /** The cast and sets that can be drawn into the new element. */
+            'elements' => fn() => ElementResource::collection(
+                $project->elements()->with('media')->get()->each->setRelation('project', $project)
+            ),
         ]);
     }
 
@@ -50,6 +56,12 @@ class ViewController
             'type' => fn() => ['value' => $element->type->value, 'label' => $element->type->description(), 'plural' => $element->type->plural()],
             /** @var string */
             'saveUrl' => fn() => route('public.projects.elements.update', [$project, $element]),
+            /** @var array<int, array{value: string, label: string, plural: string}> */
+            'elementTypes' => fn() => ElementType::catalogue(),
+            /** The other cast and sets that can be drawn into it. */
+            'elements' => fn() => ElementResource::collection(
+                $project->elements()->whereKeyNot($element->getKey())->with('media')->get()->each->setRelation('project', $project)
+            ),
         ]);
     }
 }

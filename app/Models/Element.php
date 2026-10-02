@@ -36,6 +36,9 @@ class Element extends Model implements HasMedia
 
     public const THUMBNAIL = 'thumbnail';
 
+    /** A photo of the real person, place or object that its picture is drawn from. */
+    public const PHOTO = 'photo';
+
     /**
      * On a version made by a change request: what the director asked for.
      */
@@ -111,6 +114,7 @@ class Element extends Model implements HasMedia
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection(self::REFERENCE)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::PHOTO)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
     }
 
     public function registerMediaConversions(?BaseMedia $media = null): void

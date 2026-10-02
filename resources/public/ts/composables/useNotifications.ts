@@ -75,25 +75,26 @@ const open = (item: AppNotification) => {
 /**
  * Tells the director about a result that just came in: a toast in the app,
  * and a desktop notification as well when the tab is in the background.
+ * On the page that shows the result itself nothing is announced.
  */
 const announce = (item: AppNotification) => {
   if (announced.has(item.id)) return
   announced.add(item.id)
 
-  // The page that shows the result is already open; it updates by itself.
-  const here = isCurrentPage(item.url)
-  const options = {
-    duration: 10_000,
-    action: here ? undefined : { label: $t('Open'), onClick: () => open(item) },
+  // The page that shows the result is open and updates by itself: no toast, just mark it read.
+  if (isCurrentPage(item.url) && !document.hidden) {
+    void markRead([item.id])
+
+    return
   }
+
+  const options = { duration: 10_000, action: { label: $t('Open'), onClick: () => open(item) } }
 
   if (item.failed) {
     toast.error(item.title, options)
   } else {
     toast.success(item.title, options)
   }
-
-  if (here) void markRead([item.id])
 
   if (document.hidden && permission.value === 'granted') {
     const desktop = new Notification(item.title, { icon: item.imageUrl ?? undefined, tag: item.id })

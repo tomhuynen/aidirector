@@ -16,8 +16,10 @@ use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Bus\PendingBatch;
+use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -145,7 +147,8 @@ describe('job', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->size === $shot->aspectRatio()->value
             && $prompt->quality === 'low'
             && $prompt->contains('Visual style:')
-            && $prompt->contains('in front of one calm, even backdrop surface')
+            && $prompt->contains('Framing: Full shot at eye level')
+            && $prompt->contains('never put a separate wall, panel or backdrop in front of the place')
             && $prompt->contains('A man in a navy suit stands at a red mailbox'));
     });
 
@@ -293,8 +296,8 @@ describe('first keyframe', function () {
 
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Stage it as described.'));
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Show more of the surroundings'));
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose a different backdrop surface'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose a different calm part of the same place'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose different lighting'));
     });
 
     it('adds more options on request', function () {
@@ -629,8 +632,8 @@ describe('tweak', function () {
             && $prompt->attachments->first()->content() === base64_decode(fakePng()));
     });
 
-    it('creates keyframes with the image model and tweaks with the edit model', function () {
-        Config::set('pipeline.models.image', 'create/model');
+    it('creates keyframes with the keyframe model and tweaks with the edit model', function () {
+        Config::set('pipeline.models.keyframe', 'create/model');
         Config::set('pipeline.models.image_edit', 'edit/model');
         Image::fake(fn() => fakePng());
 
@@ -642,6 +645,43 @@ describe('tweak', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model' && $prompt->contains('Look back at the sign'));
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model' && ! $prompt->contains('Look back at the sign'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'create/model');
+    });
+
+    it('creates keyframes through the images endpoint for models that only serve it', function () {
+        Config::set('pipeline.models.keyframe', 'openai/gpt-image-2.5-sunburst');
+        Image::fake(fn() => fakePng());
+        Http::fake(['openrouter.ai/api/v1/images' => Http::response([
+            'data' => [['b64_json' => fakePng(), 'media_type' => 'image/png']],
+            'usage' => ['cost' => 0.074],
+        ])]);
+
+        $shot = plannedShot($this->project);
+        drawFirstKeyframeOptions($shot);
+
+        $first = $shot->keyframes()->firstOrFail();
+
+        expect($first->renders())->toHaveCount(GenerateKeyframes::optionCount())
+            ->and($first->generations()->where('kind', 'image')->first())
+            ->model->toBe('openai/gpt-image-2.5-sunburst')
+            ->usage->toBe(['cost' => 0.074]);
+
+        Image::assertNothingGenerated();
+        Http::assertSent(fn(HttpRequest $request) => $request['model'] === 'openai/gpt-image-2.5-sunburst'
+            && $request['aspect_ratio'] === $shot->aspectRatio()->value
+            && str_contains($request['prompt'], 'stands at a red mailbox'));
+    });
+
+    it('sends references to the images endpoint as unescaped PNG data URLs', function () {
+        Config::set('pipeline.models.keyframe', 'openai/gpt-image-2.5-sunburst');
+        Image::fake(fn() => fakePng());
+        Http::fake(['openrouter.ai/api/v1/images' => Http::response(['data' => [['b64_json' => fakePng(), 'media_type' => 'image/png']]])]);
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+
+        Http::assertSent(fn(HttpRequest $request) => str_contains($request['prompt'], 'pushes a white envelope')
+            && count($request['input_references']) >= 1
+            && str_contains($request->body(), '"url":"data:image/png;base64,'));
     });
 
     it('adjusts keyframe 1 without a previous keyframe', function () {

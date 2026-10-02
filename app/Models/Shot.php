@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
+use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
 use App\Events\ShotDeleting;
 use Illuminate\Database\Eloquent\Collection;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\Config;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
@@ -157,6 +159,87 @@ class Shot extends Model implements HasMedia
     }
 
     /**
+     * How the shot is framed and where in the place it plays, as the planner
+     * chose it. Older plans have none.
+     *
+     * @return array{size: ShotSize, spot: string, light: string|null, seconds: int|null}|null
+     */
+    public function storylineFraming(): ?array
+    {
+        $framing = $this->storyline['framing'] ?? null;
+        $size = is_array($framing) ? ShotSize::tryFrom((string) ($framing['size'] ?? '')) : null;
+
+        if ($size === null) {
+            return null;
+        }
+
+        $light = trim((string) ($framing['light'] ?? ''));
+
+        return [
+            'size' => $size,
+            'spot' => (string) ($framing['spot'] ?? ''),
+            'light' => $light === '' || str_starts_with(strtolower($light), 'as the visual style') ? null : $light,
+            'seconds' => is_numeric($framing['seconds'] ?? null) ? self::clampSeconds((int) $framing['seconds']) : null,
+        ];
+    }
+
+    /**
+     * Replace the planned keyframes and keep the rest of the plan, such as the framing.
+     *
+     * @param  array<int, array<string, mixed>>  $keyframes
+     */
+    public function replacePlannedKeyframes(array $keyframes): void
+    {
+        $this->forceFill(['storyline' => [...($this->storyline ?? []), 'keyframes' => array_values($keyframes)]])->save();
+    }
+
+    /**
+     * Keyframes can be moved or deleted once the shot has its keyframes and
+     * none of them is being drawn.
+     *
+     * @param  iterable<Keyframe>  $keyframes
+     */
+    public function canArrangeKeyframes(iterable $keyframes): bool
+    {
+        if (! in_array($this->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_READY], true)) {
+            return false;
+        }
+
+        foreach ($keyframes as $keyframe) {
+            if ($keyframe->rendering) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Number the given keyframes in their order and keep the planned keyframes
+     * in step, since the plan is read by position. Keyframes left out keep
+     * their row; the caller deletes them.
+     *
+     * @param  list<Keyframe>  $keyframes
+     */
+    public function arrangeKeyframes(array $keyframes): void
+    {
+        $plans = $this->storylineKeyframes();
+
+        $arranged = array_map(fn(Keyframe $keyframe) => $plans[$keyframe->position - 1] ?? [
+            'title' => $keyframe->title,
+            'description' => $keyframe->description,
+            'prompt' => $keyframe->description,
+        ], $keyframes);
+
+        foreach ($keyframes as $index => $keyframe) {
+            $keyframe->forceFill(['position' => $index + 1])->save();
+        }
+
+        $this->unsetRelation('keyframes');
+        $this->replacePlannedKeyframes($arranged);
+    }
+
+    /**
      * Remove the rendered keyframes and their images, for example when the plan changes.
      */
     public function forgetKeyframes(): void
@@ -212,6 +295,14 @@ class Shot extends Model implements HasMedia
 
     public function durationInSeconds(): int
     {
-        return $this->duration ?? $this->project->default_duration;
+        return $this->duration ?? $this->storylineFraming()['seconds'] ?? $this->project->default_duration;
+    }
+
+    /**
+     * A length the video model accepts.
+     */
+    public static function clampSeconds(int $seconds): int
+    {
+        return max((int) Config::get('pipeline.video.min_duration'), min((int) Config::get('pipeline.video.max_duration'), $seconds));
     }
 }

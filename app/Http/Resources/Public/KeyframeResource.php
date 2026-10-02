@@ -51,6 +51,7 @@ class KeyframeResource extends JsonResource
                 'update' => route('public.shots.keyframes.update', [$this->shot->project, $this->shot, $this->resource]),
                 'tweak' => route('public.shots.keyframes.tweak', [$this->shot->project, $this->shot, $this->resource]),
                 'chooseRender' => route('public.shots.keyframes.render', [$this->shot->project, $this->shot, $this->resource]),
+                'destroy' => route('public.shots.keyframes.destroy', [$this->shot->project, $this->shot, $this->resource]),
             ],
         ];
     }

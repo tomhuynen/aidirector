@@ -29,7 +29,7 @@
             type="number"
             min="2"
             max="30"
-            :placeholder="String(project.defaultDuration)"
+            :placeholder="$t('Automatic')"
             class="block w-full rounded-lg border border-input bg-background px-4 py-3 text-[15px] placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           />
           <InputError :message="form.errors.duration" />
@@ -47,7 +47,7 @@
         :error="form.errors.notes"
       />
 
-      <fieldset v-if="elements.length > 0" class="mt-6 space-y-3">
+      <fieldset v-if="elements.length > 0 || project.links?.elementsCreate" class="mt-6 space-y-3">
         <legend class="text-[15px] font-medium">{{ $t('Do you have a preference for who or where?') }}</legend>
         <div class="flex gap-2">
           <Button type="button" :variant="choosing ? 'outline' : 'default'" @click="choosing = false">
@@ -62,44 +62,12 @@
           <p class="text-sm text-muted-foreground">
             {{ $t('Every storyline uses the people, places and objects you pick.') }}
           </p>
-          <div v-for="type in typesInUse" :key="type.value" class="space-y-2">
-            <h3 class="flex items-center gap-2 text-sm font-semibold">
-              <component :is="iconFor(type.value)" class="size-4 text-muted-foreground" />
-              {{ type.plural }}
-            </h3>
-            <ul class="grid grid-cols-4 gap-3 sm:grid-cols-6">
-              <li v-for="element in ofType(type.value)" :key="element.id" class="aspect-square">
-                <button
-                  type="button"
-                  :title="element.name"
-                  :aria-label="element.name"
-                  :aria-pressed="isPicked(element.id)"
-                  :class="
-                    cn(
-                      'relative block size-full overflow-hidden rounded-xl border border-border bg-paper-deep transition',
-                      isPicked(element.id) ? 'border-signal ring-4 ring-signal/40' : 'hover:border-muted-foreground/60',
-                    )
-                  "
-                  @click="toggle(element.id)"
-                >
-                  <img
-                    v-if="element.imageUrl"
-                    :src="element.imageUrl"
-                    :alt="element.name"
-                    class="size-full object-cover"
-                    loading="lazy"
-                  />
-                  <Placeholder v-else class="size-full rounded-none border-0 bg-background" />
-                  <span
-                    v-if="isPicked(element.id)"
-                    class="absolute top-1.5 left-1.5 flex size-6 items-center justify-center rounded-full bg-signal text-primary-foreground"
-                  >
-                    <Check class="size-3.5" />
-                  </span>
-                </button>
-              </li>
-            </ul>
-          </div>
+          <ElementPicker
+            v-model="form.preferredElements"
+            :elements="elements"
+            :types="elementTypes"
+            :create-url="project.links?.elementsCreate"
+          />
           <InputError :message="form.errors.preferredElements" />
         </template>
       </fieldset>
@@ -123,13 +91,12 @@ import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import InputError from '@public:components/Form/InputError.vue'
 import { store } from '@routes/public/shots'
-import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { ArrowRight, Box, Check, LoaderCircle, MapPin, User } from 'lucide-vue-next'
-import { computed, ref, useId } from 'vue'
+import { ArrowRight, LoaderCircle } from 'lucide-vue-next'
+import { ref, useId } from 'vue'
 
+import ElementPicker from '../ElementPicker.vue'
 import BriefField from './BriefField.vue'
-import Placeholder from './Placeholder.vue'
 
 type BriefForm = {
   takeaway: string
@@ -158,26 +125,7 @@ const form = useForm<BriefForm>({
   preferredElements: [...(props.shot.preferredElements ?? [])],
 })
 
-const ofType = (type: string) => props.elements.filter((element) => element.type === type)
-
-/**
- * Only the categories that have something to pick.
- */
-const typesInUse = computed(() => props.elementTypes.filter((type) => ofType(type.value).length > 0))
-
-const icons: Record<string, typeof User> = { person: User, place: MapPin, object: Box }
-
-const iconFor = (type: string) => icons[type] ?? Box
-
 const choosing = ref(form.preferredElements.length > 0)
-
-const isPicked = (id: string) => form.preferredElements.includes(id)
-
-const toggle = (id: string) => {
-  form.preferredElements = isPicked(id)
-    ? form.preferredElements.filter((picked) => picked !== id)
-    : [...form.preferredElements, id]
-}
 
 const submit = () => {
   form

@@ -8,6 +8,7 @@ use App\Enums\ShotStatus;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Video\OpenRouterVideoClient;
+use App\Support\Video\SilentVideo;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -65,7 +66,7 @@ class PollVideo implements ShouldQueue
             throw new RuntimeException($status['error'] ?? "The video job ended as {$state}.");
         }
 
-        $shot->addMediaFromString($videos->download($this->jobId))
+        $shot->addMediaFromString(app(SilentVideo::class)->strip($videos->download($this->jobId)))
             ->usingFileName("shot-{$shot->position}.mp4")
             ->toMediaCollection(Shot::VIDEO);
 

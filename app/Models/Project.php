@@ -49,6 +49,9 @@ class Project extends Model implements HasMedia
      */
     public const COVER = 'cover';
 
+    /** The cover, gently animated as a seamless loop for the header. */
+    public const COVER_LOOP = 'cover_loop';
+
     /**
      * The size every reference is sent to the models at, whatever arrived.
      */
@@ -246,6 +249,7 @@ class Project extends Model implements HasMedia
         $this->addMediaCollection(self::CONTENT_REFERENCES)->acceptsMimeTypes(self::REFERENCE_MIME_TYPES);
         $this->addMediaCollection(self::STYLE_REFERENCES)->acceptsMimeTypes(self::REFERENCE_MIME_TYPES);
         $this->addMediaCollection(self::COVER)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::COVER_LOOP)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }
 
     /**

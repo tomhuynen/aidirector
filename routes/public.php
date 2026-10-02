@@ -14,6 +14,7 @@ use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController
 use App\Http\Controllers\Public\Projects\CoverController as ProjectCoverController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
+use App\Http\Controllers\Public\Projects\Elements\DestroyController as ElementDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
 use App\Http\Controllers\Public\Projects\Elements\RoundController as ElementRoundController;
 use App\Http\Controllers\Public\Projects\Elements\StoreController as ElementStoreController;
@@ -24,13 +25,14 @@ use App\Http\Controllers\Public\Projects\FormatController as ProjectFormatContro
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
 use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
-use App\Http\Controllers\Public\Projects\UpdateController as ProjectUpdateController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
+use App\Http\Controllers\Public\Shots\Keyframes\DestroyController as KeyframeDestroyController;
 use App\Http\Controllers\Public\Shots\Keyframes\FirstController as FirstKeyframeController;
 use App\Http\Controllers\Public\Shots\Keyframes\GenerateController as KeyframesGenerateController;
 use App\Http\Controllers\Public\Shots\Keyframes\ImageController as KeyframeImageController;
 use App\Http\Controllers\Public\Shots\Keyframes\RenderController as KeyframeRenderController;
+use App\Http\Controllers\Public\Shots\Keyframes\ReorderController as KeyframeReorderController;
 use App\Http\Controllers\Public\Shots\Keyframes\StoreController as KeyframeStoreController;
 use App\Http\Controllers\Public\Shots\Keyframes\TweakController as KeyframeTweakController;
 use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpdateController;
@@ -72,13 +74,10 @@ Route::middleware('auth:director')->group(function () {
         ->group(function () {
             Route::get('/', [ProjectIndexController::class, 'index'])->name('index');
             Route::get('create', [ProjectCreateController::class, 'view'])->name('create');
-            Route::post('create', [ProjectUpdateController::class, 'store'])->name('store');
             Route::post('create/chat', [ProjectChatController::class, 'store'])->name('chat');
             Route::get('{project}', [ProjectViewController::class, 'view'])->name('view');
             Route::get('{project}/setup', [ProjectCreateController::class, 'resume'])->name('setup');
             Route::get('{project}/cover', [ProjectCoverController::class, 'show'])->name('cover.view');
-            Route::get('{project}/update', [ProjectUpdateController::class, 'update'])->name('update');
-            Route::post('{project}/update', [ProjectUpdateController::class, 'store']);
             Route::post('{project}/format', [ProjectFormatController::class, 'store'])->name('format');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
@@ -92,6 +91,7 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{element}', [ElementViewController::class, 'view'])->name('view');
             Route::post('{element}', [ElementUpdateController::class, 'store'])->name('update');
             Route::post('{element}/version', [ElementVersionController::class, 'store'])->name('version');
+            Route::delete('{element}', [ElementDestroyController::class, 'destroy'])->name('destroy');
         });
 
     Route::prefix('projects/{project}/elements/rounds')
@@ -126,6 +126,8 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/storyline/generate', [StorylineGenerateController::class, 'store'])->name('storyline.generate');
             Route::delete('{shot}/storyline/choose', [StorylineChooseController::class, 'destroy'])->name('storyline.reopen');
             Route::post('{shot}/keyframes', [KeyframeStoreController::class, 'store'])->name('keyframes.store');
+            Route::post('{shot}/keyframes/reorder', [KeyframeReorderController::class, 'store'])->name('keyframes.reorder');
+            Route::delete('{shot}/keyframes/{keyframe}', [KeyframeDestroyController::class, 'destroy'])->name('keyframes.destroy');
             Route::post('{shot}/keyframes/generate', [KeyframesGenerateController::class, 'store'])->name('keyframes.generate');
             Route::post('{shot}/keyframes/first/choose', [FirstKeyframeController::class, 'choose'])->name('keyframes.first.choose');
             Route::post('{shot}/keyframes/first/more', [FirstKeyframeController::class, 'more'])->name('keyframes.first.more');

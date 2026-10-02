@@ -1,12 +1,6 @@
 <template>
   <Page :eyebrow="project.purposeLabel" :title="project.title" :description="project.description ?? undefined">
     <template #actions>
-      <Button as-child variant="outline">
-        <Link :href="project.links?.update ?? '#'">
-          <Pencil class="size-4" />
-          {{ $t('Edit project') }}
-        </Link>
-      </Button>
       <Button as-child>
         <Link :href="project.links?.editor ?? project.links?.shotsCreate ?? '#'">
           {{ shots.length > 0 ? $t('Open editor') : $t('Add the first shot') }}
@@ -17,7 +11,21 @@
 
     <!-- The cast and sets group picture, or the chosen style sheet when the cast was skipped. -->
     <figure v-if="headerImage" class="overflow-hidden rounded-xl border border-border bg-card">
+      <!-- Once made, the cover loops gently; the still stays for viewers who prefer less motion. -->
+      <video
+        v-if="project.coverLoopUrl && !reducedMotion"
+        :src="project.coverLoopUrl"
+        :poster="headerImage"
+        autoplay
+        muted
+        loop
+        playsinline
+        disablepictureinpicture
+        aria-hidden="true"
+        class="h-48 w-full object-cover md:h-64"
+      />
       <img
+        v-else
         :src="headerImage"
         :alt="
           project.coverUrl
@@ -68,7 +76,7 @@ import CastAndSets from '@public:components/CastAndSets.vue'
 import FormatPicker from '@public:components/FormatPicker.vue'
 import Page from '@public:components/Page.vue'
 import { Button } from '@shared:ui/button'
-import { ArrowRight, ExternalLink, Pencil } from 'lucide-vue-next'
+import { ArrowRight, ExternalLink } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 defineOptions({
@@ -78,4 +86,6 @@ defineOptions({
 const props = defineProps<Inertia.Pages.Projects.View>()
 
 const headerImage = computed(() => props.project.coverUrl ?? props.project.styleReferenceUrl)
+
+const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 </script>

@@ -20,8 +20,9 @@ class OpenRouterVideoClient
      * Submit a generation and return the provider's job id.
      *
      * @param  list<string>  $references  Reference images as data URLs.
+     * @param  array<'first_frame'|'last_frame', string>  $frames  Images the clip must start or end on, as data URLs.
      */
-    public function submit(string $model, string $prompt, array $references, int $duration, string $aspectRatio, string $resolution): string
+    public function submit(string $model, string $prompt, array $references, int $duration, string $aspectRatio, string $resolution, array $frames = []): string
     {
         $response = $this->client()->post('videos', array_filter([
             'model' => $model,
@@ -34,6 +35,11 @@ class OpenRouterVideoClient
                 'type' => 'image_url',
                 'image_url' => ['url' => $url],
             ], $references) ?: null,
+            'frame_images' => array_map(fn(string $url, string $type) => [
+                'type' => 'image_url',
+                'image_url' => ['url' => $url],
+                'frame_type' => $type,
+            ], array_values($frames), array_keys($frames)) ?: null,
         ], fn(mixed $value) => $value !== null))->throw();
 
         return (string) $response->json('id');

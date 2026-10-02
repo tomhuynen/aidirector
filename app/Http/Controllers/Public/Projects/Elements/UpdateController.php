@@ -14,14 +14,20 @@ use Illuminate\Support\Facades\Gate;
 class UpdateController
 {
     /**
-     * Save the name and description. A change request edits the picture; a
-     * new description without one draws it again.
+     * Save the name and description. A change request edits the picture,
+     * drawing in any elements picked to add; a new description without one
+     * draws it again.
      */
     public function store(ElementUpdateRequest $request, Project $project, Element $element)
     {
         Gate::authorize(ProjectPolicy::UPDATE, $project);
 
+        $included = $request->included()->reject(fn(Element $other) => $other->is($element))->values();
         $change = trim((string) $request->validated('change'));
+
+        if ($change === '' && $included->isNotEmpty()) {
+            $change = 'Add ' . $included->pluck('name')->join(', ', ' and ') . ' to it.';
+        }
         $redraw = $change === '' && trim($request->validated('description')) !== trim($element->description);
 
         $element->fill($request->safe()->only(['name', 'description']));
@@ -30,7 +36,7 @@ class UpdateController
             $element->forceFill(['rendering' => true, 'render_error' => null]);
             $element->save();
 
-            UpdateElementImage::dispatch($element, $change !== '' ? $change : null);
+            UpdateElementImage::dispatch($element, $change !== '' ? $change : null, $included->modelKeys());
         } else {
             $element->save();
         }

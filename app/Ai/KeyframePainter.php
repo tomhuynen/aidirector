@@ -8,6 +8,7 @@ use App\Ai\Briefs\KeyframeImageBrief;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
+use App\Support\Images\OpenRouterImageClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Files\Image as ImageFile;
@@ -24,7 +25,7 @@ class KeyframePainter
 {
     /**
      * With `$choose` off the render is only added as a version, for options the director picks from later.
-     * The image model defaults to the one that creates keyframes; tweaks pass the edit model.
+     * The image model defaults to the keyframe model; tweaks pass the edit model.
      *
      * @param  array<int, StoredImage>  $attachments
      *
@@ -33,18 +34,13 @@ class KeyframePainter
     public function paint(Keyframe $keyframe, string $prompt, array $attachments = [], bool $choose = true, ?string $model = null): Media
     {
         $shot = $keyframe->shot;
-        $model ??= (string) Config::get('pipeline.models.image');
+        $model ??= (string) Config::get('pipeline.models.keyframe');
         $started = hrtime(true);
 
         try {
-            $response = Image::of($prompt)
-                ->size($shot->aspectRatio()->value)
-                ->quality(Config::get('pipeline.image_quality'))
-                ->attachments($attachments)
-                ->timeout(180)
-                ->generate('openrouter', $model);
-
-            $image = app(ImageReplies::class)->firstImage($response);
+            $result = OpenRouterImageClient::serves($model)
+                ? $this->viaImagesEndpoint($model, $prompt, $attachments, $shot->aspectRatio()->value)
+                : $this->viaChat($model, $prompt, $attachments, $shot->aspectRatio()->value);
         } catch (Throwable $exception) {
             $keyframe->generations()->create([
                 'director_id' => $shot->project->director_id,
@@ -62,21 +58,21 @@ class KeyframePainter
         $keyframe->generations()->create([
             'director_id' => $shot->project->director_id,
             'kind' => 'image',
-            'provider' => $response->meta->provider ?? 'openrouter',
-            'model' => $response->meta->model ?? $model,
+            'provider' => $result['provider'],
+            'model' => $result['model'],
             'prompt' => $prompt,
             'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
-            'usage' => $response->usage->toArray(),
+            'usage' => $result['usage'],
         ]);
 
-        $extension = match ($image->mime()) {
+        $extension = match ($result['mime']) {
             'image/jpeg' => 'jpg',
             'image/webp' => 'webp',
             default => 'png',
         };
 
         $render = $keyframe
-            ->addMediaFromString($image->content())
+            ->addMediaFromString($result['content'])
             ->usingFileName("keyframe-{$keyframe->position}.{$extension}")
             ->toMediaCollection(Keyframe::RENDERS);
 
@@ -85,6 +81,47 @@ class KeyframePainter
         }
 
         return $render;
+    }
+
+    /**
+     * @param  array<int, StoredImage>  $attachments
+     * @return array{content: string, mime: string, provider: string, model: string, usage: array<string, mixed>}
+     */
+    private function viaChat(string $model, string $prompt, array $attachments, string $aspectRatio): array
+    {
+        $response = Image::of($prompt)
+            ->size($aspectRatio)
+            ->quality(Config::get('pipeline.image_quality'))
+            ->attachments($attachments)
+            ->timeout(180)
+            ->generate('openrouter', $model);
+
+        $image = app(ImageReplies::class)->firstImage($response);
+
+        return [
+            'content' => $image->content(),
+            'mime' => $image->mime(),
+            'provider' => $response->meta->provider ?? 'openrouter',
+            'model' => $response->meta->model ?? $model,
+            'usage' => $response->usage->toArray(),
+        ];
+    }
+
+    /**
+     * @param  array<int, StoredImage>  $attachments
+     * @return array{content: string, mime: string, provider: string, model: string, usage: array<string, mixed>}
+     */
+    private function viaImagesEndpoint(string $model, string $prompt, array $attachments, string $aspectRatio): array
+    {
+        $image = app(OpenRouterImageClient::class)->generate($model, $prompt, $attachments, $aspectRatio);
+
+        return [
+            'content' => $image['content'],
+            'mime' => $image['mime'],
+            'provider' => 'openrouter',
+            'model' => $model,
+            'usage' => array_filter(['cost' => $image['cost']], fn(mixed $value) => $value !== null),
+        ];
     }
 
     /**

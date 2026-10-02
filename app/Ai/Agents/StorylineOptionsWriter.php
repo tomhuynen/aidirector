@@ -43,7 +43,7 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
             Project: {$project->title}
             Project description: {$project->description}
             Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.
-            Format: {$this->shot->aspectRatio()->value}, about {$this->shot->durationInSeconds()} seconds for this shot.
+            Format: {$this->shot->aspectRatio()->value}. {$this->lengthNote()}
 
             Cast and sets of this project, recurring people, places and objects:
             {$project->elementsBrief()}
@@ -51,7 +51,7 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
             How to use the cast and sets:
             - Tell the stories with these. Refer to each one by its name from the list, used as a noun with "the", as in "the visitor in hi-vis walks onto the quay". Never write "a man", "a woman" or "a person" for someone from the list, and never double the article.
             - When the director names people, places or objects they want in the shot, every storyline uses all of them.
-            - Introduce a new person, place or recurring object only when a story needs one worth keeping for other shots, and describe it once in a few words. Small props such as a cigarette, a sign or a bin are plain words, never new cast.
+            - The people always come from this list; never introduce a new person. Introduce a new place or recurring object only when a story needs one worth keeping for other shots, and describe it once in a few words. Small props such as a cigarette, a sign or a bin are plain words, never new cast.
 
             {$this->otherShots()}
 
@@ -154,5 +154,14 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
     private function storylineAngles(): string
     {
         return PurposeBrief::storylineAngles($this->shot->purpose());
+    }
+
+    private function lengthNote(): string
+    {
+        if ($this->shot->duration !== null) {
+            return "The shot is about {$this->shot->duration} seconds.";
+        }
+
+        return 'The shot is short: between ' . Config::get('pipeline.video.min_duration') . ' and ' . Config::get('pipeline.video.max_duration') . ' seconds, as long as its one action needs.';
     }
 }

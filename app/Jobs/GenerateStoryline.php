@@ -59,7 +59,10 @@ class GenerateStoryline implements ShouldQueue
         $shot->forgetKeyframes();
 
         $shot->forceFill([
-            'storyline' => ['keyframes' => array_values($response['keyframes'])],
+            'storyline' => [
+                'framing' => $response['framing'],
+                'keyframes' => array_values($response['keyframes']),
+            ],
             'storyline_error' => null,
             'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
         ])->save();

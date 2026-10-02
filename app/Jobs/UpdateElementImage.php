@@ -32,6 +32,8 @@ class UpdateElementImage implements ShouldQueue
     public function __construct(
         public readonly Element $element,
         public readonly ?string $instruction = null,
+        /** @var list<int> ids of the project's elements to draw into this one */
+        public readonly array $includes = [],
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
@@ -40,9 +42,11 @@ class UpdateElementImage implements ShouldQueue
     {
         $element = $this->element->load('project');
 
+        $includes = $this->includes === [] ? [] : $element->project->elements()->whereKey($this->includes)->with('media')->get()->all();
+
         filled($this->instruction) && $element->reference() !== null
-            ? $painter->edit($element, (string) $this->instruction)
-            : $painter->paint($element);
+            ? $painter->edit($element, (string) $this->instruction, $includes)
+            : $painter->paint($element, includes: $includes);
 
         $element->forceFill(['rendering' => false, 'render_error' => null])->save();
 

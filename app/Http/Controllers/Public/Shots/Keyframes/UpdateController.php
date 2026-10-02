@@ -53,6 +53,6 @@ class UpdateController
 
         $keyframes[$index] = [...$keyframes[$index], ...$plan];
 
-        $shot->forceFill(['storyline' => ['keyframes' => $keyframes]])->save();
+        $shot->replacePlannedKeyframes($keyframes);
     }
 }

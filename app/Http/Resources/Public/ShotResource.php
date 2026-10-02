@@ -46,6 +46,12 @@ class ShotResource extends JsonResource
             'aspectRatioOverride' => $this->aspect_ratio_override,
             /** @var int|null */
             'duration' => $this->duration,
+            /**
+             * The length the shot renders at: the director's, the planner's or the project default.
+             *
+             * @var int
+             */
+            'seconds' => $this->durationInSeconds(),
             /** @var array<int, array{title: string, storyline: string}>|null */
             'storylineOptions' => $this->storyline_options,
             /** @var array{title: string, storyline: string}|null */
@@ -79,6 +85,7 @@ class ShotResource extends JsonResource
                 'storylineReopen' => route('public.shots.storyline.reopen', [$this->project, $this->resource]),
                 'keyframesGenerate' => route('public.shots.keyframes.generate', [$this->project, $this->resource]),
                 'keyframesStore' => route('public.shots.keyframes.store', [$this->project, $this->resource]),
+                'keyframesReorder' => route('public.shots.keyframes.reorder', [$this->project, $this->resource]),
                 'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
                 'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),

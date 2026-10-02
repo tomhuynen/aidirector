@@ -65,8 +65,8 @@ class KeyframePlanBenchmark extends Benchmark
         return [
             'storyline' => 'The keyframes tell the chosen storyline from start to end and land the takeaway, with the fewest keyframes that do so.',
             'readable' => 'Every keyframe is one clearly readable state (pose, position, object state), not motion.',
-            'consistent' => 'The subject, setting, backdrop and objects are described with the same wording in every image prompt.',
-            'staging' => 'Every prompt follows the staging rules: calm backdrop directly behind the character, nothing crossing the figure, at most two context objects, plain ground.',
+            'consistent' => 'The subject, the spot in the place and the objects are described with the same wording in every image prompt.',
+            'staging' => 'Every prompt plays at one spot that belongs to the place, with no invented wall in front of it, nothing crossing a figure, at most two context objects and plain ground; the shot size suits what the shot communicates.',
             'rules' => 'Prompts are 50 to 90 words, present tense, no style words, the elements list only names cast and sets that are visible, no camera language, no text, English.',
         ];
     }

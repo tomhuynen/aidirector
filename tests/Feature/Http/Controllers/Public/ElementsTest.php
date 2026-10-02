@@ -18,9 +18,12 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Models\Upload;
 use Illuminate\Bus\PendingBatch;
+use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Ai\Image;
@@ -96,7 +99,7 @@ describe('writing', function () {
         }
 
         expect((string) (new StorylineWriter($shot))->instructions())->toContain('never force an existing one into a story where it does not belong')
-            ->and((string) (new StorylineOptionsWriter($shot))->instructions())->toContain('Introduce a new person, place or recurring object only when a story needs one worth keeping');
+            ->and((string) (new StorylineOptionsWriter($shot))->instructions())->toContain('never introduce a new person. Introduce a new place or recurring object only when a story needs one worth keeping');
 
         expect((string) (new StorylineWriter($shot))->instructions())->toContain('Elements: the exact names of the cast and sets listed above');
     });
@@ -124,8 +127,10 @@ describe('linking', function () {
         $markBytes = Storage::disk(Disk::TENANT->value)->get($mark->reference()->getPathRelativeToRoot());
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
-            && $prompt->contains("Cast and sets in this keyframe, draw them exactly as described:\n- Mark, the visitor (person)")
+            && $prompt->contains("Cast and sets in this keyframe:\n- Mark, the visitor (person): looks exactly like its attached picture.")
+            && ! $prompt->contains('A middle-aged man')
             && $prompt->contains('The first attached image is the reference for Mark, the visitor (person)')
+            && $prompt->contains('The picture decides how Mark, the visitor looks, whatever any other wording says.')
             && $prompt->contains('The second attached image is keyframe 1 of this shot')
             && $prompt->attachments->count() === 2
             && $prompt->attachments->first()->content() === $markBytes);
@@ -295,6 +300,154 @@ describe('adding', function () {
         Queue::assertPushed(UpdateElementImage::class, fn(UpdateElementImage $job) => $job->element->is($gate) && $job->instruction === null);
     });
 
+    it('keeps an uploaded photo on the element and draws its picture from it', function () {
+        Storage::fake(config('uploads.disk'));
+        Image::fake(fn() => elementPng());
+
+        $upload = Upload::factory()->create();
+        Storage::disk(config('uploads.disk'))->put($upload->path, base64_decode(elementPng()));
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'object', 'name' => 'Life jacket', 'description' => 'An orange life jacket.', 'photo' => $upload->sqid])
+            ->assertSessionHasNoErrors();
+
+        $jacket = Element::query()->where('name', 'Life jacket')->firstOrFail();
+
+        expect($jacket->getFirstMedia(Element::PHOTO))->not->toBeNull()
+            ->and(Upload::query()->find($upload->id))->toBeNull()
+            ->and($jacket->fresh()->reference())->not->toBeNull();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('is a photo of the real Life jacket. Use it only for what it is: shapes, markings and colours.')
+            && $prompt->contains('Do not copy its realism, lighting or proportions')
+            && $prompt->attachments->count() >= 1);
+    });
+
+    it('draws chosen elements into the new one', function () {
+        Image::fake(fn() => elementPng());
+
+        $briefcase = withReference(Element::factory()->for($this->project)->create(['type' => 'object', 'name' => 'Navy briefcase', 'description' => 'A navy briefcase.']));
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'person', 'name' => 'CEO', 'description' => 'A CEO in a suit.', 'includes' => [$briefcase->sqid]])
+            ->assertSessionHasNoErrors();
+
+        $briefcaseBytes = Storage::disk(Disk::TENANT->value)->get($briefcase->reference()->getPathRelativeToRoot());
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Show these together with CEO, as part of it, and nothing else: Navy briefcase.')
+            && $prompt->contains('attached image is Navy briefcase (object). Draw it exactly like it')
+            && $prompt->attachments->contains(fn($image) => $image->content() === $briefcaseBytes));
+    });
+
+    it('rejects elements from another project to draw in', function () {
+        Queue::fake();
+        $foreign = Element::factory()->for(Project::factory())->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'person', 'name' => 'CEO', 'description' => 'A CEO.', 'includes' => [$foreign->sqid]])
+            ->assertSessionHasErrors('includes');
+
+        expect(Element::query()->where('name', 'CEO')->exists())->toBeFalse();
+    });
+
+    it('offers the cast and sets to draw in on the create page', function () {
+        $mark = withReference(Element::factory()->for($this->project)->create());
+
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.elements.create', [$this->project, 'type' => 'person']))
+            ->assertInertia(fn($page) => $page->where('elements.0.id', $mark->sqid)->has('elementTypes', 3));
+    });
+
+    it('draws picked elements into the picture through a change', function () {
+        config(['pipeline.models.image_edit' => 'openai/gpt-5.4-image-2']);
+        Image::fake(fn() => elementPng());
+
+        $mark = withReference(Element::factory()->for($this->project)->create());
+        $briefcase = withReference(Element::factory()->for($this->project)->create(['type' => 'object', 'name' => 'Navy briefcase', 'description' => 'A navy briefcase.']));
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.update', [$this->project, $mark]), ['name' => $mark->name, 'description' => $mark->description, 'change' => '', 'includes' => [$briefcase->sqid]])
+            ->assertSessionHasNoErrors();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'openai/gpt-5.4-image-2'
+            && $prompt->contains('Edit the first attached image.')
+            && $prompt->contains('Change only this: Add Navy briefcase to it.')
+            && $prompt->contains('The second attached image is Navy briefcase (object). Draw it into the picture exactly like it')
+            && $prompt->attachments->count() === 2);
+    });
+
+    it('matches the style of a cast member already drawn, chosen by itself', function () {
+        Image::fake(fn() => elementPng());
+
+        $engineer = withReference(Element::factory()->for($this->project)->create(['name' => 'Female engineer']));
+        withReference(Element::factory()->for($this->project)->place()->create());
+        $ceo = Element::factory()->for($this->project)->create(['name' => 'CEO', 'rendering' => true]);
+
+        (new UpdateElementImage($ceo))->handle(app(ElementPainter::class));
+
+        $anchorBytes = Storage::disk(Disk::TENANT->value)->get($engineer->reference()->getPathRelativeToRoot());
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('The first attached image is Female engineer, already drawn for this project. Draw CEO in exactly the same style')
+            && $prompt->contains("Do not copy Female engineer's face, clothing or pose.")
+            && $prompt->attachments->count() === 1
+            && $prompt->attachments->first()->content() === $anchorBytes);
+    });
+
+    it('draws a person from a photo in two steps: a drawing first, then the project style', function () {
+        Storage::fake(config('uploads.disk'));
+        config(['pipeline.models.photo_drawing' => 'bytedance-seed/seedream-5-0-flash', 'pipeline.models.image' => 'google/gemini-3.1-flash-image-preview']);
+        Image::fake(fn() => elementPng());
+        $drawing = elementPng();
+        Http::fake(['openrouter.ai/api/v1/images' => Http::response(['data' => [['b64_json' => $drawing, 'media_type' => 'image/png']], 'usage' => ['cost' => 0.018]])]);
+
+        withReference(Element::factory()->for($this->project)->create(['name' => 'Female engineer']));
+        $upload = Upload::factory()->create();
+        Storage::disk(config('uploads.disk'))->put($upload->path, base64_decode(elementPng()));
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'person', 'name' => 'Tom', 'description' => 'A bald man in a black T-shirt.', 'photo' => $upload->sqid])
+            ->assertSessionHasNoErrors();
+
+        $tom = Element::query()->where('name', 'Tom')->firstOrFail();
+
+        Http::assertSent(fn(HttpRequest $request) => $request['model'] === 'bytedance-seed/seedream-5-0-flash'
+            && str_contains($request['prompt'], 'realistic adult proportions')
+            && count($request['input_references']) === 1);
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'google/gemini-3.1-flash-image-preview'
+            && $prompt->contains('attached image is a drawing of Tom. Take only who they are from it')
+            && $prompt->contains('Take the proportions, head size and body shape from Female engineer')
+            && $prompt->attachments->contains(fn($image) => $image->content() === base64_decode($drawing)));
+
+        expect($tom->generations()->where('model', 'bytedance-seed/seedream-5-0-flash')->first()->usage)->toBe(['cost' => 0.018])
+            ->and($tom->fresh()->reference())->not->toBeNull();
+    });
+
+    it('draws a place or object from a photo in one step', function () {
+        Storage::fake(config('uploads.disk'));
+        Image::fake(fn() => elementPng());
+        Http::fake();
+
+        $upload = Upload::factory()->create();
+        Storage::disk(config('uploads.disk'))->put($upload->path, base64_decode(elementPng()));
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'place', 'name' => 'Quay', 'description' => 'A concrete quay.', 'photo' => $upload->sqid])
+            ->assertSessionHasNoErrors();
+
+        Http::assertNothingSent();
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('is a photo of the real Quay. Use it only for what it is'));
+    });
+
+    it('rejects a photo that is not a staged image', function () {
+        Queue::fake();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'object', 'name' => 'Crate', 'description' => 'A crate.', 'photo' => 'upl_missing'])
+            ->assertSessionHasErrors('photo');
+
+        expect(Element::query()->where('name', 'Crate')->exists())->toBeFalse();
+    });
+
     it('validates the category, name and description', function () {
         actingAs($this->director, 'director')
             ->post(route('public.projects.elements.store', $this->project), ['type' => 'vehicle', 'name' => '', 'description' => ''])
@@ -319,6 +472,37 @@ describe('adding', function () {
                     ['value' => 'object', 'label' => 'Object', 'plural' => 'Objects'],
                 ])
                 ->where('project.links.elementsStore', route('public.projects.elements.store', $this->project)));
+    });
+});
+
+describe('deleting', function () {
+    it('deletes an element with its pictures and keeps the keyframes that showed it', function () {
+        $mark = withReference(Element::factory()->for($this->project)->create());
+        $shot = castShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
+        $keyframe = Keyframe::factory()->for($shot)->create();
+        $keyframe->elements()->attach($mark);
+        $picture = $mark->reference()->getPathRelativeToRoot();
+
+        actingAs($this->director, 'director')
+            ->delete(route('public.projects.elements.destroy', [$this->project, $mark]))
+            ->assertRedirect(route('public.projects.view', $this->project));
+
+        expect(Element::query()->find($mark->id))->toBeNull()
+            ->and($keyframe->fresh())->not->toBeNull()
+            ->and($keyframe->elements()->count())->toBe(0);
+
+        Storage::disk(Disk::TENANT->value)->assertMissing($picture);
+    });
+
+    it('forbids deleting another director\'s element', function () {
+        $project = Project::factory()->create();
+        $element = Element::factory()->for($project)->create();
+
+        actingAs($this->director, 'director')
+            ->delete(route('public.projects.elements.destroy', [$project, $element]))
+            ->assertForbidden();
+
+        expect(Element::query()->find($element->id))->not->toBeNull();
     });
 });
 
@@ -397,12 +581,13 @@ describe('element page', function () {
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'openai/gpt-5.4-image-2'
             && $prompt->contains('Change only this: Give him glasses')
+            && $prompt->contains(ElementPainter::NO_TEXT)
             && $prompt->attachments->count() === 1
             && $prompt->attachments->first()->path === $current);
     });
 
-    it('draws a new element from its description with the edit model', function () {
-        config(['pipeline.models.image_edit' => 'openai/gpt-5.4-image-2']);
+    it('draws a new element from its description with the image model', function () {
+        config(['pipeline.models.image' => 'google/gemini-3.1-flash-image-preview']);
         Image::fake(fn() => elementPng());
 
         $gate = Element::factory()->for($this->project)->place()->create(['rendering' => true]);
@@ -411,7 +596,8 @@ describe('element page', function () {
 
         expect($gate->fresh())->rendering->toBeFalse()->reference()->not->toBeNull();
 
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'openai/gpt-5.4-image-2'
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'google/gemini-3.1-flash-image-preview'
+            && $prompt->contains('not even words from the description')
             && $prompt->contains('Show only this place')
             && $prompt->contains('Main gate (place)'));
     });

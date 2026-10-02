@@ -119,17 +119,41 @@
         {{ $t('Render from description') }}
       </Button>
     </form>
+
+    <div v-if="keyframe.destroyUrl" class="mt-auto border-t border-border pt-6">
+      <ConfirmDelete
+        :action="keyframe.destroyUrl"
+        :title="$t('Delete keyframe :n?', { n: String(index + 1) })"
+        :description="$t('The keyframe and all its versions are removed. The keyframes after it move up.')"
+      >
+        <template #trigger>
+          <Button
+            type="button"
+            variant="outline"
+            class="w-full text-destructive hover:text-destructive"
+            :disabled="!canDelete"
+          >
+            <Trash2 class="size-4" />
+            {{ $t('Delete keyframe') }}
+          </Button>
+        </template>
+      </ConfirmDelete>
+      <p v-if="!canDelete" class="mt-2 text-sm text-muted-foreground">
+        {{ $t('A keyframe can be deleted when all keyframes are drawn and the shot has more than one.') }}
+      </p>
+    </div>
   </aside>
 </template>
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
+import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Label } from '@shared:ui/label'
 import { Textarea } from '@shared:ui/textarea'
-import { LoaderCircle, RefreshCw, Wand2 } from 'lucide-vue-next'
+import { LoaderCircle, RefreshCw, Trash2, Wand2 } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 import type { PanelKeyframe } from './KeyframesPanel.vue'
@@ -137,6 +161,7 @@ import type { PanelKeyframe } from './KeyframesPanel.vue'
 const props = defineProps<{
   keyframe: PanelKeyframe
   index: number
+  canDelete: boolean
 }>()
 
 const hasRender = computed(() => props.keyframe.renders.length > 0)

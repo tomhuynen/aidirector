@@ -6,6 +6,7 @@ namespace App\Ai\Briefs;
 
 use App\Ai\KeyframeReferences;
 use App\Enums\ElementType;
+use App\Enums\ShotSize;
 use App\Models\Shot;
 
 /**
@@ -32,17 +33,35 @@ class KeyframeImageBrief
         ];
 
         if ($references->elements !== []) {
-            $lines[] = 'Cast and sets in this keyframe, draw them exactly as described:';
+            $pictured = collect($references->elementImages)->map(fn(array $entry) => $entry['element']->getKey())->all();
+
+            $lines[] = 'Cast and sets in this keyframe:';
 
             foreach ($references->elements as $element) {
-                $lines[] = '- ' . $element->promptLine();
+                $lines[] = in_array($element->getKey(), $pictured, true)
+                    ? "- {$element->name} ({$element->type->value}): looks exactly like its attached picture."
+                    : '- ' . $element->promptLine();
             }
 
             $lines[] = '';
         }
 
-        $lines[] = 'Staging: the character stands in the foreground in front of one calm, even backdrop surface that fills the area directly behind them from head to feet, such as a facade, a container side, a fence panel, a wall, or open sky. Nothing crosses or touches the figure: no railings, pillars, poles, barriers or machines behind or in front of the character. The wider setting may be visible around and above the backdrop and in the distance, simpler than the character. Any sign or context object sits on the backdrop beside the character, clearly readable, not touching them. The ground near the feet is plain. Show the character fully in frame with space around them.';
-        $lines[] = 'No text, captions, logos or watermarks in the image.';
+        $framing = $shot->storylineFraming();
+        $size = $framing['size'] ?? ShotSize::FULL;
+
+        $lines[] = 'Framing: ' . $size->framing();
+
+        if (filled($framing['spot'] ?? null)) {
+            $lines[] = "Spot: {$framing['spot']}";
+        }
+
+        if (filled($framing['light'] ?? null)) {
+            $lines[] = "Light: {$framing['light']}. This overrides the lighting in the visual style.";
+        }
+
+        $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';
+        $lines[] = 'Staging: the people are inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches a figure: no railings, pillars, poles, barriers or machines directly behind or in front of the people. Any sign or context object sits on that surface beside the people, clearly readable, not touching them. The ground near the feet is plain.';
+        $lines[] = 'Do not add text, captions or watermarks. Logos, signs and markings that belong to the place stay exactly as they are.';
 
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
         $attached = 0;
@@ -53,15 +72,21 @@ class KeyframeImageBrief
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build and clothing' : '') . '. Do not copy its background or pose.';
+            if ($element->type === ElementType::PLACE) {
+                $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows what {$element->name} looks like: its buildings, shapes, colours and materials. Use it for the look of the place, not for the viewpoint" . ($size === ShotSize::WIDE ? '; a similar overview fits this wide shot.' : ': the camera stands inside the place at the spot described, at eye level, so only part of it shows.');
+
+                continue;
+            }
+
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says. Do not copy its background or pose.";
         }
 
         if ($references->first !== null) {
-            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is keyframe 1 of this shot. Keep the character\'s identity and appearance, the setting, the backdrop and the style exactly the same as in it.';
+            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is keyframe 1 of this shot. Keep the character\'s identity and appearance, the spot in the place, the framing and the style exactly the same as in it. Every fixed part of the place, such as logos, signs, doors, windows and parked vehicles, stays in the same position and looks the same; nothing appears or disappears.';
         }
 
         if ($references->previous !== null) {
-            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the character holds, what is in their pockets and what hangs on the backdrop, unless this keyframe\'s description changes it. Do not copy its pose.';
+            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the character holds, what is in their pockets and what hangs at the spot, unless this keyframe\'s description changes it. Do not copy its pose.';
         }
 
         return implode("\n", $lines);
@@ -91,8 +116,8 @@ class KeyframeImageBrief
     {
         $directions = [
             'Stage it as described.',
-            'Show more of the surroundings: a wider view where the setting is clearly visible around and above the backdrop, with the sky and the site in the distance.',
-            'Choose a different backdrop surface and different lighting for the same setting than an obvious first choice, for example another building side or time of day, still calm and even behind the character.',
+            'Choose a different calm part of the same place for the spot than an obvious first choice, for example another side of the building, keeping the same framing.',
+            'Choose different lighting or time of day for the same spot and framing.',
         ];
 
         return 'Variation for this option: ' . $directions[$index % count($directions)];
@@ -111,7 +136,7 @@ class KeyframeImageBrief
             $withPreviousKeyframe
                 ? 'The second attached image is the keyframe directly before this one in the same shot. Use it to see how the character and the objects look and where they are, and copy them from it when the change asks for something that is missing. Do not copy its pose or framing.'
                 : null,
-            'No text, captions, logos or watermarks in the image.',
+            'Do not add text, captions or watermarks. Logos, signs and markings that are already in the image stay exactly as they are.',
         ]));
     }
 }

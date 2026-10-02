@@ -45,6 +45,10 @@ class GenerateProjectCover implements ShouldQueue
         $painter->paint($this->project);
         $this->project->forceFill(['cover_status' => CoverStatus::READY])->save();
 
+        // The old loop belongs to the old cover; a new one is made in the background.
+        $this->project->clearMediaCollection(Project::COVER_LOOP);
+        GenerateCoverLoop::dispatch($this->project);
+
         GenerationFinished::ready(
             __('The cover of “:title” is ready', ['title' => $this->project->title]),
             route('public.projects.view', $this->project),

@@ -45,6 +45,7 @@ class ElementResource extends JsonResource
             'renderError' => $this->render_error,
             'url' => route('public.projects.elements.view', [$this->project, $this->resource]),
             'versionUrl' => route('public.projects.elements.version', [$this->project, $this->resource]),
+            'destroyUrl' => route('public.projects.elements.destroy', [$this->project, $this->resource]),
             /** @var string|null */
             'imageUrl' => $reference === null ? null : $this->signed($reference, Element::THUMBNAIL),
             /**

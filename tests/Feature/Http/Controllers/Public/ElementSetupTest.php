@@ -13,6 +13,7 @@ use App\Enums\ElementRoundStatus;
 use App\Enums\ElementSuggestionStatus;
 use App\Enums\ElementType;
 use App\Jobs\AnalyzePhoto;
+use App\Jobs\GenerateCoverLoop;
 use App\Jobs\GenerateElementSuggestions;
 use App\Jobs\GenerateProjectCover;
 use App\Jobs\RenderElementSuggestion;
@@ -391,6 +392,7 @@ describe('optional stage and cover', function () {
     });
 
     it('paints the cast in one picture with the place behind them and shows it on the project page', function () {
+        Queue::fake([GenerateCoverLoop::class]);
         Image::fake([pngBase64()]);
         $this->project->addMedia(UploadedFile::fake()->image('sheet.png'))->toMediaCollection(Project::STYLE_REFERENCES);
         $make = function (ElementType $type, string $name) {

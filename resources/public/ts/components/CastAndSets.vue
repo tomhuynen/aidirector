@@ -14,33 +14,34 @@
       </h3>
 
       <ul class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-        <li v-for="element in ofType(type.value)" :key="element.id" class="aspect-square">
-          <Link
-            :href="element.url"
-            :title="element.name"
-            class="relative block size-full overflow-hidden rounded-xl border border-border bg-paper-deep transition-colors hover:border-muted-foreground/60"
-          >
-            <img
-              v-if="element.imageUrl"
-              :src="element.imageUrl"
-              :alt="element.name"
-              class="size-full object-cover"
-              loading="lazy"
-            />
-            <Placeholder v-else class="size-full rounded-none border-0 bg-background" />
+        <li v-for="element in ofType(type.value)" :key="element.id" class="min-w-0">
+          <Link :href="element.url" class="group block space-y-1.5">
             <span
-              v-if="element.rendering"
-              class="absolute inset-0 flex items-center justify-center bg-background/40 text-signal"
+              class="relative block aspect-square overflow-hidden rounded-xl border border-border bg-paper-deep transition-colors group-hover:border-muted-foreground/60"
             >
-              <LoaderCircle class="size-5 animate-spin" />
+              <img
+                v-if="element.imageUrl"
+                :src="element.imageUrl"
+                :alt="element.name"
+                class="size-full object-cover"
+                loading="lazy"
+              />
+              <Placeholder v-else class="size-full rounded-none border-0 bg-background" />
+              <span
+                v-if="element.rendering"
+                class="absolute inset-0 flex items-center justify-center bg-background/40 text-signal"
+              >
+                <LoaderCircle class="size-5 animate-spin" />
+              </span>
             </span>
+            <span class="block truncate text-sm" :title="element.name">{{ element.name }}</span>
           </Link>
         </li>
 
-        <li class="aspect-square">
+        <li>
           <Link
             :href="`${createUrl}?type=${type.value}`"
-            class="flex size-full items-center justify-center rounded-xl border border-dashed border-border bg-card/60 text-muted-foreground transition-colors hover:border-muted-foreground/60 hover:text-foreground"
+            class="flex aspect-square w-full items-center justify-center rounded-xl border border-dashed border-border bg-card/60 text-muted-foreground transition-colors hover:border-muted-foreground/60 hover:text-foreground"
             :aria-label="$t('Add :type', { type: type.label.toLowerCase() })"
             :title="$t('Add :type', { type: type.label.toLowerCase() })"
           >

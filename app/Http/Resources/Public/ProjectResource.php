@@ -40,6 +40,12 @@ class ProjectResource extends JsonResource
             'styleReferenceUrl' => $this->styleReferenceUrl(),
             /** @var string|null */
             'coverUrl' => $this->coverUrl(),
+            /**
+             * The cover gently animated as a seamless loop, once it is made.
+             *
+             * @var string|null
+             */
+            'coverLoopUrl' => $this->coverLoopUrl(),
             /** @var string|null */
             'website' => $this->website,
             'videoResolution' => $this->videoResolution(),
@@ -58,7 +64,6 @@ class ProjectResource extends JsonResource
                 'elementsCreate' => route('public.projects.elements.create', $this->resource),
                 /** The editor opens on the first shot, or on a new shot when there are none. Only with the shots loaded. */
                 'editor' => $this->when($this->resource->relationLoaded('shots'), fn() => $this->editorUrl()),
-                'update' => route('public.projects.update', $this->resource),
                 'destroy' => route('public.projects.destroy', $this->resource),
                 'shotsCreate' => route('public.shots.create', $this->resource),
                 'shotsReorder' => route('public.shots.reorder', $this->resource),
@@ -71,6 +76,13 @@ class ProjectResource extends JsonResource
     /**
      * A signed link to the cast and sets group picture, once it has been drawn.
      */
+    private function coverLoopUrl(): ?string
+    {
+        $loop = $this->getFirstMedia(Project::COVER_LOOP);
+
+        return $loop === null ? null : URL::temporarySignedRoute('public.media.view', now()->addHours(2), ['media' => $loop]);
+    }
+
     private function coverUrl(): ?string
     {
         $cover = $this->getFirstMedia(Project::COVER);

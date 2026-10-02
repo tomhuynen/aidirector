@@ -48,7 +48,7 @@ class StoreController
             'rendering' => true,
         ]);
 
-        $shot->forceFill(['storyline' => ['keyframes' => [...$shot->storylineKeyframes(), $plan]]])->save();
+        $shot->replacePlannedKeyframes([...$shot->storylineKeyframes(), $plan]);
 
         GenerateKeyframeImage::dispatch($keyframe);
 

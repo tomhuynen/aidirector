@@ -53,8 +53,8 @@
 
     <div class="flex shrink-0 items-center justify-between gap-3">
       <Button type="button" variant="outline" :disabled="pending || more.processing" @click="askMore">
-        <RefreshCw class="size-4" :class="(pending || more.processing) && 'animate-spin'" />
-        {{ pending ? $t('Drawing options…') : $t('More options') }}
+        <RefreshCw class="size-4" />
+        {{ $t('More options') }}
       </Button>
       <div class="flex items-center gap-3">
         <InputError :message="choice.errors.render" />

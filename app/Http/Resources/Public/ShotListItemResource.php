@@ -29,7 +29,7 @@ class ShotListItemResource extends JsonResource
             'status' => $this->status,
             'statusLabel' => $this->status->description(),
             /** @var int */
-            'duration' => $this->duration ?? $this->project->default_duration,
+            'duration' => $this->durationInSeconds(),
             /** @var int */
             'keyframesCount' => $this->keyframes_count ?? 0,
             /** @var string|null */

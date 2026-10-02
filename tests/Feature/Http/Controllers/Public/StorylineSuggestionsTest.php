@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Ai\Agents\StorylineOptionsWriter;
 use App\Ai\Agents\StorylineWriter;
 use App\Enums\ProjectPurpose;
+use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateStoryline;
@@ -229,7 +230,7 @@ describe('jobs', function () {
     });
 
     it('passes the chosen storyline on to the keyframe writer and starts rendering', function () {
-        StorylineWriter::fake([['keyframes' => [
+        StorylineWriter::fake([['framing' => ['size' => 'medium', 'spot' => 'Against the red mailbox on the pavement, a shop window behind it.', 'light' => 'dusk, low warm evening light', 'seconds' => 7], 'keyframes' => [
             ['title' => 'At the mailbox', 'description' => 'The man stands at the mailbox holding the envelope.', 'prompt' => 'A man in a navy suit stands at a red mailbox.'],
             ['title' => 'Posting', 'description' => 'The envelope slides into the slot.', 'prompt' => 'A man in a navy suit posts a white envelope.'],
             ['title' => 'Thumbs up', 'description' => 'The man gives a thumbs up.', 'prompt' => 'A man in a navy suit gives a thumbs up.'],
@@ -249,6 +250,8 @@ describe('jobs', function () {
 
         expect($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($shot->storylineKeyframes()[0]['prompt'])->toBe('A man in a navy suit stands at a red mailbox.')
+            ->and($shot->storylineFraming())->toBe(['size' => ShotSize::MEDIUM, 'spot' => 'Against the red mailbox on the pavement, a shop window behind it.', 'light' => 'dusk, low warm evening light', 'seconds' => 7])
+            ->and($shot->durationInSeconds())->toBe(7)
             ->and(Keyframe::query()->whereKey($stale->id)->exists())->toBeFalse();
 
         Queue::assertPushed(GenerateKeyframes::class, fn(GenerateKeyframes $job) => $job->shot->is($shot));
@@ -258,10 +261,49 @@ describe('jobs', function () {
         $shot = Shot::factory()->for($this->project)->create();
 
         expect((string) (new StorylineWriter($shot->load('project')))->instructions())
-            ->toContain('Prompt: a self-contained brief for an image model')
-            ->toContain('in front of one calm, even backdrop surface that fills the area directly behind them')
-            ->toContain('Nothing crosses or touches the figure')
-            ->toContain('The wider setting, indoors or outdoors, may be visible around and above that backdrop');
+            ->toContain('Prompt: a brief for an image model that renders this keyframe')
+            ->toContain('the spot in the place with the context objects on it')
+            ->toContain('nothing crosses or touches a figure')
+            ->toContain('Never invent a separate wall, panel or backdrop in front of the place');
+    });
+
+    it('lets the keyframe writer time the shot unless the director set a length', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        expect((string) (new StorylineWriter($shot->load('project')))->instructions())
+            ->toContain('Shot length: choose it yourself as the seconds')
+            ->toContain('putting on or taking off clothing or gear: 3 to 4 seconds');
+
+        $set = Shot::factory()->for($this->project)->create(['duration' => 9]);
+
+        expect((string) (new StorylineWriter($set->load('project')))->instructions())
+            ->toContain('Shot length: the director set 9 seconds.')
+            ->not->toContain('rules of thumb');
+    });
+
+    it('renders at the director\'s length, then the planned one, then the project default', function () {
+        $planned = ['framing' => ['size' => 'full', 'spot' => 'At the door.', 'light' => 'as the visual style', 'seconds' => 8], 'keyframes' => []];
+
+        expect(Shot::factory()->for($this->project)->create(['duration' => 6, 'storyline' => $planned])->durationInSeconds())->toBe(6)
+            ->and(Shot::factory()->for($this->project)->create(['storyline' => $planned])->durationInSeconds())->toBe(8)
+            ->and(Shot::factory()->for($this->project)->create(['storyline' => [...$planned, 'framing' => [...$planned['framing'], 'seconds' => 40]]])->durationInSeconds())->toBe(15)
+            ->and(Shot::factory()->for($this->project)->create()->durationInSeconds())->toBe($this->project->default_duration);
+    });
+
+    it('lets the keyframe writer choose the framing by what the shot has to communicate', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        expect((string) (new StorylineWriter($shot->load('project')))->instructions())
+            ->toContain('choose one shot size for the whole shot by what it has to communicate')
+            ->toContain('- close-up: when the point is what the hands do with an object')
+            ->toContain('- wide: when the surroundings are the point')
+            ->toContain('the shot plays at one spot inside the place')
+            ->toContain('Frame the action: the people and the object they act on')
+            ->toContain('never describe their appearance, such as age, build, hair, clothing or colours')
+            ->toContain('never introduce a new person')
+            ->toContain('Light: the time of day and light the storyline calls for')
+            ->toContain('Do not list background extras such as vehicles, containers, cranes or people')
+            ->toContain('sit together in the centre of the frame and take most of it');
     });
 
     it('asks the keyframe writer for few, readable props so the video model cannot mistake them', function () {

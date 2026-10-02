@@ -25,27 +25,27 @@
         :suggest-url="shot.links?.storylineSuggest ?? '#'"
         :choose-url="shot.links?.storylineChoose ?? '#'"
       />
-      <Pending
-        v-else-if="state === 'planning'"
-        :title="$t('Planning keyframes')"
-        :description="$t('The director is breaking the chosen storyline into keyframes.')"
-      />
-      <template v-else-if="state === 'keyframes'">
+      <template v-else-if="state === 'keyframes' || state === 'planning'">
         <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" />
         <KeyframesPanel
           :keyframes="panelKeyframes"
           :aspect-ratio="aspectRatio"
           :duration="duration"
           :generating="shot.status === 'keyframes-pending'"
+          :planning="state === 'planning'"
           :error="shot.storylineError"
           :images-url="shot.links?.keyframesGenerate ?? '#'"
           :choosing="{
-            active: shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready',
-            pending: shot.status === 'first-keyframe-pending',
+            active:
+              state === 'planning' ||
+              shot.status === 'first-keyframe-pending' ||
+              shot.status === 'first-keyframe-ready',
+            pending: state === 'planning' || shot.status === 'first-keyframe-pending',
             optionCount: shot.firstKeyframeOptions,
             chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
             moreUrl: shot.links?.firstKeyframeMore ?? '#',
           }"
+          :reorder-url="shot.links?.keyframesReorder ?? '#'"
           :new-keyframe="{
             storeUrl: shot.links?.keyframesStore ?? '#',
             max: shot.maxKeyframes,
@@ -88,7 +88,7 @@ const props = defineProps<Inertia.Pages.Shots.View>()
 
 const code = computed(() => shotCode(props.shot.position))
 const aspectRatio = computed(() => props.shot.aspectRatioOverride ?? props.project.aspectRatio)
-const duration = computed(() => props.shot.duration ?? props.project.defaultDuration)
+const duration = computed(() => props.shot.seconds)
 
 type State = 'brief' | 'suggesting' | 'options' | 'planning' | 'keyframes'
 
@@ -132,6 +132,7 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         updateUrl: keyframe.links.update,
         tweakUrl: keyframe.links.tweak,
         chooseRenderUrl: keyframe.links.chooseRender,
+        destroyUrl: keyframe.links.destroy,
       }))
     : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
         id: String(i),
@@ -146,6 +147,7 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         updateUrl: null,
         tweakUrl: null,
         chooseRenderUrl: null,
+        destroyUrl: null,
       })),
 )
 

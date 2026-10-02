@@ -21,8 +21,8 @@
         </div>
 
         <FirstKeyframeChooser
-          v-if="choosing.active && keyframes[0]"
-          :options="keyframes[0].renders"
+          v-if="choosing.active && (keyframes[0] || planning)"
+          :options="keyframes[0]?.renders ?? []"
           :option-count="choosing.optionCount"
           :aspect-ratio="aspectRatio"
           :pending="choosing.pending"
@@ -104,7 +104,13 @@
         :resolutions="video.resolutions"
         :aspect-ratio="aspectRatio"
       />
-      <KeyframeInspector v-else-if="selected" :key="selected.id" :keyframe="selected" :index="selectedIndex" />
+      <KeyframeInspector
+        v-else-if="selected"
+        :key="selected.id"
+        :keyframe="selected"
+        :index="selectedIndex"
+        :can-delete="canArrange"
+      />
     </div>
 
     <div class="flex shrink-0 border-t border-border">
@@ -116,7 +122,8 @@
               <span class="font-normal text-muted-foreground tabular-nums">({{ keyframes.length }})</span>
             </h2>
             <p class="text-sm text-muted-foreground">
-              <template v-if="generating">{{
+              <template v-if="planning">{{ $t('The director is planning the keyframes.') }}</template>
+              <template v-else-if="generating">{{
                 $t('The images are being generated. This takes a minute or two.')
               }}</template>
               <template v-else-if="choosing.active">{{
@@ -152,21 +159,38 @@
         </header>
 
         <ul class="flex items-start gap-4 overflow-x-auto pb-1">
-          <li v-for="(keyframe, i) in keyframes" :key="keyframe.id" class="w-44 shrink-0 space-y-2">
+          <li
+            v-for="(keyframe, i) in strip"
+            :key="keyframe.id"
+            :draggable="canArrange"
+            :class="
+              cn(
+                'w-44 shrink-0 space-y-2 transition-opacity',
+                canArrange && 'cursor-grab active:cursor-grabbing',
+                keyframe.id === draggingId && 'opacity-40',
+              )
+            "
+            :title="canArrange ? $t('Drag to change the order') : undefined"
+            @dragstart="startDrag($event, keyframe.id)"
+            @dragover.prevent="dragOver(keyframe.id)"
+            @drop.prevent="drop"
+            @dragend="endDrag"
+          >
             <button
               type="button"
               :class="
                 cn(
                   'relative block h-28 w-full overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-muted-foreground/60',
-                  !showVideo && !adding && i === selectedIndex && 'border-signal ring-2 ring-signal/40',
+                  isSelected(keyframe.id) && 'border-signal ring-2 ring-signal/40',
                 )
               "
-              @click="selectKeyframe(i)"
+              @click="selectById(keyframe.id)"
             >
               <img
                 v-if="keyframe.thumbnailUrl"
                 :src="keyframe.thumbnailUrl"
                 :alt="keyframe.title"
+                draggable="false"
                 :class="cn('size-full object-cover', keyframe.rendering && 'opacity-50')"
               />
               <Placeholder v-else class="size-full rounded-none border-0 bg-card" />
@@ -182,7 +206,7 @@
                 :class="
                   cn(
                     'flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold tabular-nums',
-                    !showVideo && !adding && i === selectedIndex && 'bg-signal text-primary-foreground',
+                    isSelected(keyframe.id) && 'bg-signal text-primary-foreground',
                   )
                 "
               >
@@ -194,6 +218,14 @@
               </div>
             </div>
           </li>
+          <template v-if="planning && keyframes.length === 0">
+            <li v-for="n in 3" :key="`planning-${n}`" class="w-44 shrink-0 space-y-2">
+              <Placeholder class="h-28 w-full rounded-lg bg-card">
+                <LoaderCircle class="size-5 animate-spin text-signal" />
+              </Placeholder>
+              <div class="mx-1 h-4 w-24 animate-pulse rounded bg-secondary" />
+            </li>
+          </template>
           <li class="w-44 shrink-0">
             <button
               type="button"
@@ -213,6 +245,7 @@
             </p>
           </li>
         </ul>
+        <InputError :message="arrangeError" />
       </section>
 
       <section class="flex w-[22rem] shrink-0 flex-col gap-4 border-l border-border p-6">
@@ -317,7 +350,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { useForm } from '@inertiajs/vue3'
+import { router, useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
@@ -354,6 +387,7 @@ export type PanelKeyframe = {
   updateUrl: string | null
   tweakUrl: string | null
   chooseRenderUrl: string | null
+  destroyUrl: string | null
 }
 
 export type PanelChoosing = {
@@ -388,6 +422,9 @@ const props = defineProps<{
   video: PanelVideo
   choosing: PanelChoosing
   newKeyframe: PanelNewKeyframe
+  reorderUrl: string
+  /** The keyframes are still being planned: the panel shows the drawing state with nothing in it yet. */
+  planning?: boolean
 }>()
 
 const selectedIndex = ref(0)
@@ -442,7 +479,7 @@ watch(
     if (previous !== undefined && length > previous && !props.choosing.active) {
       selectKeyframe(length - 1)
     } else if (selectedIndex.value >= length) {
-      selectedIndex.value = 0
+      selectedIndex.value = Math.max(length - 1, 0)
     }
   },
 )
@@ -493,6 +530,98 @@ const canAdd = computed(
     props.keyframes.length < props.newKeyframe.max &&
     props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.updateUrl && !keyframe.rendering),
 )
+
+/**
+ * Keyframes can be dragged into a new order or deleted once all of them are
+ * drawn and nothing else is being generated.
+ */
+const canArrange = computed(
+  () =>
+    !props.choosing.active &&
+    !props.generating &&
+    !props.video.pending &&
+    !arranging.value &&
+    props.keyframes.length > 1 &&
+    props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.destroyUrl && !keyframe.rendering),
+)
+
+const isSelected = (id: string) => !showVideo.value && !adding.value && selected.value?.id === id
+
+const selectById = (id: string) => selectKeyframe(props.keyframes.findIndex((keyframe) => keyframe.id === id))
+
+const draggingId = ref<string | null>(null)
+const dragOrder = ref<string[]>([])
+const arranging = ref(false)
+const arrangeError = ref<string | undefined>()
+
+/**
+ * While dragging, and until the server confirms, the strip shows the order being dragged.
+ */
+const strip = computed(() => {
+  if (draggingId.value === null && !arranging.value) return props.keyframes
+
+  return dragOrder.value
+    .map((id) => props.keyframes.find((keyframe) => keyframe.id === id))
+    .filter((keyframe): keyframe is PanelKeyframe => keyframe !== undefined)
+})
+
+const startDrag = (event: DragEvent, id: string) => {
+  if (!canArrange.value) {
+    event.preventDefault()
+
+    return
+  }
+
+  draggingId.value = id
+  dragOrder.value = props.keyframes.map((keyframe) => keyframe.id)
+  arrangeError.value = undefined
+
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', id)
+  }
+}
+
+const dragOver = (overId: string) => {
+  const dragged = draggingId.value
+
+  if (dragged === null || dragged === overId) return
+
+  const order = dragOrder.value.filter((id) => id !== dragged)
+  order.splice(dragOrder.value.indexOf(overId), 0, dragged)
+  dragOrder.value = order
+}
+
+const drop = () => {
+  const dragged = draggingId.value
+  const selectedId = selected.value?.id
+  draggingId.value = null
+
+  if (dragged === null) return
+
+  const unchanged = dragOrder.value.every((id, index) => props.keyframes[index]?.id === id)
+
+  if (unchanged) return
+
+  arranging.value = true
+  router.post(
+    props.reorderUrl,
+    { keyframes: dragOrder.value },
+    {
+      preserveScroll: true,
+      onSuccess: () => {
+        const index = props.keyframes.findIndex((keyframe) => keyframe.id === selectedId)
+        if (index >= 0) selectedIndex.value = index
+      },
+      onError: (errors) => (arrangeError.value = errors.keyframes),
+      onFinish: () => (arranging.value = false),
+    },
+  )
+}
+
+const endDrag = () => {
+  if (draggingId.value !== null) drop()
+}
 
 const retry = useForm({})
 const videoForm = useForm<{ video?: string }>({})

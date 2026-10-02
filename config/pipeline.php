@@ -17,11 +17,17 @@ return [
 
     'models' => [
         'text' => env('AI_DIRECTOR_MODEL', 'openai/gpt-5.5'),
-        // Creates keyframes and style sheets: stays closest to the pinned style.
+        // Creates style sheets, covers and element pictures: stays closest to the pinned style.
         'image' => env('AI_IMAGE_MODEL', 'google/gemini-3.1-flash-image-preview'),
+        // Creates keyframes; falls back to the image model.
+        'keyframe' => env('AI_KEYFRAME_MODEL', env('AI_IMAGE_MODEL', 'google/gemini-3.1-flash-image-preview')),
+        // Turns a photo of a real person into a drawing first; the image model often refuses such photos.
+        'photo_drawing' => env('AI_PHOTO_DRAWING_MODEL', 'bytedance-seed/seedream-5-0-flash'),
         // Adjusts an existing keyframe (pose, gaze, details) and leaves the rest alone.
         'image_edit' => env('AI_IMAGE_EDIT_MODEL', 'openai/gpt-5.4-image-2'),
         'video' => env('AI_VIDEO_MODEL', 'alibaba/wan-3.0'),
+        // Animates the project cover into a seamless loop; needs first and last frame control.
+        'cover_loop' => env('AI_COVER_LOOP_MODEL', 'bytedance/seedance-2.0'),
     ],
 
     /*
@@ -97,6 +103,16 @@ return [
     |
     */
 
+    /*
+    | Image models that OpenRouter only serves through its images endpoint,
+    | not through chat completions.
+    */
+    'images_api_models' => [
+        'openai/gpt-image-2.5-sunburst',
+        'openai/gpt-image-2.5-flare',
+        'bytedance-seed/seedream-5-0-flash',
+    ],
+
     'video' => [
         'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
         // The default for projects without their own; the lowest the model offers, for quick tests.
@@ -106,6 +122,8 @@ return [
         'min_duration' => 4,
         'max_duration' => 15,
         'poll_seconds' => 20,
+        // Strips the audio some models add even when asked for none.
+        'ffmpeg' => env('FFMPEG_PATH', 'ffmpeg'),
         'max_wait_minutes' => 30,
     ],
 
