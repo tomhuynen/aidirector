@@ -100,7 +100,7 @@ describe('chat', function () {
         expect($project->title)->toBe('Mailbox explainer')
             ->and($project->description)->toBe('How to post a letter, for first-time senders.')
             ->and($project->purpose)->toBe(ProjectPurpose::EXPLAINER)
-            ->and($project->aspect_ratio)->toBe(AspectRatio::LANDSCAPE)
+            ->and($project->aspect_ratio)->toBe(AspectRatio::PORTRAIT)
             ->and($project->director_id)->toBe($this->director->id)
             ->and($project->conversation_id)->toBe($conversationId)
             ->and($project->conversation->title)->toBe('Mailbox explainer')
@@ -112,7 +112,7 @@ describe('chat', function () {
         ProjectIntake::assertPromptedTimes(2);
     });
 
-    it('sets up a social short in portrait', function () {
+    it('sets up a social short in portrait too', function () {
         ProjectIntake::fake([
             ['reply' => 'Ready.', 'description' => 'A ten second gag about a cat and a mailbox.', 'purpose' => 'social-short', 'title' => 'Cat vs Mailbox', 'ask' => 'photos', 'done' => false],
         ]);

@@ -21,7 +21,7 @@ return [
         'image' => env('AI_IMAGE_MODEL', 'google/gemini-3.1-flash-image-preview'),
         // Adjusts an existing keyframe (pose, gaze, details) and leaves the rest alone.
         'image_edit' => env('AI_IMAGE_EDIT_MODEL', 'openai/gpt-5.4-image-2'),
-        'video' => env('AI_VIDEO_MODEL', 'bytedance/seedance-2.0'),
+        'video' => env('AI_VIDEO_MODEL', 'alibaba/wan-3.0'),
     ],
 
     /*
@@ -102,7 +102,8 @@ return [
         'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
         // The default for projects without their own; the lowest the model offers, for quick tests.
         'resolution' => env('AI_VIDEO_RESOLUTION', '480p'),
-        'resolutions' => ['480p', '720p', '1080p', '4K'],
+        // What Wan 3.0 renders; a model without 4K refuses it.
+        'resolutions' => ['480p', '720p', '1080p'],
         'min_duration' => 4,
         'max_duration' => 15,
         'poll_seconds' => 20,
