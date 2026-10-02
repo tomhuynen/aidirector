@@ -14,6 +14,7 @@ use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateContro
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
 use App\Http\Controllers\Public\Projects\Elements\RoundController as ElementRoundController;
+use App\Http\Controllers\Public\Projects\Elements\StoreController as ElementStoreController;
 use App\Http\Controllers\Public\Projects\FormatController as ProjectFormatController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
@@ -74,6 +75,8 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{project}/format', [ProjectFormatController::class, 'store'])->name('format');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
+
+    Route::post('projects/{project}/elements', [ElementStoreController::class, 'store'])->name('projects.elements.store');
 
     Route::prefix('projects/{project}/elements/rounds')
         ->name('projects.elements.rounds.')

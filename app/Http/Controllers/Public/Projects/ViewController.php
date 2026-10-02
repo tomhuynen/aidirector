@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Projects;
 
+use App\Enums\ElementType;
 use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotListItemResource;
@@ -34,8 +35,14 @@ class ViewController
             'shots' => fn() => ShotListItemResource::collection($project->shots),
             /** @var array{aspectRatios: array<int, array{value: string, name: string}>, resolutions: array<int, string>, sizes: array<string, array{width: int, height: int}>} */
             'videoFormats' => fn() => VideoFormats::catalogue(),
+            /** @var array<int, array{value: string, label: string, plural: string}> */
+            'elementTypes' => fn() => array_map(fn(ElementType $type) => [
+                'value' => $type->value,
+                'label' => $type->description(),
+                'plural' => $type->plural(),
+            ], ElementType::cases()),
             'elements' => fn() => ElementResource::collection(
-                $project->elements()->with(['project', 'media', 'keyframes.shot.project'])->get()
+                $project->elements()->with('media')->get()
             ),
         ]);
     }

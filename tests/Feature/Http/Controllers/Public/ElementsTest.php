@@ -407,22 +407,62 @@ describe('pages', function () {
                 ->where('keyframes.0.elements', ['Mark, the visitor']));
     });
 
-    it('lists the cast and sets on the project overview with the shots they are in', function () {
+    it('lists the cast and sets on the project overview', function () {
         $mark = withReference(Element::factory()->for($this->project)->create());
-        $shot = castShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY, 'position' => 2]);
-        Keyframe::factory()->for($shot)->create(['position' => 1])->elements()->attach($mark);
-        Keyframe::factory()->for($shot)->create(['position' => 2])->elements()->attach($mark);
 
         $response = actingAs($this->director, 'director')
             ->get(route('public.projects.view', $this->project))
             ->assertInertia(fn($page) => $page
                 ->has('elements', 1)
                 ->where('elements.0.name', 'Mark, the visitor')
-                ->where('elements.0.shots', [['position' => 2, 'title' => $shot->title, 'url' => route('public.shots.view', [$this->project, $shot])]]));
+                ->where('elements.0.shots', []));
 
         actingAs($this->director, 'director')
             ->get($response->viewData('page')['props']['elements'][0]['imageUrl'])
             ->assertSuccessful();
+    });
+});
+
+describe('adding', function () {
+    it('adds an element to a category and draws its reference image', function () {
+        Queue::fake();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'place', 'name' => 'Main gate', 'description' => 'A grey gatehouse with a yellow barrier.'])
+            ->assertRedirect(route('public.projects.view', $this->project));
+
+        $gate = Element::query()->where('name', 'Main gate')->firstOrFail();
+
+        expect($gate->type)->toBe(ElementType::PLACE)
+            ->and($gate->project_id)->toBe($this->project->id);
+
+        Queue::assertPushed(GenerateElementReference::class, fn(GenerateElementReference $job) => $job->element->is($gate) && $job->source === null);
+    });
+
+    it('validates the category, name and description', function () {
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $this->project), ['type' => 'vehicle', 'name' => '', 'description' => ''])
+            ->assertSessionHasErrors(['type', 'name', 'description']);
+    });
+
+    it('forbids adding to another director\'s project', function () {
+        $project = Project::factory()->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.projects.elements.store', $project), ['type' => 'person', 'name' => 'Guard', 'description' => 'A guard.'])
+            ->assertForbidden();
+    });
+
+    it('lists the categories on the overview', function () {
+        actingAs($this->director, 'director')
+            ->get(route('public.projects.view', $this->project))
+            ->assertInertia(fn($page) => $page
+                ->where('elementTypes', [
+                    ['value' => 'person', 'label' => 'Person', 'plural' => 'People'],
+                    ['value' => 'place', 'label' => 'Place', 'plural' => 'Places'],
+                    ['value' => 'object', 'label' => 'Object', 'plural' => 'Objects'],
+                ])
+                ->where('project.links.elementsStore', route('public.projects.elements.store', $this->project)));
     });
 });
 
