@@ -1,6 +1,6 @@
 <template>
   <form class="flex min-h-0 flex-1 flex-col overflow-y-auto p-8" @submit.prevent="submit">
-    <div class="flex w-full max-w-[700px] flex-1 flex-col">
+    <div class="flex w-full max-w-[700px] flex-col">
       <header class="space-y-2">
         <h2 class="text-3xl font-semibold">{{ $t('Describe your shot') }}</h2>
         <p class="text-lg text-muted-foreground">
@@ -75,7 +75,7 @@
         />
       </div>
 
-      <footer class="mt-auto flex items-center justify-end gap-3 pt-8">
+      <footer class="mt-8 flex items-center justify-end gap-3">
         <Button v-if="cancelUrl" as-child variant="ghost">
           <Link :href="cancelUrl">{{ $t('Cancel') }}</Link>
         </Button>
