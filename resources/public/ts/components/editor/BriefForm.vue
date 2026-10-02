@@ -1,87 +1,91 @@
 <template>
   <form class="flex min-h-0 flex-1 flex-col overflow-y-auto p-8" @submit.prevent="submit">
-    <header class="space-y-2">
-      <h2 class="text-3xl font-semibold">{{ $t('Describe your shot') }}</h2>
-      <p class="text-lg text-muted-foreground">{{ $t('Tell us what should happen in this shot. Keep it simple.') }}</p>
-    </header>
+    <div class="flex w-full max-w-[700px] flex-1 flex-col">
+      <header class="space-y-2">
+        <h2 class="text-3xl font-semibold">{{ $t('Describe your shot') }}</h2>
+        <p class="text-lg text-muted-foreground">
+          {{ $t('Tell us what should happen in this shot. Keep it simple.') }}
+        </p>
+      </header>
 
-    <div class="mt-8 grid gap-x-6 gap-y-6 lg:grid-cols-[1fr_16rem]">
-      <BriefField
-        v-model="form.title"
-        :label="$t('Title')"
-        :max="120"
-        required
-        autofocus
-        :placeholder="$t('No smoking')"
-        :error="form.errors.title"
-      />
-      <div class="space-y-2">
-        <label :for="durationId" class="block text-[15px] font-medium">
-          {{ $t('Duration') }}
-          <span class="font-normal text-muted-foreground">({{ $t('seconds') }})</span>
-        </label>
-        <input
-          :id="durationId"
-          v-model="form.duration"
-          type="number"
-          min="2"
-          max="30"
-          :placeholder="String(project.defaultDuration)"
-          class="block w-full rounded-lg border border-input bg-background px-4 py-3 text-[15px] placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      <div class="mt-8 grid gap-x-6 gap-y-6 lg:grid-cols-[1fr_16rem]">
+        <BriefField
+          v-model="form.title"
+          :label="$t('Title')"
+          :max="120"
+          required
+          autofocus
+          :placeholder="$t('No smoking')"
+          :error="form.errors.title"
         />
-        <InputError :message="form.errors.duration" />
+        <div class="space-y-2">
+          <label :for="durationId" class="block text-[15px] font-medium">
+            {{ $t('Duration') }}
+            <span class="font-normal text-muted-foreground">({{ $t('seconds') }})</span>
+          </label>
+          <input
+            :id="durationId"
+            v-model="form.duration"
+            type="number"
+            min="2"
+            max="30"
+            :placeholder="String(project.defaultDuration)"
+            class="block w-full rounded-lg border border-input bg-background px-4 py-3 text-[15px] placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          />
+          <InputError :message="form.errors.duration" />
+        </div>
       </div>
-    </div>
 
-    <div class="mt-6 grid gap-6 lg:grid-cols-2">
-      <BriefField
-        v-model="form.subject"
-        :label="$t('Subject')"
-        :max="1000"
-        rows="4"
-        required
-        :placeholder="$t('Who or what do we see?')"
-        :error="form.errors.subject"
-      />
-      <BriefField
-        v-model="form.action"
-        :label="$t('Action')"
-        :max="1000"
-        rows="4"
-        required
-        :placeholder="$t('He lights a cigarette, notices the no smoking sign, puts it out and gives a thumbs up.')"
-        :error="form.errors.action"
-      />
-      <BriefField
-        v-model="form.takeaway"
-        :label="$t('Takeaway')"
-        :max="1000"
-        rows="3"
-        required
-        :placeholder="$t('Smoking is prohibited in this area.')"
-        :error="form.errors.takeaway"
-      />
-      <BriefField
-        v-model="form.notes"
-        :label="$t('Notes')"
-        :hint="$t('optional')"
-        :max="2000"
-        rows="3"
-        :placeholder="$t('Keep the style consistent with previous shots. Use the same character.')"
-        :error="form.errors.notes"
-      />
-    </div>
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
+        <BriefField
+          v-model="form.subject"
+          :label="$t('Subject')"
+          :max="1000"
+          rows="4"
+          required
+          :placeholder="$t('Who or what do we see?')"
+          :error="form.errors.subject"
+        />
+        <BriefField
+          v-model="form.action"
+          :label="$t('Action')"
+          :max="1000"
+          rows="4"
+          required
+          :placeholder="$t('He lights a cigarette, notices the no smoking sign, puts it out and gives a thumbs up.')"
+          :error="form.errors.action"
+        />
+        <BriefField
+          v-model="form.takeaway"
+          :label="$t('Takeaway')"
+          :max="1000"
+          rows="3"
+          required
+          :placeholder="$t('Smoking is prohibited in this area.')"
+          :error="form.errors.takeaway"
+        />
+        <BriefField
+          v-model="form.notes"
+          :label="$t('Notes')"
+          :hint="$t('optional')"
+          :max="2000"
+          rows="3"
+          :placeholder="$t('Keep the style consistent with previous shots. Use the same character.')"
+          :error="form.errors.notes"
+        />
+      </div>
 
-    <footer class="mt-auto flex items-center justify-end gap-3 pt-8">
-      <Button v-if="cancelUrl" as-child variant="ghost">
-        <Link :href="cancelUrl">{{ $t('Cancel') }}</Link>
-      </Button>
-      <Button type="submit" size="lg" :disabled="form.processing">
-        <LoaderCircle v-if="form.processing" class="size-4 animate-spin" />
-        {{ $t('Continue') }}
-        <ArrowRight class="size-4" />
-      </Button>
-    </footer>
+      <footer class="mt-auto flex items-center justify-end gap-3 pt-8">
+        <Button v-if="cancelUrl" as-child variant="ghost">
+          <Link :href="cancelUrl">{{ $t('Cancel') }}</Link>
+        </Button>
+        <Button type="submit" size="lg" :disabled="form.processing">
+          <LoaderCircle v-if="form.processing" class="size-4 animate-spin" />
+          {{ $t('Continue') }}
+          <ArrowRight class="size-4" />
+        </Button>
+      </footer>
+    </div>
   </form>
 </template>
 <script setup lang="ts">
