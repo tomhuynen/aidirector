@@ -9,68 +9,95 @@
       :current-id="shot.id"
       :create-url="project.links?.shotsCreate ?? '#'"
       :reorder-url="project.links?.shotsReorder"
+      :merge-url="project.links?.shotsMerge"
+      :transitions="shotTransitions"
     />
 
-    <main class="flex min-w-0 flex-1">
-      <Pending
-        v-if="state === 'suggesting'"
-        :title="$t('Suggesting storylines')"
-        :description="$t('The director is reading your brief and writing three possible storylines.')"
-      />
-      <Storylines
-        v-else-if="state === 'options'"
-        :options="shot.storylineOptions ?? []"
-        :error="shot.storylineError"
-        :edit-url="shot.links?.update ?? '#'"
-        :suggest-url="shot.links?.storylineSuggest ?? '#'"
-        :choose-url="shot.links?.storylineChoose ?? '#'"
-      />
-      <Pending
-        v-else-if="state === 'planning'"
-        :title="$t('Planning keyframes')"
-        :description="$t('The director is breaking the chosen storyline into keyframes.')"
-      />
-      <template v-else-if="state === 'keyframes'">
-        <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" />
-        <KeyframesPanel
-          :keyframes="panelKeyframes"
+    <main class="flex min-w-0 flex-1 flex-col">
+      <p
+        v-if="mergedInto"
+        class="flex shrink-0 items-center gap-2 border-b border-border bg-signal-soft/40 px-6 py-2.5 text-sm"
+      >
+        <Combine class="size-4 text-signal" />
+        {{
+          $t('This shot is part of “:title”. A new video here updates the merged video.', { title: mergedInto.title })
+        }}
+        <Link :href="mergedInto.url" class="ml-auto font-medium text-signal hover:underline">{{
+          $t('Open merged shot')
+        }}</Link>
+      </p>
+      <div class="flex min-h-0 min-w-0 flex-1">
+        <MergedShot
+          v-if="merge"
+          :title="shot.title"
+          :takeaway="shot.takeaway"
+          :merge="merge"
+          :video-url="shot.videoUrl"
+          :error="shot.videoError"
+          :pending="shot.status === 'video-pending'"
           :aspect-ratio="aspectRatio"
-          :duration="duration"
-          :generating="shot.status === 'keyframes-pending'"
-          :error="shot.storylineError"
-          :images-url="shot.links?.keyframesGenerate ?? '#'"
-          :choosing="{
-            active: shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready',
-            pending: shot.status === 'first-keyframe-pending',
-            optionCount: shot.firstKeyframeOptions,
-            chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
-            moreUrl: shot.links?.firstKeyframeMore ?? '#',
-          }"
-          :new-keyframe="{
-            storeUrl: shot.links?.keyframesStore ?? '#',
-            max: shot.maxKeyframes,
-          }"
-          :video="{
-            url: shot.videoUrl,
-            error: shot.videoError,
-            resolution: shot.videoResolution,
-            resolutions: shot.videoResolutions,
-            pending: shot.status === 'video-pending',
-            generateUrl: shot.links?.videoGenerate ?? '#',
-          }"
         />
-      </template>
-      <BriefForm v-else :project="project" :shot="shot" :elements="elements" :element-types="elementTypes" />
+        <Pending
+          v-else-if="state === 'suggesting'"
+          :title="$t('Suggesting storylines')"
+          :description="$t('The director is reading your brief and writing three possible storylines.')"
+        />
+        <Storylines
+          v-else-if="state === 'options'"
+          :options="shot.storylineOptions ?? []"
+          :error="shot.storylineError"
+          :edit-url="shot.links?.update ?? '#'"
+          :suggest-url="shot.links?.storylineSuggest ?? '#'"
+          :choose-url="shot.links?.storylineChoose ?? '#'"
+        />
+        <Pending
+          v-else-if="state === 'planning'"
+          :title="$t('Planning keyframes')"
+          :description="$t('The director is breaking the chosen storyline into keyframes.')"
+        />
+        <template v-else-if="state === 'keyframes'">
+          <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" />
+          <KeyframesPanel
+            :keyframes="panelKeyframes"
+            :aspect-ratio="aspectRatio"
+            :duration="duration"
+            :generating="shot.status === 'keyframes-pending'"
+            :error="shot.storylineError"
+            :images-url="shot.links?.keyframesGenerate ?? '#'"
+            :choosing="{
+              active: shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready',
+              pending: shot.status === 'first-keyframe-pending',
+              optionCount: shot.firstKeyframeOptions,
+              chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
+              moreUrl: shot.links?.firstKeyframeMore ?? '#',
+            }"
+            :new-keyframe="{
+              storeUrl: shot.links?.keyframesStore ?? '#',
+              max: shot.maxKeyframes,
+            }"
+            :video="{
+              url: shot.videoUrl,
+              error: shot.videoError,
+              resolution: shot.videoResolution,
+              resolutions: shot.videoResolutions,
+              pending: shot.status === 'video-pending',
+              generateUrl: shot.links?.videoGenerate ?? '#',
+            }"
+          />
+        </template>
+        <BriefForm v-else :project="project" :shot="shot" :elements="elements" :element-types="elementTypes" />
+      </div>
     </main>
   </div>
 </template>
 <script setup lang="ts">
-import { Head, usePoll } from '@inertiajs/vue3'
+import { Head, Link, usePoll } from '@inertiajs/vue3'
 import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import BriefForm from '@public:components/editor/BriefForm.vue'
 import KeyframesPanel, { type PanelKeyframe } from '@public:components/editor/KeyframesPanel.vue'
+import MergedShot from '@public:components/editor/MergedShot.vue'
 import Pending from '@public:components/editor/Pending.vue'
 import { shotCode } from '@public:components/editor/shotCode'
 import ShotDetails from '@public:components/editor/ShotDetails.vue'
@@ -78,6 +105,7 @@ import ShotList from '@public:components/editor/ShotList.vue'
 import Storylines from '@public:components/editor/Storylines.vue'
 import TopBar from '@public:components/editor/TopBar.vue'
 import { index as projectsIndex } from '@routes/public/projects'
+import { Combine } from 'lucide-vue-next'
 import { computed, watch } from 'vue'
 
 defineOptions({
@@ -181,6 +209,8 @@ const shotList = computed(() =>
     statusLabel: sibling.statusLabel,
     duration: sibling.duration,
     keyframesCount: sibling.keyframesCount,
+    partsCount: sibling.partsCount,
+    status: sibling.status,
     thumbnailUrl: sibling.thumbnailUrl,
     url: sibling.url,
   })),

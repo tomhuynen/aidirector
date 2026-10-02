@@ -24,7 +24,7 @@ class DeleteProjectRelations
     {
         $project = $event->project;
 
-        $project->shots()->get()->each(fn(Shot $shot) => $shot->delete());
+        $project->allShots()->get()->each(fn(Shot $shot) => $shot->delete());
 
         $project->elements()->get()->each(fn(Element $element) => $element->delete());
 
