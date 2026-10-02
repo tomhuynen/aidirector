@@ -234,4 +234,14 @@ describe('jobs', function () {
             ->toContain('Nothing crosses or touches the figure')
             ->toContain('The wider setting, indoors or outdoors, may be visible around and above that backdrop');
     });
+
+    it('asks the keyframe writer for few, readable props so the video model cannot mistake them', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        expect((string) (new StorylineWriter($shot->load('project')))->instructions())
+            ->toContain('use as few hand-held objects as the story needs, ideally one per character')
+            ->toContain('turns an unclear object into a copy of the main one')
+            ->toContain('keep the hands apart and make the objects clearly different in shape and colour')
+            ->toContain('which hand holds which object');
+    });
 });
