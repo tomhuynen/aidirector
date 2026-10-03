@@ -79,7 +79,7 @@ class GenerateCoverLoop implements ShouldQueue
     {
         return implode("\n\n", [
             'Bring this still illustration gently to life as a seamless loop. The first and the last frame are exactly the supplied image, so the clip loops without a visible jump.',
-            'Only small, slow movements: hair and loose clothing stirring in a light breeze, people breathing, blinking and shifting their weight a little, a few talking quietly with small mouth and hand movements, water rippling softly, flags or ropes swaying. Everyone stays in place.',
+            'The people talk to each other: neighbours turn their heads towards one another, take turns speaking with small mouth movements, nod, smile and make a small hand gesture now and then, and listen. Around them only small things move: hair and loose clothing stirring in a light breeze, water rippling softly, ropes swaying. Everyone stays where they stand and is back in their starting pose by the last frame.',
             'Calm and unhurried, never busy. Keep the camera completely still: no zoom, pan or cuts. Keep the drawing style, colours and composition exactly as they are. The band in the middle is what is seen; keep the areas at the top and bottom calm.',
             'No text, no new people or objects, no sound.',
         ]);

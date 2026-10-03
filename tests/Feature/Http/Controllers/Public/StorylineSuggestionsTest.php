@@ -303,6 +303,8 @@ describe('jobs', function () {
             ->toContain('never introduce a new person')
             ->toContain('Light: the time of day and light the storyline calls for')
             ->toContain('Do not list background extras such as vehicles, containers, cranes or people')
+            ->toContain('Must show: the one spatial fact the story depends on in this keyframe')
+            ->toContain('stage the person and the danger close together in the same frame')
             ->toContain('sit together in the centre of the frame and take most of it');
     });
 

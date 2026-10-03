@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Files\StoredImage;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use RuntimeException;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
 
 /**
@@ -38,9 +39,14 @@ class TweakKeyframeImage implements ShouldQueue
 
     public int $timeout = 300;
 
+    /**
+     * With an option id the job adjusts that option for keyframe 1 and adds
+     * the result as a new option instead of making it the chosen render.
+     */
     public function __construct(
         public readonly Keyframe $keyframe,
         public readonly string $instruction,
+        public readonly ?int $option = null,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
@@ -48,20 +54,28 @@ class TweakKeyframeImage implements ShouldQueue
     public function handle(KeyframePainter $painter): void
     {
         $keyframe = $this->keyframe->load('shot.project');
-        $current = $keyframe->render() ?? throw new RuntimeException('The keyframe has no render to tweak.');
+        $current = ($this->option !== null ? $keyframe->renders()->firstWhere('id', $this->option) : $keyframe->render())
+            ?? throw new RuntimeException('The keyframe has no render to tweak.');
         $previous = $keyframe->position > 1
             ? $keyframe->shot->keyframes()->with('media')->where('position', $keyframe->position - 1)->first()?->render()
             : null;
         $references = $previous ? [$painter->referenceFor($current), $painter->referenceFor($previous)] : [$painter->referenceFor($current)];
 
-        $instruction = $this->interpret($keyframe, $references);
+        ['instruction' => $instruction, 'approach' => $approach] = $this->interpret($keyframe, $references);
 
-        $render = $painter->paint(
-            $keyframe,
-            KeyframeImageBrief::tweak($instruction, withPreviousKeyframe: $previous !== null),
-            $references,
-            model: (string) Config::get('pipeline.models.image_edit'),
-        );
+        $render = $approach === 'redraw'
+            ? $this->redraw($painter, $keyframe, $instruction)
+            : $painter->paint(
+                $keyframe,
+                KeyframeImageBrief::tweak($instruction, withPreviousKeyframe: $previous !== null),
+                $references,
+                choose: $this->option === null,
+                model: (string) Config::get('pipeline.models.image_edit'),
+            );
+
+        if ($this->option !== null) {
+            $keyframe->forceFill(['rendering' => false, 'render_error' => null])->save();
+        }
 
         // Kept on the version, so the director can see what was asked and what the image model was told.
         $render->setCustomProperty(Keyframe::TWEAK_REQUEST, $this->instruction)
@@ -79,12 +93,14 @@ class TweakKeyframeImage implements ShouldQueue
     }
 
     /**
-     * The director's request rewritten as a precise edit instruction. If the
-     * rewrite fails, the request goes to the image model as it was typed.
+     * The director's request rewritten as a precise instruction, and whether
+     * an edit can make it or the keyframe has to be drawn again. If the
+     * rewrite fails, the request is used as typed, as an edit.
      *
      * @param  list<StoredImage>  $references
+     * @return array{instruction: string, approach: 'edit'|'redraw'}
      */
-    private function interpret(Keyframe $keyframe, array $references): string
+    private function interpret(Keyframe $keyframe, array $references): array
     {
         $interpreter = new TweakInterpreter($keyframe, $references);
         $model = (string) Config::get('pipeline.models.text');
@@ -106,7 +122,7 @@ class TweakKeyframeImage implements ShouldQueue
 
             report($exception);
 
-            return $this->instruction;
+            return ['instruction' => $this->instruction, 'approach' => 'edit'];
         }
 
         $keyframe->generations()->create([
@@ -119,9 +135,31 @@ class TweakKeyframeImage implements ShouldQueue
             'usage' => $response->usage->toArray(),
         ]);
 
-        $instruction = trim((string) ($response->toArray()['instruction'] ?? ''));
+        $result = $response->toArray();
+        $instruction = trim((string) ($result['instruction'] ?? ''));
 
-        return $instruction !== '' ? $instruction : $this->instruction;
+        return [
+            'instruction' => $instruction !== '' ? $instruction : $this->instruction,
+            'approach' => ($result['approach'] ?? 'edit') === 'redraw' ? 'redraw' : 'edit',
+        ];
+    }
+
+    /**
+     * Draws the keyframe again from its plan with the change, for changes an
+     * edit cannot make, such as moving someone closer to something. Uses the
+     * keyframe model and the cast and sets, like the first drawing.
+     */
+    private function redraw(KeyframePainter $painter, Keyframe $keyframe, string $instruction): Media
+    {
+        $siblings = $keyframe->shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $keyframe->shot);
+        $target = $siblings->firstWhere('id', $keyframe->id) ?? $keyframe;
+
+        return $painter->render(
+            $target,
+            $siblings,
+            "The director asked for this change, and it matters most: {$instruction}",
+            choose: $this->option === null,
+        );
     }
 
     public function failed(?Throwable $exception): void

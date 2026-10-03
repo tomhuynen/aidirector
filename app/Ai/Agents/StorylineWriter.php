@@ -59,6 +59,8 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Title: two to four words naming the moment.
             - Description: one or two sentences describing exactly what is visible, in present tense. Name the subject, the pose, the key object and its state.
             - Prompt: a brief for an image model that renders this keyframe, 40 to 80 words. Call the cast and sets by their exact names and never describe their appearance, such as age, build, hair, clothing or colours; their pictures decide that. Describe the spot in the place with the context objects on it and where they are, and any object that is not in the cast and sets (use the same wording for these in every keyframe), then each person's pose, gaze and expression, which hand holds what, and the state of the key objects. Present tense, concrete nouns, no style words: the visual style is added separately.
+            - Must show: the one spatial fact the story depends on in this keyframe, in one concrete sentence a viewer could check at a glance: where the person is relative to the hazard, the line, the door or the object, with a sense of distance, such as "both feet clearly behind the yellow line, the container hanging just beyond the line, about an arm's length from her". Repeat what stays the same and state what changed.
+            - When the story is about a danger, stage the person and the danger close together in the same frame, seen from the side, with the line, gap or route between them clearly visible, so the distance can be read. Never leave the danger small and far behind the person.
             - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
             - Keep the same subject, environment and objects across all keyframes. Do not introduce new characters or props that the storyline does not imply.
             - Framing: choose one shot size for the whole shot by what it has to communicate; the camera does not move, so every keyframe shares it. Frame the action: the people and the object they act on, such as a door, a bin or a sign, sit together in the centre of the frame and take most of it. Choose the spot so that object is right beside the person, and keep the rest of the place a simple, subdued background.
@@ -90,6 +92,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
                     'title' => $schema->string()->required(),
                     'description' => $schema->string()->required(),
                     'prompt' => $schema->string()->required(),
+                    'must_show' => $schema->string()->required(),
                     'elements' => $schema->array()->items($schema->string())->required(),
                 ]))
                 ->min(Config::get('pipeline.keyframes.min'))

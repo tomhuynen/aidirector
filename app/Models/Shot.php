@@ -52,6 +52,7 @@ class Shot extends Model implements HasMedia
      *  purpose_override: 'App\Enums\ProjectPurpose',
      *  aspect_ratio_override: 'App\Enums\AspectRatio',
      *  preferred_elements: 'array',
+     *  keyframe_review: 'array',
      *  storyline_options: 'array',
      *  chosen_storyline: 'array',
      *  storyline: 'array',
@@ -65,6 +66,7 @@ class Shot extends Model implements HasMedia
             'purpose_override' => ProjectPurpose::class,
             'aspect_ratio_override' => AspectRatio::class,
             'preferred_elements' => 'array',
+            'keyframe_review' => 'array',
             'storyline_options' => 'array',
             'chosen_storyline' => 'array',
             'storyline' => 'array',
@@ -183,7 +185,7 @@ class Shot extends Model implements HasMedia
     /**
      * The keyframes planned for the chosen storyline.
      *
-     * @return list<array{title: string, description: string, prompt?: string, elements?: list<string>}>
+     * @return list<array{title: string, description: string, prompt?: string, must_show?: string, elements?: list<string>}>
      */
     public function storylineKeyframes(): array
     {
@@ -278,6 +280,7 @@ class Shot extends Model implements HasMedia
     {
         $this->keyframes()->get()->each->delete();
         $this->unsetRelation('keyframes');
+        $this->forceFill(['keyframe_review' => null]);
         $this->forgetVideo();
     }
 

@@ -58,6 +58,7 @@
             :duration="duration"
             :generating="shot.status === 'keyframes-pending'"
             :planning="state === 'planning'"
+            :review="shot.keyframeReview"
             :error="shot.storylineError"
             :images-url="shot.links?.keyframesGenerate ?? '#'"
             :choosing="{
@@ -69,6 +70,8 @@
               optionCount: shot.firstKeyframeOptions,
               chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
               moreUrl: shot.links?.firstKeyframeMore ?? '#',
+              adjustUrl: shot.links?.firstKeyframeAdjust,
+              adjusting: shot.status === 'first-keyframe-ready' && Boolean(keyframes[0]?.rendering),
             }"
             :reorder-url="shot.links?.keyframesReorder ?? '#'"
             :new-keyframe="{
@@ -154,6 +157,8 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         imageUrl: keyframe.imageUrl,
         thumbnailUrl: keyframe.thumbnailUrl,
         rendering: keyframe.rendering,
+        renderStage: keyframe.renderStage,
+        renderNote: keyframe.renderNote,
         renderError: keyframe.renderError,
         renders: keyframe.renders,
         elements: keyframe.elements,

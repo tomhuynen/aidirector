@@ -52,13 +52,32 @@
     </div>
 
     <footer class="mt-auto flex items-center justify-between gap-3 pt-8">
-      <Button type="button" variant="outline" size="lg" :disabled="feedback.processing" @click="regenerate">
+      <Button
+        v-if="!hasFeedback"
+        type="button"
+        variant="outline"
+        size="lg"
+        :disabled="feedback.processing"
+        @click="regenerate"
+      >
         <RefreshCw class="size-4" :class="feedback.processing && 'animate-spin'" />
         {{ $t('Generate new suggestions') }}
       </Button>
-      <Button type="button" size="lg" :disabled="selected === undefined || choice.processing" @click="choose">
-        {{ $t('Continue') }}
-        <ArrowRight class="size-4" />
+      <Button
+        type="button"
+        size="lg"
+        class="ml-auto"
+        :disabled="hasFeedback ? feedback.processing : selected === undefined || choice.processing"
+        @click="hasFeedback ? regenerate() : choose()"
+      >
+        <template v-if="hasFeedback">
+          <RefreshCw class="size-4" :class="feedback.processing && 'animate-spin'" />
+          {{ $t('Generate new suggestions with this feedback') }}
+        </template>
+        <template v-else>
+          {{ $t('Continue') }}
+          <ArrowRight class="size-4" />
+        </template>
       </Button>
     </footer>
   </section>
@@ -71,7 +90,7 @@ import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { RadioGroup, RadioGroupItem } from '@shared:ui/radio-group'
 import { ArrowRight, Pencil, RefreshCw } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps<{
   options: { title: string; storyline: string }[]
@@ -85,6 +104,12 @@ const selected = ref<string | undefined>(props.options.length > 0 ? '0' : undefi
 
 const feedback = useForm({ feedback: '' })
 const choice = useForm({ option: 0 })
+
+/**
+ * With feedback typed, the way on is a new set of suggestions that uses it,
+ * so the feedback can never be lost by continuing with an old one.
+ */
+const hasFeedback = computed(() => feedback.feedback.trim() !== '')
 
 const regenerate = () => feedback.post(props.suggestUrl, { preserveScroll: true })
 

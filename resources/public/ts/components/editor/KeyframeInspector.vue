@@ -40,7 +40,7 @@
       <Button type="submit" class="w-full" :disabled="!canTweak || tweak.instruction.trim() === '' || tweak.processing">
         <LoaderCircle v-if="keyframe.rendering" class="size-4 animate-spin" />
         <Wand2 v-else class="size-4" />
-        {{ keyframe.rendering ? $t('Generating image…') : $t('Apply change') }}
+        {{ keyframe.rendering ? busyLabel : $t('Apply change') }}
       </Button>
     </form>
 
@@ -74,6 +74,16 @@
         </li>
       </ul>
     </div>
+
+    <p v-if="checkWarning" class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
+      <span class="font-medium">{{ $t('The check could not see this') }}</span>
+      <span class="text-muted-foreground"> · {{ checkWarning }}</span>
+    </p>
+
+    <p v-if="checkProblems.length > 0" class="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">
+      <span class="font-medium">{{ $t('Redrawn automatically') }}</span>
+      <span class="text-muted-foreground"> · {{ checkProblems.join(' ') }}</span>
+    </p>
 
     <section
       v-if="adjustment"
@@ -172,6 +182,18 @@ const adjustment = computed(() => {
 
   return chosen?.request && chosen.instruction ? { request: chosen.request, instruction: chosen.instruction } : null
 })
+const busyLabel = computed(() => {
+  if (props.keyframe.renderStage === 'checking') return $t('Checking the image…')
+  if (props.keyframe.renderStage === 'fixing') return $t('Fixing a mistake the check found…')
+
+  return $t('Generating image…')
+})
+
+/** What the automatic check found wrong in the attempt before the chosen version, if it redrew. */
+const checkWarning = computed(() => props.keyframe.renders.find((render) => render.chosen)?.checkWarning ?? null)
+
+const checkProblems = computed(() => props.keyframe.renders.find((render) => render.chosen)?.checkProblems ?? [])
+
 const canTweak = computed(() => hasRender.value && Boolean(props.keyframe.tweakUrl) && !props.keyframe.rendering)
 
 const tweak = useForm({ instruction: '' })

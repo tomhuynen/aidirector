@@ -53,6 +53,10 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Name what must stay exactly the same: the feet and stance unless the change needs them, the other hand, the props, the camera, the framing, the background, the lighting and the style.
             - Change only what the director asked for. Do not add new ideas.
             - Write three to five short plain sentences in English, in the present tense, as a description of the edited image. No lists, no markdown.
+
+            Also choose how the change is made:
+            - edit: a local change to something already in the picture, such as clothing, a hand, an expression, an object's colour or a sign. The image is edited and everything else stays exactly the same.
+            - redraw: the change moves people or objects through the scene, changes distances or how close someone is to something, or changes the viewpoint, framing or composition. Editing cannot do that, so the keyframe is drawn again with the request.
             INSTRUCTIONS;
     }
 
@@ -63,6 +67,7 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
     {
         return [
             'instruction' => $schema->string()->required(),
+            'approach' => $schema->string()->enum(['edit', 'redraw'])->required(),
         ];
     }
 

@@ -9,6 +9,14 @@ use App\Enums\ProjectPurpose;
 /**
  * What the director optimises for, per project purpose. Injected into every
  * director prompt so recommendations are judged in the project's own terms.
+ *
+ * Known gap: the staging, framing, check and video rules elsewhere are tuned
+ * for e-learning (clear literal action, static camera, subdued backgrounds,
+ * no text, silent clips, a takeaway per shot) and apply to every purpose.
+ * Commercials need the opposite in many places: emotion over instruction,
+ * camera movement and cuts, rich backgrounds, product and brand shots with
+ * logos and on-screen text, and sound. Those rules should move behind the
+ * project purpose, starting here.
  */
 class PurposeBrief
 {

@@ -19,7 +19,7 @@ use App\Models\Shot;
 class KeyframeImageBrief
 {
     /**
-     * @param  array{title: string, description: string, prompt?: string}  $keyframe
+     * @param  array{title: string, description: string, prompt?: string, must_show?: string}  $keyframe
      */
     public static function for(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
@@ -28,9 +28,14 @@ class KeyframeImageBrief
         $lines = [
             "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
             '',
-            $keyframe['prompt'] ?? $keyframe['description'],
-            '',
         ];
+
+        if (filled($keyframe['must_show'] ?? null)) {
+            $lines[] = "Most important, this must be clearly visible: {$keyframe['must_show']}";
+            $lines[] = '';
+        }
+
+        array_push($lines, $keyframe['prompt'] ?? $keyframe['description'], '');
 
         if ($references->elements !== []) {
             $pictured = collect($references->elementImages)->map(fn(array $entry) => $entry['element']->getKey())->all();

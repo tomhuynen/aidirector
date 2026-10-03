@@ -54,6 +54,8 @@ return [
         'project_intake' => null,
         'tweak_interpreter' => null,
         'video_prompt_writer' => null,
+        'keyframe_checker' => env('AI_KEYFRAME_CHECK_REASONING', 'low'),
+        'shot_reviewer' => env('AI_SHOT_REVIEW_REASONING', 'medium'),
         'bench_judge' => 'low',
     ],
 
@@ -80,6 +82,12 @@ return [
     | (1K, 2K or 4K on OpenRouter's Gemini image models). Low keeps tests quick.
     */
     'image_quality' => env('AI_IMAGE_QUALITY', 'low'),
+
+    /*
+     * Each drawn keyframe is checked against its plan and references; a clear
+     * mistake gets one redraw with a fix before the director sees it.
+     */
+    'keyframe_check' => env('AI_KEYFRAME_CHECK', true),
 
     'keyframes' => [
         'min' => 3,

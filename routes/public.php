@@ -135,6 +135,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/keyframes/generate', [KeyframesGenerateController::class, 'store'])->name('keyframes.generate');
             Route::post('{shot}/keyframes/first/choose', [FirstKeyframeController::class, 'choose'])->name('keyframes.first.choose');
             Route::post('{shot}/keyframes/first/more', [FirstKeyframeController::class, 'more'])->name('keyframes.first.more');
+            Route::post('{shot}/keyframes/first/adjust', [FirstKeyframeController::class, 'adjust'])->name('keyframes.first.adjust');
             Route::post('{shot}/keyframes/{keyframe}/update', [KeyframeUpdateController::class, 'store'])->name('keyframes.update');
             Route::post('{shot}/keyframes/{keyframe}/tweak', [KeyframeTweakController::class, 'store'])->name('keyframes.tweak');
             Route::post('{shot}/keyframes/{keyframe}/render', [KeyframeRenderController::class, 'store'])->name('keyframes.render');

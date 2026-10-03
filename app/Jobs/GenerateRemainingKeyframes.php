@@ -60,6 +60,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
 
         $shot->forceFill([
             'storyline_error' => null,
+            'keyframe_review' => Config::get('pipeline.keyframe_check') ? $painter->review($shot, $siblings) : null,
             'status' => ShotStatus::KEYFRAMES_READY,
         ])->save();
 

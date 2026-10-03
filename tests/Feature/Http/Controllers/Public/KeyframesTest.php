@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\KeyframeChecker;
+use App\Ai\Agents\ShotReviewer;
 use App\Ai\Agents\TweakInterpreter;
 use App\Ai\KeyframePainter;
 use App\Enums\Disk;
@@ -298,6 +300,84 @@ describe('first keyframe', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Stage it as described.'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose a different calm part of the same place'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose different lighting'));
+    });
+
+    it('adjusts one option for keyframe 1 and adds the result as a new option', function () {
+        Image::fake(fn() => numberedPng());
+        TweakInterpreter::fake([['instruction' => 'The red line runs across the quay right in front of her feet.']]);
+
+        $shot = plannedShot($this->project);
+        drawFirstKeyframeOptions($shot);
+        $first = $shot->keyframes()->firstOrFail();
+        $option = $first->renders()->get(1);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.adjust', [$this->project, $shot]), ['render' => $option->id, 'instruction' => 'Put the line across her path'])
+            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+
+        $first->refresh();
+        $added = $first->renders()->last();
+
+        expect($first->renders())->toHaveCount(GenerateKeyframes::optionCount() + 1)
+            ->and($first->render_id)->toBeNull()
+            ->and($first->rendering)->toBeFalse()
+            ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY)
+            ->and($added->getCustomProperty(Keyframe::TWEAK_REQUEST))->toBe('Put the line across her path');
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('The red line runs across the quay right in front of her feet.')
+            && $prompt->attachments->first()->path === $option->getPathRelativeToRoot());
+    });
+
+    it('draws an option again instead of editing it when the change moves people through the scene', function () {
+        Config::set('pipeline.models.keyframe', 'create/model');
+        Config::set('pipeline.models.image_edit', 'edit/model');
+        Image::fake(fn() => fakePng());
+        TweakInterpreter::fake([['instruction' => 'She stands right next to the crane, the container almost above her.', 'approach' => 'redraw']]);
+
+        $shot = plannedShot($this->project);
+        drawFirstKeyframeOptions($shot);
+        $first = $shot->keyframes()->firstOrFail();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.adjust', [$this->project, $shot]), ['render' => $first->renders()->first()->id, 'instruction' => 'Closer to the crane'])
+            ->assertSessionHasNoErrors();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'create/model'
+            && $prompt->contains('The director asked for this change, and it matters most: She stands right next to the crane')
+            && $prompt->contains('A man in a navy suit stands at a red mailbox'));
+        Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model');
+
+        expect($first->fresh())->rendering->toBeFalse()->render_id->toBeNull()
+            ->and($first->fresh()->renders())->toHaveCount(GenerateKeyframes::optionCount() + 1);
+    });
+
+    it('does not choose an option while an adjusted one is being drawn', function () {
+        Image::fake(fn() => fakePng());
+
+        $shot = plannedShot($this->project);
+        drawFirstKeyframeOptions($shot);
+        $first = $shot->keyframes()->firstOrFail();
+        $first->forceFill(['rendering' => true])->save();
+        Queue::fake();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.choose', [$this->project, $shot]), ['render' => $first->renders()->first()->id])
+            ->assertSessionHasErrors('render');
+
+        expect($first->fresh()->render_id)->toBeNull();
+        Queue::assertNothingPushed();
+    });
+
+    it('only adjusts options while keyframe 1 is waiting for a choice', function () {
+        Queue::fake();
+        $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
+        Keyframe::factory()->for($shot)->create();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.first.adjust', [$this->project, $shot]), ['render' => 1, 'instruction' => 'Closer'])
+            ->assertSessionHasErrors('instruction');
+
+        Queue::assertNothingPushed();
     });
 
     it('adds more options on request', function () {
@@ -645,6 +725,117 @@ describe('tweak', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model' && $prompt->contains('Look back at the sign'));
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model' && ! $prompt->contains('Look back at the sign'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'create/model');
+    });
+
+    it('redraws a keyframe once when the automatic check finds a clear mistake', function () {
+        Config::set('pipeline.keyframe_check', true);
+        $notes = [];
+        Image::fake(function (ImagePrompt $prompt) use (&$notes) {
+            if ($prompt->contains('Correct these mistakes')) {
+                $notes[] = Keyframe::query()->where('rendering', true)->value('render_note');
+            }
+
+            return fakePng();
+        });
+        ShotReviewer::fake(fn() => ['clear' => true, 'notes' => []]);
+        $stages = [];
+        KeyframeChecker::fake(function () use (&$stages) {
+            $stages[] = Keyframe::query()->where('position', 2)->value('render_stage');
+
+            return ['passes' => false, 'problems' => ['The DAMEN logo is missing from the hall.'], 'fix' => 'Put the DAMEN logo back on the hall facade as in keyframe 1.'];
+        });
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+
+        $second = $shot->keyframes()->where('position', 2)->firstOrFail();
+        $chosen = $second->render();
+
+        expect($stages[0])->toBe(Keyframe::STAGE_CHECKING)
+            ->and($notes[0])->toBe('The DAMEN logo is missing from the hall.')
+            ->and($second->render_note)->toBeNull()
+            ->and($second->rendering)->toBeFalse()
+            ->and($second->render_stage)->toBeNull()
+            ->and($second->renders())->toHaveCount(2)
+            ->and($chosen->getCustomProperty(Keyframe::CHECK_PROBLEMS))->toBe(['The DAMEN logo is missing from the hall.'])
+            ->and($second->generations()->where('kind', 'text')->count())->toBe(1);
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Correct these mistakes from an earlier attempt: Put the DAMEN logo back'));
+        KeyframeChecker::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'What the keyframe should show:'));
+    });
+
+    it('puts what the keyframe must show first and warns when it stays missing after a redraw', function () {
+        Config::set('pipeline.keyframe_check', true);
+        Image::fake(fn() => fakePng());
+        KeyframeChecker::fake(fn() => ['must_show_visible' => false, 'passes' => false, 'problems' => ['She stands far from the container.'], 'fix' => 'Bring the container close to her.']);
+        ShotReviewer::fake(fn() => ['clear' => true, 'notes' => []]);
+
+        $plans = plannedKeyframes();
+        $plans[1]['must_show'] = 'The envelope is halfway into the slot, his hand still on it.';
+        $shot = plannedShot($this->project, ['storyline' => ['keyframes' => $plans]]);
+        renderAllKeyframes($shot);
+
+        $second = $shot->keyframes()->where('position', 2)->firstOrFail();
+
+        expect($second->render()->getCustomProperty(Keyframe::CHECK_WARNING))->toBe('The envelope is halfway into the slot, his hand still on it.');
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => str_starts_with(explode("\n\n", (string) $prompt->prompt)[1] ?? '', 'Most important, this must be clearly visible: The envelope is halfway into the slot'));
+        KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Must show: The envelope is halfway into the slot'));
+    });
+
+    it('reviews all keyframes together against the takeaway and keeps the notes', function () {
+        Config::set('pipeline.keyframe_check', true);
+        Image::fake(fn() => fakePng());
+        KeyframeChecker::fake(fn() => ['must_show_visible' => true, 'passes' => true, 'problems' => [], 'fix' => '']);
+        ShotReviewer::fake(fn() => ['clear' => false, 'notes' => ['In keyframes 2 and 3 the envelope looks the same, so posting cannot be seen.']]);
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+
+        expect($shot->fresh()->keyframe_review)->toBe(['clear' => false, 'notes' => ['In keyframes 2 and 3 the envelope looks the same, so posting cannot be seen.']]);
+        ShotReviewer::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'The shot teaches: Sending the letter is easy and final') && $prompt->attachments->count() === 3);
+    });
+
+    it('keeps the keyframe when the check passes', function () {
+        Config::set('pipeline.keyframe_check', true);
+        Image::fake(fn() => fakePng());
+        KeyframeChecker::fake(fn() => ['passes' => true, 'problems' => [], 'fix' => '']);
+        ShotReviewer::fake(fn() => ['clear' => true, 'notes' => []]);
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+
+        $second = $shot->keyframes()->where('position', 2)->firstOrFail();
+
+        expect($second->renders())->toHaveCount(1)
+            ->and($second->render()->getCustomProperty(Keyframe::CHECK_PROBLEMS))->toBeNull();
+        Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Correct these mistakes'));
+    });
+
+    it('never checks the options for keyframe 1, which the director picks', function () {
+        Config::set('pipeline.keyframe_check', true);
+        Image::fake(fn() => fakePng());
+        KeyframeChecker::fake(fn() => ['passes' => true, 'problems' => [], 'fix' => '']);
+
+        drawFirstKeyframeOptions(plannedShot($this->project));
+
+        KeyframeChecker::assertNeverPrompted();
+    });
+
+    it('keeps the keyframe when the check itself fails', function () {
+        Config::set('pipeline.keyframe_check', true);
+        Image::fake(fn() => fakePng());
+        KeyframeChecker::fake(fn() => throw new RuntimeException('Provider down'));
+        ShotReviewer::fake(fn() => ['clear' => true, 'notes' => []]);
+
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+
+        $second = $shot->keyframes()->where('position', 2)->firstOrFail();
+
+        expect($second->renders())->toHaveCount(1)
+            ->and($second->render())->not->toBeNull()
+            ->and($second->generations()->where('kind', 'text')->whereNotNull('error')->count())->toBe(1);
     });
 
     it('creates keyframes through the images endpoint for models that only serve it', function () {

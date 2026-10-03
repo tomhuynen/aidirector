@@ -60,6 +60,12 @@ class ShotResource extends JsonResource
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
+            /**
+             * The look at all keyframes together against the takeaway; notes only when it does not come across.
+             *
+             * @var array{clear: bool, notes: array<int, string>}|null
+             */
+            'keyframeReview' => $this->keyframe_review,
             /** @var int */
             'firstKeyframeOptions' => GenerateKeyframes::optionCount(),
             /** @var int */
@@ -88,6 +94,7 @@ class ShotResource extends JsonResource
                 'keyframesReorder' => route('public.shots.keyframes.reorder', [$this->project, $this->resource]),
                 'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
                 'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
+                'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
             ]),
             /** @var array<string, bool> */

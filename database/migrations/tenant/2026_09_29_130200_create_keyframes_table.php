@@ -18,6 +18,8 @@ return new class extends Migration {
             $table->text('prompt')->nullable();
             $table->unsignedBigInteger('render_id')->nullable();
             $table->boolean('rendering')->default(false);
+            $table->string('render_stage', 16)->nullable();
+            $table->text('render_note')->nullable();
             $table->text('render_error')->nullable();
             $table->timestamps();
 

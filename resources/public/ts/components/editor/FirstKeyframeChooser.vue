@@ -1,10 +1,13 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-4">
+    <!-- One row: as many options fit as the first batch, further ones scroll sideways. -->
     <div
-      class="grid min-h-0 flex-1 gap-4"
+      ref="row"
+      class="grid min-h-0 flex-1 gap-4 overflow-x-auto pb-2"
       :style="{
-        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+        gridAutoFlow: 'column',
+        gridAutoColumns: `calc((100% - ${optionCount - 1}rem) / ${optionCount})`,
+        gridTemplateRows: 'minmax(0, 1fr)',
       }"
     >
       <button
@@ -13,7 +16,7 @@
         type="button"
         class="group flex min-h-0 items-center justify-center"
         :aria-pressed="option.id === selectedId"
-        :disabled="pending"
+        :disabled="pending || adjusting"
         @click="selectedId = option.id"
       >
         <!-- Sized like the placeholders: one side fills the cell and the ratio sets the other, so the frame hugs the image. -->
@@ -52,13 +55,17 @@
     </div>
 
     <div class="flex shrink-0 items-center justify-between gap-3">
-      <Button type="button" variant="outline" :disabled="pending || more.processing" @click="askMore">
+      <Button type="button" variant="outline" :disabled="pending || adjusting || more.processing" @click="askMore">
         <RefreshCw class="size-4" />
         {{ $t('More options') }}
       </Button>
       <div class="flex items-center gap-3">
         <InputError :message="choice.errors.render" />
-        <Button type="button" :disabled="pending || selectedId === null || choice.processing" @click="choose">
+        <Button
+          type="button"
+          :disabled="pending || adjusting || selectedId === null || choice.processing"
+          @click="choose"
+        >
           {{ $t('Use this keyframe') }}
           <ArrowRight class="size-4" />
         </Button>
@@ -73,7 +80,7 @@ import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { ArrowRight, Check, LoaderCircle, RefreshCw } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, nextTick, useTemplateRef, watch } from 'vue'
 
 import Placeholder from './Placeholder.vue'
 
@@ -84,24 +91,24 @@ const props = defineProps<{
   pending: boolean
   chooseUrl: string
   moreUrl: string
+  /** An adjusted option is being drawn. */
+  adjusting?: boolean
 }>()
 
-const selectedId = ref<number | null>(null)
+/** The option the director selected; shared with the column on the right, which adjusts it. */
+const selectedId = defineModel<number | null>('selected', { default: null })
 
 /**
  * While options are being drawn, the batch that is still missing shows as spinners.
  */
 const placeholders = computed(() => {
+  if (props.adjusting && !props.pending) return 1
   if (!props.pending) return 0
 
   const drawn = props.options.length % props.optionCount
 
   return props.optionCount - drawn
 })
-
-const total = computed(() => props.options.length + placeholders.value)
-const columns = computed(() => Math.min(Math.max(total.value, 1), props.optionCount))
-const rows = computed(() => Math.max(Math.ceil(total.value / columns.value), 1))
 
 const isPortrait = computed(() => {
   const [w, h] = props.aspectRatio.split(':').map(Number)
@@ -125,4 +132,33 @@ const choose = () => {
 }
 
 const askMore = () => more.post(props.moreUrl, { preserveScroll: true })
+
+const row = useTemplateRef<HTMLElement>('row')
+
+const scrollToEnd = async () => {
+  await nextTick()
+  row.value?.scrollTo({ left: row.value.scrollWidth, behavior: 'smooth' })
+}
+
+// The tile of an option being adjusted is added at the end; bring it into view.
+watch(
+  () => props.adjusting,
+  (adjusting) => {
+    if (adjusting) void scrollToEnd()
+  },
+)
+
+// When an adjusted option arrives, select it and scroll it into view, so it can be compared and used straight away.
+watch(
+  () => props.options.length,
+  async (length, previous) => {
+    if (previous === undefined || length <= previous) return
+
+    if (length === previous + 1 && !props.pending) {
+      selectedId.value = props.options[length - 1]?.id ?? selectedId.value
+    }
+
+    await scrollToEnd()
+  },
+)
 </script>

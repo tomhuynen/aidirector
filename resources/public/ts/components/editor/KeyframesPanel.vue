@@ -22,12 +22,14 @@
 
         <FirstKeyframeChooser
           v-if="choosing.active && (keyframes[0] || planning)"
+          v-model:selected="selectedOption"
           :options="keyframes[0]?.renders ?? []"
           :option-count="choosing.optionCount"
           :aspect-ratio="aspectRatio"
           :pending="choosing.pending"
           :choose-url="choosing.chooseUrl"
           :more-url="choosing.moreUrl"
+          :adjusting="choosing.adjusting"
         />
         <div v-else class="flex min-h-0 flex-1 items-center justify-center">
           <video
@@ -41,18 +43,26 @@
             class="max-h-full max-w-full rounded-xl border border-border bg-black object-cover"
             :style="frameSize"
           />
-          <img
+          <div
             v-else-if="!showVideo && !adding && selected?.imageUrl"
-            :src="selected.imageUrl"
-            :alt="selected.title"
-            :class="
-              cn(
-                'max-h-full max-w-full rounded-xl border border-border bg-card object-cover',
-                selected.rendering && 'opacity-50',
-              )
-            "
+            class="relative flex max-h-full max-w-full items-end justify-center"
             :style="frameSize"
-          />
+          >
+            <img
+              :src="selected.imageUrl"
+              :alt="selected.title"
+              :class="
+                cn('size-full rounded-xl border border-border bg-card object-cover', selected.rendering && 'opacity-50')
+              "
+            />
+            <p
+              v-if="selected.rendering"
+              class="absolute bottom-4 mx-4 flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
+            >
+              <LoaderCircle class="size-4 shrink-0 animate-spin" />
+              {{ renderLabel(selected) }}
+            </p>
+          </div>
           <Placeholder v-else class="max-h-full max-w-full rounded-xl bg-card" :style="frameSize">
             <p
               v-if="showVideo && video.pending"
@@ -84,14 +94,20 @@
               <p class="text-sm leading-relaxed text-muted-foreground">{{ selected.description }}</p>
               <p v-if="selected.rendering" class="flex items-center justify-center gap-2 pt-1 text-xs text-signal">
                 <LoaderCircle class="size-3.5 animate-spin" />
-                {{ $t('Generating image…') }}
+                {{ renderLabel(selected) }}
               </p>
             </div>
           </Placeholder>
         </div>
       </section>
 
-      <FirstKeyframeInspector v-if="choosing.active && keyframes[0]" :keyframe="keyframes[0]" />
+      <FirstKeyframeInspector
+        v-if="choosing.active && (keyframes[0] || planning)"
+        :keyframe="keyframes[0]"
+        :adjust-url="planning ? undefined : choosing.adjustUrl"
+        :selected="selectedOption"
+        :busy="choosing.pending || Boolean(choosing.adjusting)"
+      />
       <NewKeyframeInspector
         v-else-if="adding"
         :position="keyframes.length + 1"
@@ -158,6 +174,14 @@
           </div>
         </header>
 
+        <div
+          v-if="review && !review.clear && review.notes.length > 0 && !generating"
+          class="space-y-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm"
+        >
+          <p class="font-medium">{{ $t('The check thinks the point may not come across') }}</p>
+          <p v-for="(note, i) in review.notes" :key="i" class="text-muted-foreground">{{ note }}</p>
+        </div>
+
         <ul class="flex items-start gap-4 overflow-x-auto pb-1">
           <li
             v-for="(keyframe, i) in strip"
@@ -214,13 +238,18 @@
               </span>
               <div class="min-w-0">
                 <p class="truncate text-sm font-semibold">{{ keyframe.title }}</p>
-                <p class="text-xs text-muted-foreground tabular-nums">{{ timeAt(i) }}</p>
+                <p v-if="keyframe.renderStage" class="truncate text-xs text-signal" :title="renderLabel(keyframe)">
+                  {{ renderLabel(keyframe) }}
+                </p>
+                <p v-else class="text-xs text-muted-foreground tabular-nums">{{ timeAt(i) }}</p>
               </div>
             </div>
           </li>
           <template v-if="planning && keyframes.length === 0">
             <li v-for="n in 3" :key="`planning-${n}`" class="w-44 shrink-0 space-y-2">
-              <Placeholder class="h-28 w-full rounded-lg bg-card">
+              <Placeholder
+                :class="cn('h-28 w-full rounded-lg bg-card', n === 1 && 'border-signal ring-2 ring-signal/40')"
+              >
                 <LoaderCircle class="size-5 animate-spin text-signal" />
               </Placeholder>
               <div class="mx-1 h-4 w-24 animate-pulse rounded bg-secondary" />
@@ -248,7 +277,7 @@
         <InputError :message="arrangeError" />
       </section>
 
-      <section class="flex w-[22rem] shrink-0 flex-col gap-4 border-l border-border p-6">
+      <section v-if="!planning" class="flex w-[22rem] shrink-0 flex-col gap-4 border-l border-border p-6">
         <header class="flex items-start justify-between gap-4">
           <div class="space-y-1">
             <h2 class="text-xl font-semibold">{{ $t('Video') }}</h2>
@@ -372,6 +401,10 @@ export type PanelKeyframe = {
   imageUrl: string | null
   thumbnailUrl: string | null
   rendering: boolean
+  /** After drawing: the image is being checked, or redrawn to fix what the check found. */
+  renderStage?: 'checking' | 'fixing' | null
+  /** While fixing: what the check found, in plain words. */
+  renderNote?: string | null
   renderError: string | null
   renders: {
     id: number
@@ -382,6 +415,10 @@ export type PanelKeyframe = {
     request?: string | null
     /** The rewritten instruction the image model received. */
     instruction?: string | null
+    /** When the automatic check redrew this version: what was wrong with the one before. */
+    checkProblems?: string[]
+    /** What the keyframe must show that the check still could not see after a redraw. */
+    checkWarning?: string | null
   }[]
   elements: string[]
   updateUrl: string | null
@@ -396,6 +433,8 @@ export type PanelChoosing = {
   optionCount: number
   chooseUrl: string
   moreUrl: string
+  adjustUrl?: string
+  adjusting?: boolean
 }
 
 export type PanelNewKeyframe = {
@@ -425,9 +464,14 @@ const props = defineProps<{
   reorderUrl: string
   /** The keyframes are still being planned: the panel shows the drawing state with nothing in it yet. */
   planning?: boolean
+  /** The look at all keyframes together; shown only when the point does not come across. */
+  review?: { clear: boolean; notes: string[] } | null
 }>()
 
 const selectedIndex = ref(0)
+
+/** The keyframe 1 option the director selected, shared by the options and the column that adjusts them. */
+const selectedOption = ref<number | null>(null)
 const showVideo = ref(Boolean(props.video.url || props.video.pending))
 
 const adding = ref(false)
@@ -544,6 +588,19 @@ const canArrange = computed(
     props.keyframes.length > 1 &&
     props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.destroyUrl && !keyframe.rendering),
 )
+
+/**
+ * What a busy keyframe is doing, so a longer wait explains itself.
+ */
+const renderLabel = (keyframe: PanelKeyframe) => {
+  if (keyframe.renderStage === 'checking') return $t('Checking the image…')
+  if (keyframe.renderStage === 'fixing')
+    return keyframe.renderNote
+      ? $t('Fixing: :note', { note: keyframe.renderNote })
+      : $t('Fixing a mistake the check found…')
+
+  return $t('Generating image…')
+}
 
 const isSelected = (id: string) => !showVideo.value && !adding.value && selected.value?.id === id
 

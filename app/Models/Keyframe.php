@@ -40,6 +40,18 @@ class Keyframe extends Model implements HasMedia
 
     public const TWEAK_INSTRUCTION = 'tweak_instruction';
 
+    /** While rendering: the drawn image is being checked. */
+    public const STAGE_CHECKING = 'checking';
+
+    /** While rendering: the image is redrawn to fix what the check found. */
+    public const STAGE_FIXING = 'fixing';
+
+    /** On a render: what the keyframe must show that the check could still not see after a redraw. */
+    public const CHECK_WARNING = 'check_warning';
+
+    /** On a redrawn render: the mistakes the automatic check found in the render before it. */
+    public const CHECK_PROBLEMS = 'check_problems';
+
     protected $guarded = [];
 
     /** @var array<string, class-string> */

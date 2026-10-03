@@ -45,9 +45,6 @@
                   {{ $t('Part :n', { n: String(i + 1) }) }} · {{ $t(':count s', { count: String(part.duration) }) }}
                 </span>
                 <span class="block truncate text-sm font-medium group-hover:text-signal">{{ part.title }}</span>
-                <span v-if="part.storyline" class="line-clamp-2 block text-xs leading-snug text-muted-foreground">
-                  {{ part.storyline }}
-                </span>
               </span>
             </Link>
           </li>
@@ -57,12 +54,12 @@
         </p>
       </section>
 
-      <section v-if="takeaway" class="space-y-2 border-t border-border pt-6">
+      <section v-if="takeaways.length > 0" class="space-y-2 border-t border-border pt-6">
         <h3 class="flex items-center gap-2 font-semibold">
           <Target class="size-4 text-muted-foreground" />
           {{ $t('Takeaway') }}
         </h3>
-        <p class="text-[15px] leading-relaxed">{{ takeaway }}</p>
+        <p class="text-[15px] leading-relaxed">{{ takeaways.join(' ') }}</p>
       </section>
     </aside>
 
@@ -152,6 +149,11 @@ const props = defineProps<{
   pending: boolean
   aspectRatio: string
 }>()
+
+/**
+ * The takeaway of every part, in order; the merged shot itself has none of its own.
+ */
+const takeaways = computed(() => props.merge.parts.map((part) => part.takeaway).filter((line) => line.trim() !== ''))
 
 const join = useForm({ transition: props.merge.transition })
 

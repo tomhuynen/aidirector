@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace App\Ai;
 
+use App\Ai\Agents\KeyframeChecker;
+use App\Ai\Agents\ShotReviewer;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
+use App\Models\Shot;
 use App\Support\Images\OpenRouterImageClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Files\StoredImage;
 use Laravel\Ai\Image;
+use Laravel\Ai\Responses\StructuredAgentResponse;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
 
@@ -171,7 +175,158 @@ class KeyframePainter
         $render = $this->paint($keyframe, $extra === '' ? $prompt : $prompt . "\n" . $extra, $references->images(), $choose);
         $keyframe->load('media');
 
-        return $render;
+        // Options for keyframe 1 are judged by the director; every keyframe that is used straight away is checked once.
+        if (! $choose || ! Config::get('pipeline.keyframe_check')) {
+            return $render;
+        }
+
+        // The keyframe stays busy while it is checked, so the director sees why it takes longer.
+        $keyframe->forceFill(['rendering' => true, 'render_stage' => Keyframe::STAGE_CHECKING])->save();
+        $mustShow = isset($plan['must_show']) ? (string) $plan['must_show'] : null;
+        $check = $this->check($keyframe, $render, $references, $mustShow);
+
+        if ($check === null || $check['passes'] || trim($check['fix']) === '') {
+            $keyframe->forceFill(['rendering' => false, 'render_stage' => null])->save();
+
+            return $render;
+        }
+
+        $keyframe->forceFill(['render_stage' => Keyframe::STAGE_FIXING, 'render_note' => implode(' ', $check['problems'])])->save();
+
+        try {
+            $redraw = $this->paint($keyframe, $prompt . "\nCorrect these mistakes from an earlier attempt: " . $check['fix'], $references->images(), $choose);
+        } finally {
+            $keyframe->forceFill(['rendering' => false, 'render_stage' => null, 'render_note' => null])->save();
+        }
+
+        $redraw->setCustomProperty(Keyframe::CHECK_PROBLEMS, $check['problems'])->save();
+
+        // When the point of the keyframe was missing, look once more: if it still is, say so instead of passing silently.
+        if (filled($mustShow) && ! $check['must_show_visible']) {
+            $keyframe->forceFill(['rendering' => true, 'render_stage' => Keyframe::STAGE_CHECKING])->save();
+            $again = $this->check($keyframe, $redraw, $references, $mustShow);
+            $keyframe->forceFill(['rendering' => false, 'render_stage' => null])->save();
+
+            if ($again !== null && ! $again['must_show_visible']) {
+                $redraw->setCustomProperty(Keyframe::CHECK_WARNING, $mustShow)->save();
+            }
+        }
+
+        $keyframe->load('media');
+
+        return $redraw;
+    }
+
+    /**
+     * Looks at all keyframes of the shot together against its takeaway. Null
+     * when the review itself fails; a review never holds up the shot.
+     *
+     * @param  Collection<int, Keyframe>  $keyframes
+     * @return array{clear: bool, notes: list<string>}|null
+     */
+    public function review(Shot $shot, Collection $keyframes): ?array
+    {
+        $rendered = $keyframes->filter(fn(Keyframe $keyframe) => $keyframe->render() !== null)->sortBy('position')->values();
+
+        if ($rendered->count() < 2) {
+            return null;
+        }
+
+        $reviewer = new ShotReviewer($shot, $rendered);
+        $model = (string) Config::get('pipeline.models.text');
+        $started = hrtime(true);
+
+        try {
+            /** @var StructuredAgentResponse $response */
+            $response = $reviewer->prompt($reviewer->promptFor(), attachments: $rendered->map(fn(Keyframe $keyframe) => $this->referenceFor($keyframe->render()))->all(), provider: 'openrouter', model: $model);
+        } catch (Throwable $exception) {
+            $shot->generations()->create([
+                'director_id' => $shot->project->director_id,
+                'kind' => 'text',
+                'provider' => 'openrouter',
+                'model' => $model,
+                'prompt' => $reviewer->promptFor(),
+                'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
+                'error' => $exception->getMessage(),
+            ]);
+            report($exception);
+
+            return null;
+        }
+
+        $shot->generations()->create([
+            'director_id' => $shot->project->director_id,
+            'kind' => 'text',
+            'provider' => $response->meta->provider ?? 'openrouter',
+            'model' => $response->meta->model ?? $model,
+            'prompt' => $reviewer->promptFor(),
+            'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
+            'usage' => $response->usage->toArray(),
+        ]);
+
+        $result = $response->toArray();
+
+        return [
+            'clear' => (bool) ($result['clear'] ?? true),
+            'notes' => array_values(array_filter(array_map('strval', (array) ($result['notes'] ?? [])))),
+        ];
+    }
+
+    /**
+     * Has the checker look at a render against the plan, keyframe 1 and the
+     * cast and sets. Returns null when the check itself fails, so a broken
+     * check never holds up the shot.
+     *
+     * @return array{passes: bool, must_show_visible: bool, problems: list<string>, fix: string}|null
+     */
+    private function check(Keyframe $keyframe, Media $render, KeyframeReferences $references, ?string $mustShow = null): ?array
+    {
+        $pictured = array_map(fn(array $entry) => $entry['element'], $references->elementImages);
+        $checker = new KeyframeChecker($keyframe, $references->first !== null, $pictured, $mustShow);
+        $images = array_values(array_filter([
+            $this->referenceFor($render),
+            $references->first,
+            ...array_map(fn(array $entry) => $entry['image'], $references->elementImages),
+        ]));
+        $model = (string) Config::get('pipeline.models.text');
+        $started = hrtime(true);
+
+        try {
+            /** @var StructuredAgentResponse $response */
+            $response = $checker->prompt($checker->promptFor(), attachments: $images, provider: 'openrouter', model: $model);
+        } catch (Throwable $exception) {
+            $keyframe->generations()->create([
+                'director_id' => $keyframe->shot->project->director_id,
+                'kind' => 'text',
+                'provider' => 'openrouter',
+                'model' => $model,
+                'prompt' => $checker->promptFor(),
+                'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
+                'error' => $exception->getMessage(),
+            ]);
+            report($exception);
+
+            return null;
+        }
+
+        $keyframe->generations()->create([
+            'director_id' => $keyframe->shot->project->director_id,
+            'kind' => 'text',
+            'provider' => $response->meta->provider ?? 'openrouter',
+            'model' => $response->meta->model ?? $model,
+            'prompt' => $checker->promptFor(),
+            'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000),
+            'usage' => $response->usage->toArray(),
+        ]);
+
+        $result = $response->toArray();
+
+        return [
+            'passes' => (bool) ($result['passes'] ?? true),
+            'must_show_visible' => (bool) ($result['must_show_visible'] ?? true),
+            'problems' => array_values(array_filter(array_map('strval', (array) ($result['problems'] ?? [])))),
+            'fix' => (string) ($result['fix'] ?? ''),
+        ];
     }
 
     /**
