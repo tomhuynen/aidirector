@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Ai\ImageReplies;
+use App\Models\Correction;
 use App\Models\Director;
 use App\Models\Element;
 use App\Models\ElementRound;
@@ -14,6 +15,7 @@ use App\Models\Keyframe;
 use App\Models\Media;
 use App\Models\PersonalAccessToken;
 use App\Models\Project;
+use App\Models\ProjectRule;
 use App\Models\Shot;
 use App\Models\StyleOption;
 use App\Models\Tenant;
@@ -100,6 +102,8 @@ class AppServiceProvider extends ServiceProvider
             'style-option' => StyleOption::class,
             'element-round' => ElementRound::class,
             'element-suggestion' => ElementSuggestion::class,
+            'correction' => Correction::class,
+            'project-rule' => ProjectRule::class,
         ]);
 
         Model::preventLazyLoading(! $this->app->isProduction());

@@ -47,6 +47,7 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
 
             Cast and sets of this project, recurring people, places and objects:
             {$project->elementsBrief()}
+            {$this->projectRules()}
 
             How to use the cast and sets:
             - Tell the stories with these. Refer to each one by its name from the list, used as a noun with "the", as in "the visitor in hi-vis walks onto the quay". Never write "a man", "a woman" or "a person" for someone from the list, and never double the article.
@@ -163,5 +164,15 @@ class StorylineOptionsWriter implements Agent, HasReasoningEffort, HasStructured
         }
 
         return 'The shot is short: between ' . Config::get('pipeline.video.min_duration') . ' and ' . Config::get('pipeline.video.max_duration') . ' seconds, as long as its one action needs.';
+    }
+
+    /**
+     * Rules the director confirmed from recurring corrections, when there are any.
+     */
+    private function projectRules(): string
+    {
+        $rules = $this->shot->project->rulesBrief();
+
+        return $rules === '' ? '' : "\nRules the director confirmed for this project, always follow them:\n{$rules}";
     }
 }

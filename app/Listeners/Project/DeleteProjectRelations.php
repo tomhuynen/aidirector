@@ -30,6 +30,9 @@ class DeleteProjectRelations
 
         $project->elementRounds()->get()->each(fn(ElementRound $round) => $round->delete());
 
+        $project->corrections()->delete();
+        $project->rules()->delete();
+
         // Children first, so a parent never outlives the options that point at it.
         $project->styleOptions()->reorder()->orderByDesc('round')->get()->each(fn(StyleOption $option) => $option->delete());
 

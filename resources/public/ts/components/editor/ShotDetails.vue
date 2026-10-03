@@ -8,16 +8,6 @@
     "
   >
     <template v-if="collapsed">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        :aria-label="$t('Show the storyline')"
-        :title="$t('Show the storyline')"
-        @click="toggle"
-      >
-        <PanelLeftOpen class="size-4" />
-      </Button>
       <button
         type="button"
         class="min-h-0 truncate text-sm font-semibold text-muted-foreground [writing-mode:vertical-rl] hover:text-foreground"
@@ -25,12 +15,23 @@
       >
         {{ shot.title }}
       </button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        class="mt-auto"
+        :aria-label="$t('Show the storyline')"
+        :title="$t('Show the storyline')"
+        @click="toggle"
+      >
+        <PanelLeftOpen class="size-4" />
+      </Button>
     </template>
 
     <template v-else>
       <div class="flex items-start justify-between gap-3">
         <h2 class="text-2xl leading-tight font-semibold text-balance">{{ shot.title }}</h2>
-        <div class="flex shrink-0 items-center gap-1">
+        <div class="flex shrink-0 items-center">
           <ConfirmDelete
             :action="shot.links?.storylineReopen ?? '#'"
             :title="$t('Back to the storylines?')"
@@ -48,16 +49,6 @@
               </Button>
             </template>
           </ConfirmDelete>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            :aria-label="$t('Hide the storyline')"
-            :title="$t('Hide the storyline')"
-            @click="toggle"
-          >
-            <PanelLeftClose class="size-4" />
-          </Button>
         </div>
       </div>
 
@@ -76,6 +67,19 @@
         </h3>
         <p class="text-[15px] leading-relaxed">{{ shot.takeaway }}</p>
       </section>
+
+      <div class="mt-auto flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          :aria-label="$t('Hide the storyline')"
+          :title="$t('Hide the storyline')"
+          @click="toggle"
+        >
+          <PanelLeftClose class="size-4" />
+        </Button>
+      </div>
     </template>
   </aside>
 </template>
@@ -93,12 +97,12 @@ defineProps<{
   storyline: { title: string; storyline: string } | null
 }>()
 
-/** Remembered per browser, so the column stays folded while moving between shots. */
+/** Remembered for this browser tab's session, so the column stays folded while moving between shots. */
 const STORAGE_KEY = 'aidirector.shot-details.collapsed'
 
 const read = (): boolean => {
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === '1'
+    return window.sessionStorage.getItem(STORAGE_KEY) === '1'
   } catch {
     return false
   }
@@ -110,7 +114,7 @@ const toggle = () => {
   collapsed.value = !collapsed.value
 
   try {
-    window.localStorage.setItem(STORAGE_KEY, collapsed.value ? '1' : '0')
+    window.sessionStorage.setItem(STORAGE_KEY, collapsed.value ? '1' : '0')
   } catch {
     // Storage can be blocked; the column still folds for this page.
   }

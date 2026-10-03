@@ -64,6 +64,10 @@ class KeyframeImageBrief
             $lines[] = "Light: {$framing['light']}. This overrides the lighting in the visual style.";
         }
 
+        if (($rules = $shot->project->rulesBrief()) !== '') {
+            $lines[] = "Project rules, always follow them:\n{$rules}";
+        }
+
         $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';
         $lines[] = 'Staging: the people are inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches a figure: no railings, pillars, poles, barriers or machines directly behind or in front of the people. Any sign or context object sits on that surface beside the people, clearly readable, not touching them. The ground near the feet is plain.';
         $lines[] = 'Do not add text, captions or watermarks. Logos, signs and markings that belong to the place stay exactly as they are.';

@@ -23,6 +23,7 @@ use App\Http\Controllers\Public\Projects\Elements\VersionController as ElementVe
 use App\Http\Controllers\Public\Projects\Elements\ViewController as ElementViewController;
 use App\Http\Controllers\Public\Projects\FormatController as ProjectFormatController;
 use App\Http\Controllers\Public\Projects\IndexController as ProjectIndexController;
+use App\Http\Controllers\Public\Projects\RuleController as ProjectRuleController;
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
 use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
@@ -80,6 +81,8 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{project}/setup', [ProjectCreateController::class, 'resume'])->name('setup');
             Route::get('{project}/cover', [ProjectCoverController::class, 'show'])->name('cover.view');
             Route::post('{project}/format', [ProjectFormatController::class, 'store'])->name('format');
+            Route::post('{project}/rules/{rule}/accept', [ProjectRuleController::class, 'accept'])->scopeBindings()->name('rules.accept');
+            Route::post('{project}/rules/{rule}/dismiss', [ProjectRuleController::class, 'dismiss'])->scopeBindings()->name('rules.dismiss');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
         });
 

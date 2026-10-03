@@ -52,6 +52,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Cast and sets of this project, recurring people, places and objects:
             {$project->elementsBrief()}
+            {$this->projectRules()}
             Reuse one of these when this shot is about that person, place or object, and then call it by its exact name. Never describe how one of these looks: the image model draws each from its picture. The people in the shot always come from this list; never introduce a new person. Introduce a new place or object only when the story needs it; never force an existing one into a story where it does not belong.
 
             Rules:
@@ -173,5 +174,15 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
               - putting on or taking off clothing or gear: 3 to 4 seconds
             Round to whole seconds, between {$min} and {$max}.
             RULE;
+    }
+
+    /**
+     * Rules the director confirmed from recurring corrections, when there are any.
+     */
+    private function projectRules(): string
+    {
+        $rules = $this->shot->project->rulesBrief();
+
+        return $rules === '' ? '' : "\nRules the director confirmed for this project, always follow them:\n{$rules}";
     }
 }

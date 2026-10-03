@@ -63,7 +63,7 @@
       </section>
     </aside>
 
-    <section class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-6">
+    <section class="group relative flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-6">
       <div
         v-if="error && !pending"
         class="flex items-center justify-between gap-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm"
@@ -81,6 +81,9 @@
           :key="videoUrl"
           :src="videoUrl"
           controls
+          autoplay
+          muted
+          loop
           playsinline
           class="max-h-full max-w-full rounded-xl border border-border bg-black object-cover"
           :style="frameSize"
@@ -110,6 +113,12 @@
           {{ $t('Join again') }}
         </Button>
       </div>
+      <VideoActions
+        v-if="videoUrl && !pending"
+        :video-url="videoUrl"
+        :download-url="downloadUrl"
+        :title="$t('Video')"
+      />
     </section>
   </div>
 </template>
@@ -123,6 +132,7 @@ import { computed, watch } from 'vue'
 
 import Placeholder from './Placeholder.vue'
 import TransitionPicker, { type ShotTransitionOption } from './TransitionPicker.vue'
+import VideoActions from './VideoActions.vue'
 
 export type ShotMerge = {
   transition: string
@@ -145,6 +155,7 @@ const props = defineProps<{
   takeaway: string | null
   merge: ShotMerge
   videoUrl: string | null
+  downloadUrl?: string | null
   error: string | null
   pending: boolean
   aspectRatio: string

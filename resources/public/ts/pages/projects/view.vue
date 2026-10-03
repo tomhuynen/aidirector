@@ -64,6 +64,8 @@
       </div>
     </section>
 
+    <ProjectRules v-if="rules.length > 0" :rules="rules" />
+
     <CastAndSets :elements="elements" :types="elementTypes" :create-url="project.links?.elementsCreate ?? '#'" />
   </Page>
 </template>
@@ -75,6 +77,7 @@ import type { Inertia } from '@public/ts/types/utils'
 import CastAndSets from '@public:components/CastAndSets.vue'
 import FormatPicker from '@public:components/FormatPicker.vue'
 import Page from '@public:components/Page.vue'
+import ProjectRules from '@public:components/ProjectRules.vue'
 import { Button } from '@shared:ui/button'
 import { ArrowRight, ExternalLink } from 'lucide-vue-next'
 import { computed } from 'vue'

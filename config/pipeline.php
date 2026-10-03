@@ -56,6 +56,7 @@ return [
         'video_prompt_writer' => null,
         'keyframe_checker' => env('AI_KEYFRAME_CHECK_REASONING', 'low'),
         'shot_reviewer' => env('AI_SHOT_REVIEW_REASONING', 'medium'),
+        'correction_classifier' => env('AI_CORRECTION_REASONING', 'low'),
         'bench_judge' => 'low',
     ],
 
@@ -88,6 +89,16 @@ return [
      * mistake gets one redraw with a fix before the director sees it.
      */
     'keyframe_check' => env('AI_KEYFRAME_CHECK', true),
+
+    /*
+     * Changes and check findings are labelled in the background; a kind of
+     * correction that comes back in this many different shots is suggested
+     * as a project rule.
+     */
+    'rules' => [
+        'enabled' => env('AI_LEARN_RULES', true),
+        'threshold' => 2,
+    ],
 
     'keyframes' => [
         'min' => 3,

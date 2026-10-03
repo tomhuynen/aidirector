@@ -7,10 +7,12 @@ namespace App\Ai;
 use App\Ai\Agents\KeyframeChecker;
 use App\Ai\Agents\ShotReviewer;
 use App\Ai\Briefs\KeyframeImageBrief;
+use App\Enums\CorrectionSource;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Corrections\RecordCorrection;
 use App\Support\Images\OpenRouterImageClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
@@ -200,6 +202,7 @@ class KeyframePainter
         }
 
         $redraw->setCustomProperty(Keyframe::CHECK_PROBLEMS, $check['problems'])->save();
+        RecordCorrection::record($shot->project, CorrectionSource::CHECK, implode(' ', $check['problems']), $shot, $keyframe, RecordCorrection::keyframeContext($keyframe));
 
         // When the point of the keyframe was missing, look once more: if it still is, say so instead of passing silently.
         if (filled($mustShow) && ! $check['must_show_visible']) {

@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Storyline;
 
+use App\Enums\CorrectionSource;
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\StorylineFeedbackRequest;
 use App\Jobs\GenerateStorylineOptions;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Corrections\RecordCorrection;
 use Illuminate\Support\Facades\Gate;
 
 class SuggestController
@@ -27,6 +29,11 @@ class SuggestController
         ])->save();
 
         GenerateStorylineOptions::dispatch($shot, $request->validated('feedback'));
+
+        if (filled($feedback = $request->validated('feedback'))) {
+            $titles = collect($shot->storylineOptions())->pluck('title')->join(', ');
+            RecordCorrection::record($project, CorrectionSource::FEEDBACK, (string) $feedback, $shot, context: "Takeaway of the shot: {$shot->takeaway}. Suggested storylines: {$titles}.");
+        }
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

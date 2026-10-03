@@ -8,6 +8,7 @@ use App\Enums\AspectRatio;
 use App\Enums\CoverStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
+use App\Enums\ProjectRuleStatus;
 use App\Events\ProjectDeleting;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -181,6 +182,31 @@ class Project extends Model implements HasMedia
     public function generations(): MorphMany
     {
         return $this->morphMany(Generation::class, 'generatable');
+    }
+
+    /** @return HasMany<Correction, $this> */
+    public function corrections(): HasMany
+    {
+        return $this->hasMany(Correction::class);
+    }
+
+    /** @return HasMany<ProjectRule, $this> */
+    public function rules(): HasMany
+    {
+        return $this->hasMany(ProjectRule::class)->orderBy('id');
+    }
+
+    /**
+     * The confirmed rules as lines for the writers, image prompts and checks;
+     * empty when there are none.
+     */
+    public function rulesBrief(): string
+    {
+        return $this->rules()
+            ->where('status', ProjectRuleStatus::ACTIVE)
+            ->pluck('text')
+            ->map(fn(string $rule) => "- {$rule}")
+            ->join("\n");
     }
 
     /** @return HasMany<ElementRound, $this> */

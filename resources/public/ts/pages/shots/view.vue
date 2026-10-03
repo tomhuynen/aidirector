@@ -33,6 +33,7 @@
           :takeaway="shot.takeaway"
           :merge="merge"
           :video-url="shot.videoUrl"
+          :download-url="shot.videoDownloadUrl"
           :error="shot.videoError"
           :pending="shot.status === 'video-pending'"
           :aspect-ratio="aspectRatio"
@@ -80,6 +81,7 @@
             }"
             :video="{
               url: shot.videoUrl,
+              downloadUrl: shot.videoDownloadUrl,
               error: shot.videoError,
               resolution: shot.videoResolution,
               resolutions: shot.videoResolutions,

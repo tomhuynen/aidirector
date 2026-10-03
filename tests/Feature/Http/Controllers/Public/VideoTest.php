@@ -271,6 +271,23 @@ describe('page', function () {
             ->assertSuccessful();
     });
 
+    it('offers the video as a download under the shot code and title', function () {
+        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_READY, 'title' => 'Quay Stop Line', 'position' => 7]);
+        $shot->addMediaFromString(fakeMp4())->usingFileName('shot.mp4')->toMediaCollection(Shot::VIDEO);
+
+        $response = actingAs($this->director, 'director')->get(route('public.shots.view', [$this->project, $shot]));
+        $url = $response->viewData('page')['props']['shot']['videoDownloadUrl'];
+
+        actingAs($this->director, 'director')
+            ->get($url)
+            ->assertSuccessful()
+            ->assertDownload('SH070 Quay Stop Line.mp4');
+
+        actingAs($this->director, 'director')
+            ->get(str_replace('SH070', 'SH999', $url))
+            ->assertForbidden();
+    });
+
     it('drops the video when the keyframes are planned again', function () {
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_READY, 'video_prompt' => 'The prompt', 'video_job_id' => 'vid_1']);
         $shot->addMediaFromString(fakeMp4())->usingFileName('shot.mp4')->toMediaCollection(Shot::VIDEO);

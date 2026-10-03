@@ -65,6 +65,8 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             - Physical sense: objects are whole and of a normal size, nothing floats or sits on a wall where it cannot be, no duplicated or merged objects or limbs.
             - Text: no added words, letters or captions; logos that belong to the place are fine.
 
+            {$this->projectRules()}
+
             Output:
             - must_show_visible: true when the must show is clearly visible, or when there is none.
             - passes: true when there is no clear mistake.
@@ -97,5 +99,12 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
         return filled($this->mustShow)
             ? "{$this->mustShow} This is what the keyframe is for; if a viewer cannot see it at a glance, that is a mistake."
             : 'nothing specific for this keyframe.';
+    }
+
+    private function projectRules(): string
+    {
+        $rules = $this->keyframe->shot->project->rulesBrief();
+
+        return $rules === '' ? '' : "Also check the rules the director confirmed for this project:\n{$rules}";
     }
 }

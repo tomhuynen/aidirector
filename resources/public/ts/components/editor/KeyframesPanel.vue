@@ -1,7 +1,7 @@
 <template>
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     <div class="flex min-h-0 flex-1">
-      <section class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-6">
+      <section class="group relative flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-6">
         <div
           v-if="error && !generating"
           class="flex items-center justify-between gap-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm"
@@ -99,6 +99,12 @@
             </div>
           </Placeholder>
         </div>
+        <VideoActions
+          v-if="showVideo && video.url && !video.pending"
+          :video-url="video.url"
+          :download-url="video.downloadUrl"
+          :title="$t('Video')"
+        />
       </section>
 
       <FirstKeyframeInspector
@@ -392,6 +398,7 @@ import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
 import KeyframeInspector from './KeyframeInspector.vue'
 import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
+import VideoActions from './VideoActions.vue'
 import VideoInspector from './VideoInspector.vue'
 
 export type PanelKeyframe = {
@@ -444,6 +451,7 @@ export type PanelNewKeyframe = {
 
 export type PanelVideo = {
   url: string | null
+  downloadUrl?: string | null
   error: string | null
   pending: boolean
   resolution: string

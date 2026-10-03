@@ -7,9 +7,11 @@ namespace App\Jobs;
 use App\Ai\Agents\TweakInterpreter;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
+use App\Enums\CorrectionSource;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Keyframe;
 use App\Notifications\Public\GenerationFinished;
+use App\Support\Corrections\RecordCorrection;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -81,6 +83,8 @@ class TweakKeyframeImage implements ShouldQueue
         $render->setCustomProperty(Keyframe::TWEAK_REQUEST, $this->instruction)
             ->setCustomProperty(Keyframe::TWEAK_INSTRUCTION, $instruction)
             ->save();
+
+        RecordCorrection::record($keyframe->shot->project, CorrectionSource::ADJUSTMENT, $this->instruction, $keyframe->shot, $keyframe, RecordCorrection::keyframeContext($keyframe));
 
         $shot = $keyframe->shot;
 

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
+use App\Enums\CorrectionSource;
 use App\Models\Keyframe;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Corrections\RecordCorrection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
@@ -32,6 +34,8 @@ class DestroyController
 
         $shot->arrangeKeyframes($remaining);
         $keyframe->delete();
+
+        RecordCorrection::record($project, CorrectionSource::DELETE, "Deleted the planned keyframe \"{$keyframe->title}\": {$keyframe->description}", $shot, context: "Takeaway of the shot: {$shot->takeaway}.");
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

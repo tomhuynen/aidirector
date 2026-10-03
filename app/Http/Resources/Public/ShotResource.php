@@ -12,6 +12,7 @@ use App\Models\Shot;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 /** @mixin Shot */
@@ -79,6 +80,8 @@ class ShotResource extends JsonResource
             'videoError' => $this->video_error,
             /** @var string|null */
             'videoUrl' => $this->mediaUrl($this->video()),
+            /** @var string|null */
+            'videoDownloadUrl' => $this->downloadUrl($this->video()),
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,
             'links' => $this->when($this->resource->exists, fn() => [
@@ -106,6 +109,20 @@ class ShotResource extends JsonResource
      * A signed link to a private media file. The expiry is rounded to the hour
      * so the link stays the same while the page polls and the browser can cache it.
      */
+    /**
+     * A signed link that saves the clip under a readable name, such as "SH070 Quay Stop Line.mp4".
+     */
+    private function downloadUrl(?Media $media): ?string
+    {
+        if ($media === null) {
+            return null;
+        }
+
+        $name = sprintf('SH%03d %s.%s', $this->position * 10, Str::of($this->title)->replaceMatches('/[^\pL\pN ._-]+/u', '')->trim()->limit(80, ''), pathinfo($media->file_name, PATHINFO_EXTENSION) ?: 'mp4');
+
+        return URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $media, 'download' => $name]);
+    }
+
     private function mediaUrl(?Media $media): ?string
     {
         if ($media === null) {

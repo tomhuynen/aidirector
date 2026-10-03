@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Projects;
 
 use App\Enums\ElementType;
+use App\Enums\ProjectRuleStatus;
 use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotListItemResource;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
+use App\Models\ProjectRule;
 use App\Support\Video\VideoFormats;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
@@ -37,6 +39,23 @@ class ViewController
             'videoFormats' => fn() => VideoFormats::catalogue(),
             /** @var array<int, array{value: string, label: string, plural: string}> */
             'elementTypes' => fn() => ElementType::catalogue(),
+            /**
+             * Rules learned from recurring corrections: suggested ones to decide on, active ones in use.
+             *
+             * @var array<int, array{id: string, text: string, status: string, acceptUrl: string, dismissUrl: string}>
+             */
+            'rules' => fn() => $project->rules()
+                ->whereIn('status', [ProjectRuleStatus::SUGGESTED, ProjectRuleStatus::ACTIVE])
+                ->get()
+                ->map(fn(ProjectRule $rule) => [
+                    'id' => $rule->sqid,
+                    'text' => $rule->text,
+                    'status' => $rule->status->value,
+                    'acceptUrl' => route('public.projects.rules.accept', [$project, $rule]),
+                    'dismissUrl' => route('public.projects.rules.dismiss', [$project, $rule]),
+                ])
+                ->values()
+                ->all(),
             'elements' => fn() => ElementResource::collection(
                 $project->elements()->with('media')->get()->each->setRelation('project', $project)
             ),
