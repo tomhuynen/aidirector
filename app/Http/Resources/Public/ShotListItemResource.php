@@ -38,6 +38,13 @@ class ShotListItemResource extends JsonResource
              * @var int
              */
             'partsCount' => $this->parts_count ?? 0,
+            /**
+             * Whether storylines, keyframes or the video are being generated right now.
+             *
+             * @var bool
+             */
+            'busy' => $this->status->isWorking()
+                || ($this->relationLoaded('keyframes') && $this->keyframes->contains(fn(Keyframe $keyframe) => (bool) $keyframe->rendering)),
             /** @var string|null */
             'thumbnailUrl' => $this->thumbnailUrl(),
             'url' => route('public.shots.view', [$this->project, $this->resource]),

@@ -6,6 +6,7 @@ use App\Enums\ShotStatus;
 use App\Jobs\GenerateStorylineOptions;
 use App\Models\Director;
 use App\Models\Element;
+use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Facades\Queue;
@@ -113,6 +114,20 @@ describe('view and update', function () {
             ->get(route('public.shots.view', [$this->project, $shots->first()]))
             ->assertSuccessful()
             ->assertInertia(fn($page) => $page->component('shots/view')->has('siblings', 3)->where('siblings.0.duration', 5));
+    });
+
+    it('marks the shots in the list that are being generated', function () {
+        $idle = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::VIDEO_READY]);
+        Shot::factory()->for($this->project)->create(['position' => 2, 'status' => ShotStatus::VIDEO_PENDING]);
+        $drawing = Shot::factory()->for($this->project)->create(['position' => 3, 'status' => ShotStatus::KEYFRAMES_READY]);
+        Keyframe::factory()->for($drawing)->create(['position' => 1, 'rendering' => true]);
+
+        actingAs($this->director, 'director')
+            ->get(route('public.shots.view', [$this->project, $idle]))
+            ->assertInertia(fn($page) => $page
+                ->where('siblings.0.busy', false)
+                ->where('siblings.1.busy', true)
+                ->where('siblings.2.busy', true));
     });
 
     it('updates an owned shot', function () {

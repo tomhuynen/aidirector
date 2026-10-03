@@ -189,6 +189,17 @@ const busy = computed(
 
 const { start, stop } = usePoll(3000, { only: ['shot', 'keyframes', 'siblings'] }, { autoStart: false })
 
+/*
+ * Other shots that are still being generated: only the list is refreshed,
+ * so their spinners clear when they are done.
+ */
+const othersBusy = computed(
+  () => !busy.value && props.siblings.some((sibling) => sibling.busy && sibling.id !== props.shot.id),
+)
+const siblingsPoll = usePoll(5000, { only: ['siblings'] }, { autoStart: false })
+
+watch(othersBusy, (current) => (current ? siblingsPoll.start() : siblingsPoll.stop()), { immediate: true })
+
 watch(
   busy,
   (current) => {
@@ -211,6 +222,7 @@ const shotList = computed(() =>
     keyframesCount: sibling.keyframesCount,
     partsCount: sibling.partsCount,
     status: sibling.status,
+    busy: sibling.busy,
     thumbnailUrl: sibling.thumbnailUrl,
     url: sibling.url,
   })),
