@@ -18,7 +18,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3'
+import { Head, usePoll } from '@inertiajs/vue3'
 import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
@@ -27,7 +27,7 @@ import { shotCode } from '@public:components/editor/shotCode'
 import ShotList from '@public:components/editor/ShotList.vue'
 import TopBar from '@public:components/editor/TopBar.vue'
 import { index as projectsIndex } from '@routes/public/projects'
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 defineOptions({
   layout: EditorLayout,
@@ -45,10 +45,20 @@ const shotList = computed(() =>
     keyframesCount: sibling.keyframesCount,
     partsCount: sibling.partsCount,
     status: sibling.status,
+    busy: sibling.busy,
     thumbnailUrl: sibling.thumbnailUrl,
     url: sibling.url,
   })),
 )
+
+/*
+ * Other shots that are still being generated: the list is refreshed so
+ * their spinners clear when they are done.
+ */
+const othersBusy = computed(() => props.siblings.some((sibling) => sibling.busy && sibling.id !== props.shot.id))
+const { start, stop } = usePoll(5000, { only: ['siblings'] }, { autoStart: false })
+
+watch(othersBusy, (current) => (current ? start() : stop()), { immediate: true })
 
 const crumbs = computed(() => [
   { title: $t('Projects'), href: projectsIndex.url() },

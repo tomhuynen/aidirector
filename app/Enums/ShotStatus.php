@@ -34,6 +34,20 @@ enum ShotStatus: string
 
     case VIDEO_READY = 'video-ready';
 
+    /**
+     * Whether something is being generated for the shot right now.
+     */
+    public function isWorking(): bool
+    {
+        return in_array($this, [
+            self::OPTIONS_PENDING,
+            self::STORYLINE_PENDING,
+            self::FIRST_KEYFRAME_PENDING,
+            self::KEYFRAMES_PENDING,
+            self::VIDEO_PENDING,
+        ], true);
+    }
+
     public function description(): string
     {
         return match ($this) {

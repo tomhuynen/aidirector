@@ -97,21 +97,29 @@
             )
           "
         >
-          <img
-            v-if="shot.thumbnailUrl"
-            :src="shot.thumbnailUrl"
-            :alt="shot.title"
-            :class="
-              cn(
-                'h-11 w-[72px] shrink-0 rounded-md border border-border object-cover',
-                shot.id === currentId && 'border-signal',
-              )
-            "
-          />
-          <Placeholder
-            v-else
-            :class="cn('h-11 w-[72px] shrink-0 bg-background', shot.id === currentId && 'border-signal')"
-          />
+          <span class="relative shrink-0">
+            <img
+              v-if="shot.thumbnailUrl"
+              :src="shot.thumbnailUrl"
+              :alt="shot.title"
+              :class="
+                cn(
+                  'block h-11 w-[72px] rounded-md border border-border object-cover',
+                  shot.id === currentId && 'border-signal',
+                )
+              "
+            />
+            <Placeholder v-else :class="cn('h-11 w-[72px] bg-background', shot.id === currentId && 'border-signal')" />
+            <!-- Another shot that is still being generated; the open shot shows its own progress. -->
+            <span
+              v-if="shot.busy && shot.id !== currentId"
+              class="absolute inset-0 flex items-center justify-center rounded-md bg-black/60"
+              :title="shot.statusLabel"
+            >
+              <LoaderCircle class="size-4 animate-spin text-white" />
+              <span class="sr-only">{{ shot.statusLabel }}</span>
+            </span>
+          </span>
           <div class="min-w-0">
             <p :class="cn('text-[15px] font-semibold', shot.id === currentId && 'text-signal')">
               {{ shot.code }}
@@ -161,7 +169,7 @@ import { $t } from '@public/ts/shared/i18n'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Checkbox } from '@shared:ui/checkbox'
-import { ArrowDown, ArrowUp, Combine, Plus } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Combine, LoaderCircle, Plus } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
 import MergeShotsDialog from './MergeShotsDialog.vue'
@@ -178,6 +186,8 @@ export type ShotListItem = {
   /** How many shots this one was merged from; 0 for an ordinary shot. */
   partsCount: number
   status: string
+  /** Storylines, keyframes or the video are being generated right now. */
+  busy: boolean
   thumbnailUrl: string | null
   url: string
 }
