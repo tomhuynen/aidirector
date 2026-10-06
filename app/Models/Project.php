@@ -10,6 +10,7 @@ use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
 use App\Enums\ProjectRuleStatus;
 use App\Events\ProjectDeleting;
+use App\Support\Projects\ProjectSettings;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -90,6 +91,7 @@ class Project extends Model implements HasMedia
      *  aspect_ratio: 'App\Enums\AspectRatio',
      *  style: 'array',
      *  cover_status: 'App\Enums\CoverStatus',
+     *  settings: 'App\Support\Projects\ProjectSettings',
      *  setup_completed_at: 'datetime',
      *  archived_at: 'datetime',
      * }
@@ -101,6 +103,7 @@ class Project extends Model implements HasMedia
             'aspect_ratio' => AspectRatio::class,
             'style' => 'array',
             'cover_status' => CoverStatus::class,
+            'settings' => ProjectSettings::class,
             'setup_completed_at' => 'datetime',
             'archived_at' => 'datetime',
         ];

@@ -61,6 +61,17 @@
         </h3>
         <p class="text-[15px] leading-relaxed">{{ takeaways.join(' ') }}</p>
       </section>
+
+      <section v-if="voiceOverTracks.length > 0" class="space-y-3 border-t border-border pt-6">
+        <h3 class="flex items-center gap-2 font-semibold">
+          <AudioLines class="size-4 text-muted-foreground" />
+          {{ $t('Audio track') }}
+        </h3>
+        <AudioTracks
+          :tracks="voiceOverTracks"
+          :empty-hint="$t('Made from the parts\' tracks once the clips are joined.')"
+        />
+      </section>
     </aside>
 
     <section class="group relative flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-6">
@@ -75,10 +86,16 @@
         </Button>
       </div>
 
+      <!-- Above the video, top right, so it never covers the picture. -->
+      <div v-if="videoUrl && !pending" class="flex shrink-0 justify-end">
+        <VideoActions :video-url="videoUrl" :download-url="downloadUrl" :title="$t('Video')" class="flex-nowrap" />
+      </div>
+
       <div class="flex min-h-0 flex-1 items-center justify-center">
         <video
           v-if="videoUrl && !pending"
           :key="videoUrl"
+          data-shot-video
           :src="videoUrl"
           controls
           autoplay
@@ -113,12 +130,6 @@
           {{ $t('Join again') }}
         </Button>
       </div>
-      <VideoActions
-        v-if="videoUrl && !pending"
-        :video-url="videoUrl"
-        :download-url="downloadUrl"
-        :title="$t('Video')"
-      />
     </section>
   </div>
 </template>
@@ -127,9 +138,10 @@ import { Link, useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { Button } from '@shared:ui/button'
-import { Combine, LoaderCircle, RefreshCw, Split, Target } from 'lucide-vue-next'
+import { AudioLines, Combine, LoaderCircle, RefreshCw, Split, Target } from 'lucide-vue-next'
 import { computed, watch } from 'vue'
 
+import AudioTracks, { type AudioTrack } from './AudioTracks.vue'
 import Placeholder from './Placeholder.vue'
 import TransitionPicker, { type ShotTransitionOption } from './TransitionPicker.vue'
 import VideoActions from './VideoActions.vue'
@@ -159,6 +171,7 @@ const props = defineProps<{
   error: string | null
   pending: boolean
   aspectRatio: string
+  voiceOverTracks: AudioTrack[]
 }>()
 
 /**

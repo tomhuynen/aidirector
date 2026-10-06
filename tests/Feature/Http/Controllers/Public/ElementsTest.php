@@ -127,13 +127,12 @@ describe('linking', function () {
         $markBytes = Storage::disk(Disk::TENANT->value)->get($mark->reference()->getPathRelativeToRoot());
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
-            && $prompt->contains("Cast and sets in this keyframe:\n- Mark, the visitor (person): looks exactly like its attached picture.")
+            && $prompt->contains("People and objects in this keyframe:\n- Mark, the visitor (person): looks exactly like its attached picture.")
             && ! $prompt->contains('A middle-aged man')
-            && $prompt->contains('The first attached image is the reference for Mark, the visitor (person)')
-            && $prompt->contains('The picture decides how Mark, the visitor looks, whatever any other wording says.')
-            && $prompt->contains('The second attached image is keyframe 1 of this shot')
+            && $prompt->contains('Edit the first attached image. It is keyframe 1 of this shot')
+            && $prompt->contains('The second attached image is the picture of Mark, the visitor (person). Draw Mark, the visitor exactly like it')
             && $prompt->attachments->count() === 2
-            && $prompt->attachments->first()->content() === $markBytes);
+            && $prompt->attachments->last()->content() === $markBytes);
     });
 
     it('attaches at most three element images to one keyframe', function () {
@@ -150,8 +149,8 @@ describe('linking', function () {
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
             && $prompt->contains('- Crate 4 (object)')
-            && $prompt->contains('The third attached image is the reference for Crate 3 (object)')
-            && ! $prompt->contains('the reference for Crate 4')
+            && $prompt->contains('The fourth attached image is the picture of Crate 3 (object)')
+            && ! $prompt->contains('the picture of Crate 4')
             && $prompt->attachments->count() === 4);
     });
 });
@@ -180,7 +179,7 @@ describe('reference images', function () {
             && $prompt->attachments->first()->content() === $firstBytes);
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man gives a thumbs up.')
-            && $prompt->contains('The first attached image is the reference for Security guard (person)'));
+            && $prompt->contains('attached image is the picture of Security guard (person)'));
     });
 
     it('draws new element images side by side before the keyframes', function () {
@@ -708,8 +707,9 @@ describe('versions', function () {
         chooseFirstKeyframe($shot);
         (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
 
+        // Keyframe 1 comes first as the base image; the chosen picture of the element follows it.
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
-            && $prompt->attachments->first()->path === $first->getPathRelativeToRoot());
+            && $prompt->attachments->get(1)?->path === $first->getPathRelativeToRoot());
     });
 });
 

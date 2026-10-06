@@ -151,7 +151,7 @@
         <InputGroupTextarea
           v-model="draft"
           rows="1"
-          maxlength="2000"
+          maxlength="20000"
           :placeholder="placeholder ?? $t('Type your answer…')"
           :disabled="disabled"
           :aria-label="$t('Your message')"
@@ -224,7 +224,7 @@ const props = withDefaults(
     title: undefined,
     description: undefined,
     uploadUrl: undefined,
-    accept: 'image/*',
+    accept: 'image/*,application/pdf,text/plain,text/markdown,text/rtf,application/rtf,.md,.txt,.rtf',
     hint: null,
   },
 )

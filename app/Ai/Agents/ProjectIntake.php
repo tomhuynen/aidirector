@@ -84,6 +84,7 @@ class ProjectIntake implements Agent, Conversational, HasReasoningEffort, HasStr
 
             Stage one.
             Description: what the project is about, who it is for (the client, if any, and the audience) and what the shots will be used for, in one to three plain sentences. Write it yourself from what the user tells you; do not copy the conversation.
+            Your second question, right after the user first describes the project, is whether they have a document with the functional design, a brief or a script, which they can paste into the message box or add as a PDF, RTF or text file with the + button next to it. Skip it if they already shared one. When a shared document appears in a message, between <<< and >>>, read it closely, take the description, purpose and title from it where it gives them, and use it for everything that follows. Acknowledge it in one sentence; do not summarise it back.
             Purpose: what the shots have to achieve. Once you know what they will be used for, infer the most likely purpose, name it in "reply" and ask whether that is right. If the user does not know yet, briefly offer the two or three most likely options. Exactly one of:
             {$purposes}
             Title: the name of the project, between 2 and 120 characters, without surrounding quotes. If the user names the project, use that name. Otherwise propose one concrete title in "reply" and ask whether it works.
@@ -98,7 +99,7 @@ class ProjectIntake implements Agent, Conversational, HasReasoningEffort, HasStr
             When the user's message says a style was chosen, confirm it in one sentence and go to stage four. A style is needed before anything can be rendered, so this step cannot be skipped: if the user wants to skip it, say so briefly and suggest asking for more like the closest option instead.
 
             Stage four, the cast and sets. This stage is optional.
-            Start by asking in one short question whether the user wants to set up the recurring people, places and objects now, so every shot draws them the same way, or skip it and add them later while making shots. If they skip, set "skip_elements" to true, say in one sentence that the project is ready and set "done" to true.
+            Start by asking in one short question whether the user wants to set up the recurring people, places and objects now, so every shot draws them the same way, or skip it and add them later while making shots. If they skip, set "skip_elements" to true and go to the last step.
             If they want to set them up:
             First check whether you know enough to suggest people, places and objects: who the audience is, where the shots take place and what happens in them. If something important is missing, ask about it in one question before you begin.
             As soon as you know enough, set "prepare" to a first brief for every category that is "not started": two to four sentences each on what to suggest, from the description, the conversation and what the photos show. The app starts drawing those suggestions in the background, so they are ready when you get to the category. Do this once; categories that are prepared say so under "What the app knows".
@@ -109,7 +110,10 @@ class ProjectIntake implements Agent, Conversational, HasReasoningEffort, HasStr
             The app renders the suggestions; the user ticks the ones to keep. Their next message says which were picked, or that they skip the category. Then move on to the next category. If the user wants to skip a category, set "skip" to that category and move on. A category is settled once it was picked from or skipped; the status is listed under "What the app knows".
             Set "ask" to "elements" on every turn in stage four.
             When all three categories are settled, ask once whether anything is missing: another person, place or object that should look the same in every shot. If the user names something, set "element_round" to its category with "use_prepared" false and a "brief" for just that, and handle the pick as before. Do not ask again after that.
-            When the user has nothing to add, say in one sentence that you are finishing the project and set "done" to true. Keep "done" false until then.
+            When the user has nothing to add, go to the last step.
+
+            Last step, the shots.
+            Ask in one short question whether you should generate the shots for them. If yes, set "shots" to the shots of the project in story order, as many as the material needs to cover every point once: a short brief may need three, a full design document twenty or more, up to 30. Each shot has a "takeaway": the one point a viewer must learn from that shot, in one plain sentence, and a "context": one or two sentences on where it happens and what goes on. Base them on the description, the shared document and the conversation, and give each shot its own point. Say in one sentence that the shots are being created and set "done" to true. If no, say in one sentence that the project is ready and set "done" to true. Keep "done" false until this question is answered, and leave "shots" null on every other turn.
 
             Rules:
             - Ask one short question at a time. Be warm and to the point: two sentences at most.
@@ -209,6 +213,10 @@ class ProjectIntake implements Agent, Conversational, HasReasoningEffort, HasStr
             ])->nullable()->required(),
             'skip' => $schema->string()->enum(ElementType::collect()->map->value->all())->nullable()->required(),
             'skip_elements' => $schema->boolean()->required(),
+            'shots' => $schema->array()->items($schema->object([
+                'takeaway' => $schema->string()->required(),
+                'context' => $schema->string()->required(),
+            ]))->nullable()->required(),
             'done' => $schema->boolean()->required(),
         ];
     }

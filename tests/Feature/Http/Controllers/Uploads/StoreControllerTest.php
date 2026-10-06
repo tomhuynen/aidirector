@@ -48,6 +48,12 @@ describe('public route', function () {
         Storage::disk(Disk::TENANT->value)->assertExists($upload->path);
     });
 
+    it('accepts text documents for the intake chat', function () {
+        postJson(URL::signedRoute('public.uploads.store'), ['file' => UploadedFile::fake()->createWithContent('notes.txt', 'hello')])
+            ->assertSuccessful()
+            ->assertJsonPath('isImage', false);
+    });
+
     it('rejects files that are not allowed', function (UploadedFile $file) {
         postJson(URL::signedRoute('public.uploads.store'), ['file' => $file])
             ->assertUnprocessable()
@@ -55,7 +61,7 @@ describe('public route', function () {
 
         expect(Upload::query()->count())->toBe(0);
     })->with([
-        'unsupported type' => fn() => UploadedFile::fake()->createWithContent('notes.txt', 'hello'),
+        'unsupported type' => fn() => UploadedFile::fake()->create('archive.zip', 10, 'application/zip'),
         'too large' => fn() => UploadedFile::fake()->image('huge.png')->size(intdiv((int) Config::get('uploads.max_file_size'), 1024) + 1),
     ]);
 

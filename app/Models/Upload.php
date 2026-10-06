@@ -102,6 +102,14 @@ class Upload extends Model
         return str_starts_with((string) $this->mime_type, 'image/');
     }
 
+    /**
+     * A document the intake chat can read: a PDF, RTF or plain text.
+     */
+    public function isDocument(): bool
+    {
+        return in_array($this->mime_type, ['application/pdf', 'text/plain', 'text/markdown', 'text/rtf', 'application/rtf'], true);
+    }
+
     public function extension(): ?string
     {
         return pathinfo($this->name, PATHINFO_EXTENSION) ?: null;

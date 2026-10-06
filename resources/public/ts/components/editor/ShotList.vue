@@ -30,7 +30,7 @@
       {{ $t('No shots yet. Add the first one to start the sequence.') }}
     </p>
 
-    <ol v-else class="flex-1 space-y-1 overflow-y-auto p-2">
+    <ol v-else ref="list" scroll-region class="flex-1 space-y-1 overflow-y-auto p-2" @scroll.passive="rememberScroll">
       <li v-for="(shot, i) in shots" :key="shot.id" class="group relative">
         <label
           v-if="merging"
@@ -90,6 +90,7 @@
         <Link
           v-if="!merging"
           :href="shot.url"
+          preserve-scroll
           :class="
             cn(
               'flex items-center gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors hover:bg-card',
@@ -170,7 +171,7 @@ import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Checkbox } from '@shared:ui/checkbox'
 import { ArrowDown, ArrowUp, Combine, LoaderCircle, Plus } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import MergeShotsDialog from './MergeShotsDialog.vue'
 import Placeholder from './Placeholder.vue'
@@ -268,4 +269,29 @@ const move = (index: number, delta: number) => {
     },
   )
 }
+
+/*
+ * The list keeps its scroll position while moving between shots: the editor
+ * renders it again on every visit, so the position is remembered for the tab.
+ */
+const SCROLL_KEY = 'aidirector.shot-list.scroll'
+const list = ref<HTMLElement | null>(null)
+
+const rememberScroll = () => {
+  try {
+    window.sessionStorage.setItem(SCROLL_KEY, String(list.value?.scrollTop ?? 0))
+  } catch {
+    // Storage can be blocked; the list then starts at the top.
+  }
+}
+
+onMounted(() => {
+  try {
+    const top = Number(window.sessionStorage.getItem(SCROLL_KEY) ?? 0)
+
+    if (list.value && top > 0) list.value.scrollTop = top
+  } catch {
+    // Storage can be blocked; the list then starts at the top.
+  }
+})
 </script>

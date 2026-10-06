@@ -1,7 +1,5 @@
 import { router } from '@inertiajs/vue3'
-import { $t } from '@public/ts/shared/i18n'
 import { computed, ref } from 'vue'
-import { toast } from 'vue-sonner'
 
 import type { GetResponse } from '../types/utils'
 
@@ -73,27 +71,20 @@ const open = (item: AppNotification) => {
 }
 
 /**
- * Tells the director about a result that just came in: a toast in the app,
- * and a desktop notification as well when the tab is in the background.
- * On the page that shows the result itself nothing is announced.
+ * Tells the director about a result that just came in with a desktop
+ * notification while the tab is in the background. In the app the bell and
+ * the decision queue show it. On the page that shows the result itself it is
+ * marked read straight away.
  */
 const announce = (item: AppNotification) => {
   if (announced.has(item.id)) return
   announced.add(item.id)
 
-  // The page that shows the result is open and updates by itself: no toast, just mark it read.
+  // The page that shows the result is open and updates by itself: just mark it read.
   if (isCurrentPage(item.url) && !document.hidden) {
     void markRead([item.id])
 
     return
-  }
-
-  const options = { duration: 10_000, action: { label: $t('Open'), onClick: () => open(item) } }
-
-  if (item.failed) {
-    toast.error(item.title, options)
-  } else {
-    toast.success(item.title, options)
   }
 
   if (document.hidden && permission.value === 'granted') {

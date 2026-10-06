@@ -66,6 +66,8 @@ it('asks for a loop that starts and ends on the cover, padded to the widest rati
         && $request['frame_images'][0]['image_url']['url'] === $request['frame_images'][1]['image_url']['url']
         && str_contains($request['prompt'], 'seamless loop')
         && str_contains($request['prompt'], 'The people talk to each other')
+        && str_contains($request['prompt'], 'Nobody walks, steps, turns around or changes position')
+        && str_contains($request['prompt'], 'someone drawn mid-step stays frozen in that step')
         && $request['generate_audio'] === false);
 
     Queue::assertPushed(PollCoverLoop::class, fn(PollCoverLoop $job) => $job->jobId === 'loop_1'

@@ -40,6 +40,10 @@ class ProjectResource extends JsonResource
             'styleReferenceUrl' => $this->styleReferenceUrl(),
             /** @var string|null */
             'coverUrl' => $this->coverUrl(),
+            /** @var bool */
+            'voiceOver' => $this->settings->voiceOver,
+            /** @var array<int, string> */
+            'voiceOverLocales' => $this->settings->voiceOverLocales,
             /**
              * The cover gently animated as a seamless loop, once it is made.
              *
@@ -60,6 +64,8 @@ class ProjectResource extends JsonResource
             'links' => $this->when($this->resource->exists, fn() => [
                 'view' => route('public.projects.view', $this->resource),
                 'format' => route('public.projects.format', $this->resource),
+                'voiceOver' => route('public.projects.voice-over', $this->resource),
+                'decisions' => route('public.projects.decisions', $this->resource),
                 'elementsStore' => route('public.projects.elements.store', $this->resource),
                 'elementsCreate' => route('public.projects.elements.create', $this->resource),
                 /** The editor opens on the first shot, or on a new shot when there are none. Only with the shots loaded. */

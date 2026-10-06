@@ -24,10 +24,11 @@ class ClipJoiner
 
     /**
      * @param  list<string>  $paths  local clip files, in order
+     * @return array{starts: list<float>, duration: float} when each clip starts in the joined video, and its length, in seconds
      *
      * @throws RuntimeException when ffprobe or ffmpeg fails
      */
-    public function join(array $paths, ShotTransition $transition, string $output): void
+    public function join(array $paths, ShotTransition $transition, string $output): array
     {
         if (count($paths) < 2) {
             throw new RuntimeException('At least two clips are needed to join.');
@@ -53,6 +54,14 @@ class ClipJoiner
         }
 
         $xfade = $transition->xfade();
+        $overlap = $xfade === null ? 0.0 : $fade;
+        $starts = [];
+        $start = 0.0;
+
+        foreach ($clips as $clip) {
+            $starts[] = round($start, 3);
+            $start += $clip['duration'] - $overlap;
+        }
 
         if ($xfade === null) {
             $inputs = implode('', array_map(fn(int $i) => "[v{$i}]" . ($withSound ? "[a{$i}]" : ''), array_keys($clips)));
@@ -91,6 +100,8 @@ class ClipJoiner
         if (! $result->successful()) {
             throw new RuntimeException('ffmpeg could not join the clips: ' . mb_substr(trim($result->errorOutput()), -500));
         }
+
+        return ['starts' => $starts, 'duration' => round($start + $overlap, 3)];
     }
 
     /**

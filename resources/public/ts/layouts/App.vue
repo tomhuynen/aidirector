@@ -19,20 +19,32 @@
       </div>
     </header>
 
-    <main class="relative mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-12 md:py-16">
+    <main
+      :class="
+        wide
+          ? 'relative flex w-full flex-1 flex-col px-6 py-8 md:px-12'
+          : 'relative mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-12 md:py-16'
+      "
+    >
       <slot />
     </main>
   </div>
-  <Toaster position="bottom-right" />
 </template>
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import AccountMenu from '@public:components/AccountMenu.vue'
 import NotificationsMenu from '@public:components/NotificationsMenu.vue'
-import { Toaster } from 'vue-sonner'
 
 import { usePage } from '../composables/page'
+
+withDefaults(
+  defineProps<{
+    /** Use the full window width, for pages that are mostly pictures. */
+    wide?: boolean
+  }>(),
+  { wide: false },
+)
 
 const { account, app } = usePage()
 </script>

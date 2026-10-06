@@ -18,6 +18,7 @@ return new class extends Migration {
             $table->text('description')->nullable();
             $table->string('website')->nullable();
             $table->json('style');
+            $table->json('settings')->nullable();
             $table->string('aspect_ratio', 8);
             $table->unsignedSmallInteger('default_duration');
             $table->string('video_resolution', 8)->nullable();

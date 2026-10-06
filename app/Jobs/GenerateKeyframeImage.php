@@ -40,8 +40,14 @@ class GenerateKeyframeImage implements ShouldQueue
         $shot = $this->keyframe->shot()->with('project')->firstOrFail();
         $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
 
+        // Keyframe 1 with people gets a version without them, for the other keyframes to be drawn on.
+        if ($this->keyframe->position > 1) {
+            $painter->ensurePlate($shot, $siblings);
+        }
+
         $keyframe = $siblings->firstWhere('id', $this->keyframe->id) ?? $this->keyframe->setRelation('shot', $shot);
         $painter->render($keyframe, $siblings);
+        ReviewShot::after($shot);
 
         GenerationFinished::ready(
             __('Keyframe :number of “:shot” is ready', ['number' => $keyframe->position, 'shot' => $shot->title]),

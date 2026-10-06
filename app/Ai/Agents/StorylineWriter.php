@@ -38,7 +38,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
         return <<<INSTRUCTIONS
             You are an experienced film director planning a single shot for an animated production.
-            Your job is to break the shot's storyline into keyframes.
+            Your job is to write the storyline of the shot from the director's takeaway and context, and to break it into keyframes.
             Each keyframe is one clearly readable moment: a pose, a position, an object state.
             The video model will interpolate the motion between keyframes, so keyframes must describe states, not motion.
 
@@ -56,15 +56,19 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             Reuse one of these when this shot is about that person, place or object, and then call it by its exact name. Never describe how one of these looks: the image model draws each from its picture. The people in the shot always come from this list; never introduce a new person. Introduce a new place or object only when the story needs it; never force an existing one into a story where it does not belong.
 
             Rules:
+            - Shot title: two to four words naming the scene, such as the place, the person or the moment.
+            - Storyline: two to four sentences, in present tense, from beginning to end, that land the takeaway with one clear, visible action a viewer can follow in the shot length, not a still moment. Refer to the cast and sets by their names, used as a noun with "the". When the director names people, places or objects they want in the shot, use all of them. When a chosen storyline is given, keep it as it is.
             - Produce between {$min} and {$max} keyframes. Use the fewest that tell the story clearly.
             - Title: two to four words naming the moment.
             - Description: one or two sentences describing exactly what is visible, in present tense. Name the subject, the pose, the key object and its state.
-            - Prompt: a brief for an image model that renders this keyframe, 40 to 80 words. Call the cast and sets by their exact names and never describe their appearance, such as age, build, hair, clothing or colours; their pictures decide that. Describe the spot in the place with the context objects on it and where they are, and any object that is not in the cast and sets (use the same wording for these in every keyframe), then each person's pose, gaze and expression, which hand holds what, and the state of the key objects. Present tense, concrete nouns, no style words: the visual style is added separately.
+            - Prompt: a brief for an image model that renders this keyframe, 40 to 80 words. Call the cast and sets by their exact names and never describe their appearance, such as age, build, hair, clothing or colours; their pictures decide that. Describe the spot in the place with the context objects on it and where they are, and any object that is not in the cast and sets (use the same wording for these in every keyframe), then each person's pose, gaze and expression, which hand holds what, and the state of the key objects. Say which way each person faces from the camera's point of view: face to the camera, back to the camera, or side-on facing left or right in the frame, and whether they move towards or away from the camera or to the left or right of the frame. Never write "forward", "looking forward", "ahead" or "angled into": the image model then draws them facing the viewer. Present tense, concrete nouns, no style words: the visual style is added separately.
             - Must show: the one spatial fact the story depends on in this keyframe, in one concrete sentence a viewer could check at a glance: where the person is relative to the hazard, the line, the door or the object, with a sense of distance, such as "both feet clearly behind the yellow line, the container hanging just beyond the line, about an arm's length from her". Repeat what stays the same and state what changed.
             - When the story is about a danger, stage the person and the danger close together in the same frame, seen from the side, with the line, gap or route between them clearly visible, so the distance can be read. Never leave the danger small and far behind the person.
             - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
             - Keep the same subject, environment and objects across all keyframes. Do not introduce new characters or props that the storyline does not imply.
             - Framing: choose one shot size for the whole shot by what it has to communicate; the camera does not move, so every keyframe shares it. Frame the action: the people and the object they act on, such as a door, a bin or a sign, sit together in the centre of the frame and take most of it. Choose the spot so that object is right beside the person, and keep the rest of the place a simple, subdued background.
+            - Keyframe 1 sets the camera for the whole shot: every later keyframe is drawn on top of it. When keyframe 1 shows the place before the people arrive, frame it for them anyway: the spot where they will stand is in the middle foreground, at a scale where an adult standing there fills about two thirds of the frame height, and the object they act on is beside that spot, large enough to read. Say so in its description and prompt, such as "the empty spot in front of the bin, framed so a person standing there fills two thirds of the frame height". Never frame an empty keyframe 1 as a wide view of the building.
+            - Every step the storyline names gets its own keyframe; nothing important happens between two keyframes. When someone enters a place that lies behind the doorway, show it: a keyframe that says literally "seen from behind, back to the camera, walking away from the camera through the doorway", before a keyframe without them. Someone who leaves towards the camera walks towards it, face to the camera.
             {$this->shotSizes()}
             - Light: the time of day and light the storyline calls for, such as "dusk, low warm evening light, deep blue sky, the torch switched on". Use "as the visual style" when the storyline names no time of day or weather. The light is the same in every keyframe and overrides the lighting of the visual style.
             - Spot: the shot plays at one spot inside the place, seen from where a person would stand there, unless the shot is wide. Pick a calm part of the place that already exists in it, such as the lower part of one hall facade, the side of a container or the quay edge, and describe only what the story needs there, such as the door or the sign the people act on. Do not list background extras such as vehicles, containers, cranes or people just because the place has them. Never invent a separate wall, panel or backdrop in front of the place. Describe the spot with the same wording in every keyframe.
@@ -82,6 +86,8 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     public function schema(JsonSchema $schema): array
     {
         return [
+            'title' => $schema->string()->required(),
+            'storyline' => $schema->string()->required(),
             'framing' => $schema->object([
                 'size' => $schema->string()->enum(array_column(ShotSize::cases(), 'value'))->required(),
                 'spot' => $schema->string()->required(),
@@ -109,14 +115,14 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     {
         $shot = $this->shot;
 
-        $brief = "Shot title: {$shot->title}\n{$shot->brief()}";
+        $brief = (filled($shot->title) ? "Shot title: {$shot->title}\n" : '') . $shot->brief();
 
         if ($chosen = $shot->chosenStoryline()) {
             $brief .= "\n\nChosen storyline ({$chosen['title']}): {$chosen['storyline']}";
         }
 
         if (blank($instruction) || $shot->storyline === null) {
-            return "Break this shot into keyframes.\n\n{$brief}";
+            return "Write the storyline of this shot and break it into keyframes.\n\n{$brief}";
         }
 
         $current = collect($shot->storylineKeyframes())
@@ -182,7 +188,9 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     private function projectRules(): string
     {
         $rules = $this->shot->project->rulesBrief();
+        $shotRules = $this->shot->rulesBrief();
 
-        return $rules === '' ? '' : "\nRules the director confirmed for this project, always follow them:\n{$rules}";
+        return ($rules === '' ? '' : "\nRules the director confirmed for this project, always follow them:\n{$rules}")
+            . ($shotRules === '' ? '' : "\nRules the director set for this shot; the storyline and every keyframe follow them, never break one:\n{$shotRules}");
     }
 }

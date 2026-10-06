@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Support\Images;
 
+use App\Support\TransientHttpFailure;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Ai\Files\StoredImage;
 use RuntimeException;
+use Throwable;
 
 /**
  * The OpenRouter images endpoint, for image models that are not served
@@ -47,6 +49,7 @@ class OpenRouterImageClient
             ->withToken((string) Config::get('ai.providers.openrouter.key'))
             ->acceptJson()
             ->timeout(300)
+            ->retry(TransientHttpFailure::ATTEMPTS, TransientHttpFailure::WAIT_MS, fn(Throwable $exception) => TransientHttpFailure::retryable($exception))
             ->withBody((string) json_encode($body, JSON_UNESCAPED_SLASHES), 'application/json')
             ->post('images')
             ->throw();

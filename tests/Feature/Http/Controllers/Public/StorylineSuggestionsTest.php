@@ -10,6 +10,7 @@ use App\Enums\ShotStatus;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateStoryline;
 use App\Jobs\GenerateStorylineOptions;
+use App\Jobs\GenerateVoiceOver;
 use App\Models\Director;
 use App\Models\Element;
 use App\Models\Keyframe;
@@ -150,6 +151,16 @@ describe('jobs', function () {
         expect((new StorylineOptionsWriter(Shot::factory()->for($this->project)->create()))->providerOptions('openrouter'))->toBe([]);
     });
 
+    it('stays silent for shots created in bulk', function () {
+        StorylineOptionsWriter::fake([['options' => suggestedStorylines()]]);
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::OPTIONS_PENDING]);
+
+        (new GenerateStorylineOptions($shot, notify: false))->handle();
+
+        expect($shot->fresh()->status)->toBe(ShotStatus::OPTIONS_READY)
+            ->and($this->director->notifications()->count())->toBe(0);
+    });
+
     it('includes the current suggestions and feedback when asked for new ones', function () {
         StorylineOptionsWriter::fake([['options' => suggestedStorylines()]]);
 
@@ -255,6 +266,52 @@ describe('jobs', function () {
             ->and(Keyframe::query()->whereKey($stale->id)->exists())->toBeFalse();
 
         Queue::assertPushed(GenerateKeyframes::class, fn(GenerateKeyframes $job) => $job->shot->is($shot));
+        Queue::assertPushed(GenerateVoiceOver::class, fn(GenerateVoiceOver $job) => $job->shot->is($shot));
+    });
+
+    it('writes the storyline from the brief itself, names the shot after it and plans the keyframes', function () {
+        StorylineWriter::fake([['title' => 'Mailbox Relief', 'storyline' => 'The man posts the envelope at the red mailbox and exhales.', 'framing' => ['size' => 'medium', 'spot' => 'At the red mailbox.', 'light' => 'as the visual style', 'seconds' => 6], 'keyframes' => [
+            ['title' => 'At the mailbox', 'description' => 'He holds the envelope.', 'prompt' => 'He stands at the mailbox.'],
+            ['title' => 'Posted', 'description' => 'The envelope is in the slot.', 'prompt' => 'He posts it.'],
+            ['title' => 'Relief', 'description' => 'He exhales.', 'prompt' => 'He exhales.'],
+        ]]]);
+
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_PENDING, 'title' => 'Sending the letter is easy and final', 'takeaway' => 'Sending the letter is easy and final']);
+
+        (new GenerateStoryline($shot, draw: false))->handle();
+
+        StorylineWriter::assertPrompted(fn($prompt) => str_starts_with($prompt->prompt, 'Write the storyline of this shot and break it into keyframes.'));
+
+        expect($shot->fresh())
+            ->title->toBe('Mailbox Relief')
+            ->chosenStoryline()->toBe(['title' => 'Mailbox Relief', 'storyline' => 'The man posts the envelope at the red mailbox and exhales.'])
+            ->status->toBe(ShotStatus::STORYLINE_READY);
+
+        // Shots created in bulk are planned only; the director starts the drawing.
+        Queue::assertNotPushed(GenerateKeyframes::class);
+        Queue::assertPushed(GenerateVoiceOver::class);
+    });
+
+    it('keeps a title the director gave the shot', function () {
+        StorylineWriter::fake([['title' => 'Mailbox Relief', 'storyline' => 'He posts it.', 'framing' => ['size' => 'medium', 'spot' => 'At the mailbox.', 'light' => 'as the visual style', 'seconds' => 6], 'keyframes' => []]]);
+
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_PENDING, 'title' => 'Letter box']);
+
+        (new GenerateStoryline($shot))->handle();
+
+        expect($shot->fresh()->title)->toBe('Letter box');
+        Queue::assertPushed(GenerateKeyframes::class);
+    });
+
+    it('frames an empty keyframe 1 for the people still to come and shows every step as its own keyframe', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        expect((string) (new StorylineWriter($shot->load('project')))->instructions())
+            ->toContain('When keyframe 1 shows the place before the people arrive, frame it for them anyway')
+            ->toContain('an adult standing there fills about two thirds of the frame height')
+            ->toContain('Never frame an empty keyframe 1 as a wide view of the building')
+            ->toContain('seen from behind, back to the camera, walking away from the camera through the doorway')
+            ->toContain('Never write "forward", "looking forward", "ahead" or "angled into"');
     });
 
     it('asks the keyframe writer for an image prompt per keyframe', function () {

@@ -127,3 +127,27 @@
     letter-spacing: -0.005em;
   }
 }
+
+@layer components {
+  /* The native audio player of a voice-over track: its panel 10% darker than the app background. */
+  .voice-track {
+    --voice-track-bg: color-mix(in oklab, var(--background) 90%, black);
+    border-radius: 9999px;
+    background-color: var(--voice-track-bg);
+    color-scheme: dark;
+  }
+
+  .voice-track::-webkit-media-controls-enclosure,
+  .voice-track::-webkit-media-controls-panel {
+    border-radius: 9999px;
+    background-color: var(--voice-track-bg);
+  }
+}
+
+@layer components {
+  /* No overflow menu (download, speed, cast) on voice-over tracks. */
+  .voice-track::-webkit-media-controls-overflow-button,
+  .voice-track::-internal-media-controls-overflow-button {
+    display: none !important;
+  }
+}

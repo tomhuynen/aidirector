@@ -27,6 +27,8 @@ class GenerateStorylineOptions implements ShouldQueue
     public function __construct(
         public readonly Shot $shot,
         public readonly ?string $feedback = null,
+        /** Off for shots created in bulk, so the director is not flooded with one notice per shot. */
+        public readonly bool $notify = true,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
@@ -60,8 +62,10 @@ class GenerateStorylineOptions implements ShouldQueue
             'status' => ShotStatus::OPTIONS_READY,
         ])->save();
 
-        GenerationFinished::ready(__('Storylines for “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
-            ->sendTo($shot->project);
+        if ($this->notify) {
+            GenerationFinished::ready(__('Storylines for “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
+                ->sendTo($shot->project);
+        }
     }
 
     public function failed(?Throwable $exception): void

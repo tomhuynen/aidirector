@@ -49,9 +49,29 @@ class GenerateKeyframes implements ShouldQueue
             $this->replaceKeyframes($shot);
         }
 
+        $shotId = $shot->id;
+
+        // Start from empty places: the director chooses one, and every keyframe is drawn on it.
+        if (Config::get('pipeline.keyframes.start_with_plate')) {
+            if (! $this->more) {
+                $shot->clearMediaCollection(Shot::PLATE_OPTIONS);
+                $shot->clearMediaCollection(Shot::PLATE);
+            }
+
+            $drawnPlates = $shot->getMedia(Shot::PLATE_OPTIONS)->count();
+
+            Bus::batch(collect(range(0, max(1, (int) Config::get('pipeline.keyframes.plate_options')) - 1))->map(fn(int $index) => new GeneratePlateOption($shot, $drawnPlates + $index))->all())
+                ->name("Places for shot {$shot->id}")
+                ->onQueue(Config::get('pipeline.queue'))
+                ->allowFailures()
+                ->finally(static fn(Batch $batch) => self::finishPlates($shotId, $batch->failedJobs))
+                ->dispatch();
+
+            return;
+        }
+
         $first = $shot->keyframes()->with('media')->firstOrFail();
         $drawn = $first->renders()->count();
-        $shotId = $shot->id;
 
         Bus::batch(collect(range(0, self::optionCount() - 1))->map(fn(int $index) => new GenerateKeyframeOption($first, $drawn + $index))->all())
             ->name("Keyframe 1 options for shot {$shot->id}")
@@ -94,8 +114,40 @@ class GenerateKeyframes implements ShouldQueue
         $url = route('public.shots.view', [$shot->project, $shot]);
 
         ($hasOptions
-            ? GenerationFinished::ready(__('Options for the first keyframe of “:shot” are ready', ['shot' => $shot->title]), $url, $first->renders()->last(), Keyframe::THUMBNAIL)
+            ? GenerationFinished::ready(self::optionCount() === 1 ? __('The first keyframe of “:shot” is ready to confirm', ['shot' => $shot->title]) : __('Options for the first keyframe of “:shot” are ready', ['shot' => $shot->title]), $url, $first->renders()->last(), Keyframe::THUMBNAIL)
             : GenerationFinished::failed(__('The first keyframe of “:shot” could not be drawn', ['shot' => $shot->title]), $url))
+            ->sendTo($shot->project);
+    }
+
+    /**
+     * Once every place of a round is drawn or failed: wait for the director to
+     * choose one when there is anything to choose from, otherwise report it.
+     */
+    public static function finishPlates(int $shotId, int $failed = 0): void
+    {
+        $shot = Shot::query()->find($shotId);
+
+        if ($shot === null) {
+            return;
+        }
+
+        $hasPlates = $shot->getMedia(Shot::PLATE_OPTIONS)->isNotEmpty();
+        $shot->keyframes()->update(['rendering' => false]);
+
+        $shot->forceFill([
+            'storyline_error' => match (true) {
+                ! $hasPlates => __('The places could not be drawn. Please try again.'),
+                $failed > 0 => __('Not every place could be drawn. Choose one of these or try again.'),
+                default => null,
+            },
+            'status' => $hasPlates ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
+        ])->save();
+
+        $url = route('public.shots.view', [$shot->project, $shot]);
+
+        ($hasPlates
+            ? GenerationFinished::ready(__('Places for “:shot” are ready to choose from', ['shot' => $shot->title]), $url)
+            : GenerationFinished::failed(__('The places for “:shot” could not be drawn', ['shot' => $shot->title]), $url))
             ->sendTo($shot->project);
     }
 

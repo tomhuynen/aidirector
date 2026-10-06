@@ -263,12 +263,12 @@ describe('chat', function () {
             ProjectIntake::assertPromptedTimes(1);
         });
 
-        it('rejects unknown uploads and non-images', function () {
+        it('rejects unknown uploads and files that are neither photos nor readable documents', function () {
             ProjectIntake::fake();
-            $pdf = Upload::fromFile(UploadedFile::fake()->create('brief.pdf', 10, 'application/pdf'));
+            $archive = Upload::fromFile(UploadedFile::fake()->create('brief.zip', 10, 'application/zip'));
 
             actingAs($this->director, 'director')
-                ->postJson(route('public.projects.chat'), ['conversation' => $this->conversationId, 'message' => 'Look', 'uploads' => ['nope', $pdf->sqid]])
+                ->postJson(route('public.projects.chat'), ['conversation' => $this->conversationId, 'message' => 'Look', 'uploads' => ['nope', $archive->sqid]])
                 ->assertUnprocessable()
                 ->assertJsonValidationErrors(['uploads.0', 'uploads.1']);
 
@@ -288,7 +288,7 @@ describe('chat', function () {
     })->with([
         'missing message' => [['message' => ''], 'message'],
         'too many uploads' => [['message' => 'hi', 'uploads' => array_fill(0, 15, 'x')], 'uploads'],
-        'message too long' => [['message' => str_repeat('a', 2001)], 'message'],
+        'message too long' => [['message' => str_repeat('a', 20001)], 'message'],
         'malformed conversation' => [['conversation' => 'not-a-uuid', 'message' => 'hi'], 'conversation'],
     ]);
 

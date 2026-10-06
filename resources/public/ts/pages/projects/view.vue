@@ -1,6 +1,17 @@
 <template>
   <Page :eyebrow="project.purposeLabel" :title="project.title" :description="project.description ?? undefined">
     <template #actions>
+      <Button v-if="project.links?.decisions" as-child variant="outline">
+        <Link :href="project.links.decisions">
+          <ListChecks class="size-4" />
+          {{ $t('Decisions') }}
+          <span
+            v-if="decisionsCount > 0"
+            class="rounded-full bg-signal px-1.5 text-xs font-semibold text-primary-foreground tabular-nums"
+            >{{ decisionsCount }}</span
+          >
+        </Link>
+      </Button>
       <Button as-child>
         <Link :href="project.links?.editor ?? project.links?.shotsCreate ?? '#'">
           {{ shots.length > 0 ? $t('Open editor') : $t('Add the first shot') }}
@@ -64,6 +75,13 @@
       </div>
     </section>
 
+    <VoiceOverSettings
+      :enabled="project.voiceOver"
+      :locales="project.voiceOverLocales"
+      :languages="voiceOverLanguages"
+      :save-url="project.links?.voiceOver ?? '#'"
+    />
+
     <ProjectRules v-if="rules.length > 0" :rules="rules" />
 
     <CastAndSets :elements="elements" :types="elementTypes" :create-url="project.links?.elementsCreate ?? '#'" />
@@ -78,8 +96,9 @@ import CastAndSets from '@public:components/CastAndSets.vue'
 import FormatPicker from '@public:components/FormatPicker.vue'
 import Page from '@public:components/Page.vue'
 import ProjectRules from '@public:components/ProjectRules.vue'
+import VoiceOverSettings from '@public:components/VoiceOverSettings.vue'
 import { Button } from '@shared:ui/button'
-import { ArrowRight, ExternalLink } from 'lucide-vue-next'
+import { ArrowRight, ExternalLink, ListChecks } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 defineOptions({

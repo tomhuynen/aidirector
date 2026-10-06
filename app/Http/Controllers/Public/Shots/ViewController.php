@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots;
 
 use App\Enums\ElementType;
+use App\Enums\ShotSize;
 use App\Enums\ShotTransition;
 use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\KeyframeResource;
@@ -14,6 +15,7 @@ use App\Http\Resources\Public\ShotResource;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Decisions\DecisionQueue;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
@@ -28,7 +30,11 @@ class ViewController
 
         return Inertia::render('shots/view', [
             'project' => fn() => ProjectResource::make($project),
+            /** @var int How many decisions wait for the director in this project. */
+            'decisionsCount' => fn() => app(DecisionQueue::class)->count($project),
             'shot' => fn() => ShotResource::make($shot),
+            /** @var array<int, array{value: string, label: string}> */
+            'shotSizes' => fn() => ShotSize::catalogue(),
             'keyframes' => fn() => KeyframeResource::collection(
                 $shot->keyframes()->with(['media', 'elements'])->get()->each->setRelation('shot', $shot)
             ),

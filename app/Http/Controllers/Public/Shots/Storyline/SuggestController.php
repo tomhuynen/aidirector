@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Public\Shots\Storyline;
 
 use App\Enums\CorrectionSource;
 use App\Enums\ShotStatus;
+use App\Http\Controllers\Public\Shots\Concerns\GuardsBusyShots;
 use App\Http\Requests\Public\StorylineFeedbackRequest;
 use App\Jobs\GenerateStorylineOptions;
 use App\Models\Policies\Public\ShotPolicy;
@@ -16,12 +17,15 @@ use Illuminate\Support\Facades\Gate;
 
 class SuggestController
 {
+    use GuardsBusyShots;
+
     /**
      * Suggest storylines for the shot, or a new set based on the director's feedback.
      */
     public function store(StorylineFeedbackRequest $request, Project $project, Shot $shot)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
+        $this->ensureShotIdle($shot, 'feedback');
 
         $shot->forceFill([
             'status' => ShotStatus::OPTIONS_PENDING,

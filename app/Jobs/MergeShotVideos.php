@@ -21,7 +21,7 @@ use Throwable;
 
 /**
  * Joins the videos of a merged shot's parts into the merged shot's video,
- * with the transition the director picked.
+ * with the transition the director picked, then the parts' audio tracks.
  */
 #[DeleteWhenMissingModels]
 class MergeShotVideos implements ShouldQueue
@@ -60,10 +60,11 @@ class MergeShotVideos implements ShouldQueue
             })->all();
 
             $output = "{$directory}/merged.mp4";
-            $joiner->join($paths, $shot->merge_transition, $output);
+            $timeline = $joiner->join($paths, $shot->merge_transition, $output);
 
             $shot->addMedia($output)
                 ->usingFileName("shot-{$shot->position}.mp4")
+                ->withCustomProperties([Shot::PART_STARTS => $timeline['starts'], Shot::VIDEO_SECONDS => $timeline['duration']])
                 ->toMediaCollection(Shot::VIDEO);
         } finally {
             File::deleteDirectory($directory);
@@ -72,7 +73,10 @@ class MergeShotVideos implements ShouldQueue
         $shot->forceFill([
             'status' => ShotStatus::VIDEO_READY,
             'video_error' => null,
+            'voice_over' => $shot->parts->pluck('voice_over')->filter()->join(' ') ?: null,
         ])->save();
+
+        MergeShotAudio::start($shot);
 
         GenerationFinished::ready(__('The merged video of “:shot” is ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
             ->sendTo($shot->project);

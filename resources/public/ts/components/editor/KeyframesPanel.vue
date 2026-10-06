@@ -20,21 +20,54 @@
           </Button>
         </div>
 
+        <div
+          v-if="drawable"
+          class="flex items-center justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3 text-sm"
+        >
+          <p>{{ $t('The keyframes are planned. Draw them when you are ready.') }}</p>
+          <Button type="button" size="sm" :disabled="retry.processing" @click="retryImages">
+            <LoaderCircle v-if="retry.processing" class="size-4 animate-spin" />
+            <Wand v-else class="size-4" />
+            {{ $t('Draw keyframes') }}
+          </Button>
+        </div>
+
+        <!-- Above the video, top right, so it never covers the picture. -->
+        <div v-if="!choosing.active && showVideo && video.url && !video.pending" class="flex shrink-0 justify-end">
+          <VideoActions
+            :video-url="video.url"
+            :download-url="video.downloadUrl"
+            :title="$t('Video')"
+            class="flex-nowrap justify-end"
+          >
+            <Button type="button" variant="outline" size="sm" :disabled="!canRenderVideo" @click="renderVideo">
+              <RefreshCw class="size-4" :class="videoForm.processing && 'animate-spin'" />
+              {{ $t('Render again') }}
+            </Button>
+            <Button type="button" variant="outline" size="sm" disabled>
+              <Pencil class="size-4" />
+              {{ $t('Edit') }}
+            </Button>
+          </VideoActions>
+        </div>
         <FirstKeyframeChooser
           v-if="choosing.active && (keyframes[0] || planning)"
           v-model:selected="selectedOption"
-          :options="keyframes[0]?.renders ?? []"
+          :options="choosing.plates ?? keyframes[0]?.renders ?? []"
           :option-count="choosing.optionCount"
+          :field="choosing.plates ? 'plate' : 'render'"
           :aspect-ratio="aspectRatio"
           :pending="choosing.pending"
           :choose-url="choosing.chooseUrl"
           :more-url="choosing.moreUrl"
           :adjusting="choosing.adjusting"
+          :reset-url="choosing.resetUrl"
         />
         <div v-else class="flex min-h-0 flex-1 items-center justify-center">
           <video
             v-if="showVideo && video.url"
             :key="video.url"
+            data-shot-video
             :src="video.url"
             controls
             autoplay
@@ -52,11 +85,11 @@
               :src="selected.imageUrl"
               :alt="selected.title"
               :class="
-                cn('size-full rounded-xl border border-border bg-card object-cover', selected.rendering && 'opacity-50')
+                cn('size-full rounded-xl border border-border bg-card object-cover', busy(selected) && 'opacity-50')
               "
             />
             <p
-              v-if="selected.rendering"
+              v-if="busy(selected)"
               class="absolute bottom-4 mx-4 flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
             >
               <LoaderCircle class="size-4 shrink-0 animate-spin" />
@@ -92,25 +125,22 @@
               </p>
               <h3 class="font-semibold">{{ selected.title }}</h3>
               <p class="text-sm leading-relaxed text-muted-foreground">{{ selected.description }}</p>
-              <p v-if="selected.rendering" class="flex items-center justify-center gap-2 pt-1 text-xs text-signal">
+              <p v-if="busy(selected)" class="flex items-center justify-center gap-2 pt-1 text-xs text-signal">
                 <LoaderCircle class="size-3.5 animate-spin" />
                 {{ renderLabel(selected) }}
               </p>
             </div>
           </Placeholder>
         </div>
-        <VideoActions
-          v-if="showVideo && video.url && !video.pending"
-          :video-url="video.url"
-          :download-url="video.downloadUrl"
-          :title="$t('Video')"
-        />
       </section>
 
       <FirstKeyframeInspector
         v-if="choosing.active && (keyframes[0] || planning)"
         :keyframe="keyframes[0]"
-        :adjust-url="planning ? undefined : choosing.adjustUrl"
+        :adjust-url="planning || choosing.plates ? undefined : choosing.adjustUrl"
+        :plates="Boolean(choosing.plates)"
+        :on-plate="Boolean(choosing.resetUrl)"
+        :steps="keyframes.map((keyframe) => keyframe.title)"
         :selected="selectedOption"
         :busy="choosing.pending || Boolean(choosing.adjusting)"
       />
@@ -120,18 +150,14 @@
         :store-url="newKeyframe.storeUrl"
         @added="adding = false"
       />
-      <VideoInspector
-        v-else-if="showVideo"
-        :resolution="video.resolution"
-        :resolutions="video.resolutions"
-        :aspect-ratio="aspectRatio"
-      />
       <KeyframeInspector
-        v-else-if="selected"
+        v-else-if="selected && !showVideo"
         :key="selected.id"
         :keyframe="selected"
         :index="selectedIndex"
         :can-delete="canArrange"
+        :can-copy="keyframes.length < newKeyframe.max"
+        :issues="issuesFor(selected.id)"
       />
     </div>
 
@@ -147,6 +173,12 @@
               <template v-if="planning">{{ $t('The director is planning the keyframes.') }}</template>
               <template v-else-if="generating">{{
                 $t('The images are being generated. This takes a minute or two.')
+              }}</template>
+              <template v-else-if="choosing.active && choosing.plates">{{
+                $t('Choose the place. Every keyframe is drawn on it.')
+              }}</template>
+              <template v-else-if="choosing.active && choosing.resetUrl">{{
+                $t('Keyframe 1 on the chosen place. The others are drawn once you use it.')
               }}</template>
               <template v-else-if="choosing.active">{{
                 $t('Choose the first keyframe. The others are drawn to match it.')
@@ -180,12 +212,37 @@
           </div>
         </header>
 
-        <div
-          v-if="review && !review.clear && review.notes.length > 0 && !generating"
-          class="space-y-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm"
+        <p
+          v-if="reviewing && !generating"
+          class="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm text-signal"
         >
-          <p class="font-medium">{{ $t('The check thinks the point may not come across') }}</p>
-          <p v-for="(note, i) in review.notes" :key="i" class="text-muted-foreground">{{ note }}</p>
+          <LoaderCircle class="size-4 animate-spin" />
+          {{ $t('Reviewing the keyframes together…') }}
+        </p>
+        <!-- Only for what concerns the whole shot; a keyframe with something found is marked in the strip and explained when selected. -->
+        <div
+          v-else-if="shotIssues.length > 0 && !generating"
+          class="space-y-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
+        >
+          <div class="flex items-center gap-3">
+            <TriangleAlert class="size-4 shrink-0 text-amber-500" />
+            <p class="min-w-0 flex-1">{{ $t('The check found something in the whole shot') }}</p>
+            <Button v-if="fixAllUrl" type="button" size="sm" :disabled="fixing.processing" @click="fixAll">
+              <Wand class="size-4" />
+              {{ $t('Fix all') }}
+            </Button>
+            <Button
+              v-if="dismissAllUrl"
+              type="button"
+              size="sm"
+              variant="ghost"
+              :disabled="fixing.processing"
+              @click="dismissAll"
+            >
+              {{ $t('Dismiss all') }}
+            </Button>
+          </div>
+          <p v-for="(issue, i) in shotIssues" :key="i" class="pl-7 text-muted-foreground">{{ issue }}</p>
         </div>
 
         <ul class="flex items-start gap-4 overflow-x-auto pb-1">
@@ -229,6 +286,18 @@
                 class="absolute inset-0 flex items-center justify-center bg-background/40 text-signal"
               >
                 <LoaderCircle class="size-5 animate-spin" />
+              </span>
+              <!-- A light shade over the image, so the warning stands out. -->
+              <span
+                v-else-if="issuesFor(keyframe.id)"
+                class="absolute inset-0 bg-black/10"
+                :title="$t('The check found something here')"
+              >
+                <span
+                  class="absolute top-1.5 left-1.5 flex size-6 items-center justify-center rounded-full bg-amber-500 text-black shadow"
+                >
+                  <TriangleAlert class="size-3.5" />
+                </span>
               </span>
             </button>
             <div class="flex items-start gap-2 px-1">
@@ -300,15 +369,16 @@
             </p>
           </div>
           <Button
-            v-if="video.url && !video.pending"
+            v-if="!video.url && !video.pending"
             type="button"
-            variant="outline"
             size="sm"
+            class="shrink-0"
             :disabled="!canRenderVideo"
             @click="renderVideo"
           >
-            <RefreshCw class="size-4" :class="videoForm.processing && 'animate-spin'" />
-            {{ $t('Render again') }}
+            <LoaderCircle v-if="videoForm.processing" class="size-4 animate-spin" />
+            <Clapperboard v-else class="size-4" />
+            {{ $t('Render video') }}
           </Button>
         </header>
 
@@ -368,18 +438,6 @@
             </div>
           </div>
         </div>
-
-        <Button
-          v-if="!video.url && !video.pending"
-          type="button"
-          class="w-full"
-          :disabled="!canRenderVideo"
-          @click="renderVideo"
-        >
-          <LoaderCircle v-if="videoForm.processing" class="size-4 animate-spin" />
-          <Clapperboard v-else class="size-4" />
-          {{ $t('Render video') }}
-        </Button>
       </section>
     </div>
   </div>
@@ -390,7 +448,19 @@ import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { ChevronLeft, ChevronRight, Clapperboard, Film, LoaderCircle, Play, Plus, RefreshCw } from 'lucide-vue-next'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Clapperboard,
+  Film,
+  LoaderCircle,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  TriangleAlert,
+  Wand,
+} from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
 import FirstKeyframeChooser from './FirstKeyframeChooser.vue'
@@ -399,12 +469,21 @@ import KeyframeInspector from './KeyframeInspector.vue'
 import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import VideoActions from './VideoActions.vue'
-import VideoInspector from './VideoInspector.vue'
+
+export type PanelIssueGroup = {
+  key: string
+  position: number | null
+  issues: string[]
+  fixUrl: string | null
+  dismissUrl: string
+}
 
 export type PanelKeyframe = {
   id: string
   title: string
   description: string
+  /** A copy that still repeats another keyframe's description. */
+  needsDescription?: boolean
   imageUrl: string | null
   thumbnailUrl: string | null
   rendering: boolean
@@ -420,18 +499,27 @@ export type PanelKeyframe = {
     thumbnailUrl: string
     /** What the director asked for, when this version came from an adjustment. */
     request?: string | null
+    /** The request came from the automatic check, through Fix. */
+    requestFromCheck?: boolean
     /** The rewritten instruction the image model received. */
     instruction?: string | null
     /** When the automatic check redrew this version: what was wrong with the one before. */
     checkProblems?: string[]
     /** What the keyframe must show that the check still could not see after a redraw. */
     checkWarning?: string | null
+    /** What the check found wrong with this version, kept as notes. */
+    checkIssues?: string[]
+    /** What the image model got for this version. */
+    sent?: { model: string; prompt: string; images: string[] } | null
+    /** The share of the background that stayed in place, measured in code. */
+    stillness?: number | null
   }[]
   elements: string[]
   updateUrl: string | null
   tweakUrl: string | null
   chooseRenderUrl: string | null
   destroyUrl: string | null
+  copyUrl?: string | null
 }
 
 export type PanelChoosing = {
@@ -442,6 +530,10 @@ export type PanelChoosing = {
   moreUrl: string
   adjustUrl?: string
   adjusting?: boolean
+  /** Empty places to choose from instead of options for keyframe 1. */
+  plates?: { id: number; imageUrl: string }[] | null
+  /** Keyframe 1 is drawn on a chosen place; this goes back to the places. */
+  resetUrl?: string | null
 }
 
 export type PanelNewKeyframe = {
@@ -472,8 +564,16 @@ const props = defineProps<{
   reorderUrl: string
   /** The keyframes are still being planned: the panel shows the drawing state with nothing in it yet. */
   planning?: boolean
-  /** The look at all keyframes together; shown only when the point does not come across. */
-  review?: { clear: boolean; notes: string[] } | null
+  /** What the checks found, per keyframe position or for the whole shot (position null). */
+  issueGroups?: PanelIssueGroup[]
+  /** The keyframes are being reviewed together right now. */
+  reviewing?: boolean
+  /** Redraws every keyframe the notes are about, when there is one to redraw. */
+  fixAllUrl?: string | null
+  /** The keyframes are planned but not drawn yet, as for shots created in bulk. */
+  drawable?: boolean
+  /** Takes every note off the list without changing anything. */
+  dismissAllUrl?: string | null
 }>()
 
 const selectedIndex = ref(0)
@@ -597,11 +697,14 @@ const canArrange = computed(
     props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.destroyUrl && !keyframe.rendering),
 )
 
+/** Drawn, or still being checked after drawing, as the place check does without blocking the keyframe. */
+const busy = (keyframe: PanelKeyframe) => keyframe.rendering || keyframe.renderStage === 'checking'
+
 /**
  * What a busy keyframe is doing, so a longer wait explains itself.
  */
 const renderLabel = (keyframe: PanelKeyframe) => {
-  if (keyframe.renderStage === 'checking') return $t('Checking the image…')
+  if (keyframe.renderStage === 'checking') return $t('Checking image…')
   if (keyframe.renderStage === 'fixing')
     return keyframe.renderNote
       ? $t('Fixing: :note', { note: keyframe.renderNote })
@@ -689,6 +792,19 @@ const endDrag = () => {
 }
 
 const retry = useForm({})
+const issueGroups = computed(() => props.issueGroups ?? [])
+const shotIssues = computed(() => issueGroups.value.find((group) => group.position === null)?.issues ?? [])
+
+/** The issues of a keyframe, found by its position in the shot. */
+const issuesFor = (id: string) => {
+  const position = props.keyframes.findIndex((keyframe) => keyframe.id === id) + 1
+
+  return issueGroups.value.find((group) => group.position === position) ?? null
+}
+
+const fixing = useForm({})
+const fixAll = () => props.fixAllUrl && fixing.post(props.fixAllUrl, { preserveScroll: true })
+const dismissAll = () => props.dismissAllUrl && fixing.post(props.dismissAllUrl, { preserveScroll: true })
 const videoForm = useForm<{ video?: string }>({})
 
 const canRenderVideo = computed(

@@ -38,6 +38,9 @@ class Keyframe extends Model implements HasMedia
      */
     public const TWEAK_REQUEST = 'tweak_request';
 
+    /** On a render: the adjustment was asked by the automatic check (Fix), not by the director. */
+    public const TWEAK_FROM_CHECK = 'tweak_from_check';
+
     public const TWEAK_INSTRUCTION = 'tweak_instruction';
 
     /** While rendering: the drawn image is being checked. */
@@ -49,8 +52,23 @@ class Keyframe extends Model implements HasMedia
     /** On a render: what the keyframe must show that the check could still not see after a redraw. */
     public const CHECK_WARNING = 'check_warning';
 
+    /** On a render: how the place differs from keyframe 1, found after drawing. */
+    public const PLACE_ISSUES = 'place_issues';
+
     /** On a redrawn render: the mistakes the automatic check found in the render before it. */
     public const CHECK_PROBLEMS = 'check_problems';
+
+    /** On a render drawn on a base image: the share of the background that stayed in place, from 0 to 1. */
+    public const STILLNESS = 'stillness';
+
+    /** On a render: its background moved compared with the image it was drawn on, even after drawing it again. */
+    public const BACKGROUND_MOVED = 'background_moved';
+
+    /** On a render: what the automatic check found wrong with it, kept as notes; nothing is redrawn by itself. */
+    public const CHECK_ISSUES = 'check_issues';
+
+    /** On a render: what the image model got, its prompt, the model and what each attached image was. */
+    public const SENT = 'sent';
 
     protected $guarded = [];
 

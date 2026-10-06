@@ -6,12 +6,15 @@ use App\Ai\Agents\VideoPromptWriter;
 use App\Enums\AspectRatio;
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
+use App\Jobs\DownloadVideo;
 use App\Jobs\GenerateVideo;
 use App\Jobs\PollVideo;
+use App\Jobs\PollVideos;
 use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -115,6 +118,22 @@ describe('generate', function () {
 });
 
 describe('job', function () {
+    it('starts the voice-over tracks of every language while the video renders', function () {
+        Queue::fake([App\Jobs\GenerateVoiceOverAudio::class, PollVideos::class]);
+        VideoPromptWriter::fake([videoPromptParts()]);
+        Http::fake(['openrouter.ai/api/v1/videos' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
+
+        $this->project->settings = new App\Support\Projects\ProjectSettings(voiceOver: true, voiceOverLocales: ['nl-NL', 'de-DE']);
+        $this->project->save();
+        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'voice_over' => 'Wait behind the line.']);
+
+        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class));
+
+        Queue::assertPushed(App\Jobs\GenerateVoiceOverAudio::class, fn($job) => $job->locale === 'nl-NL');
+        Queue::assertPushed(App\Jobs\GenerateVoiceOverAudio::class, fn($job) => $job->locale === 'de-DE');
+        expect($shot->fresh()->voice_over_tracks)->toEqual(['nl-NL' => ['status' => 'pending'], 'de-DE' => ['status' => 'pending']]);
+    });
+
     it('submits every keyframe as its own reference with a prompt that forbids inventing anything', function () {
         VideoPromptWriter::fake([videoPromptParts()]);
         Http::fake(['openrouter.ai/api/v1/videos' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
@@ -122,11 +141,12 @@ describe('job', function () {
         $this->project->forceFill(['video_resolution' => '1080p'])->save();
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'duration' => 30]);
 
-        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class));
+        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class));
 
         $shot->refresh();
 
         expect($shot->video_job_id)->toBe('vid_123')
+            ->and($shot->video_submitted_at)->not->toBeNull()
             ->and($shot->video_prompt)
             ->toContain('Create one continuous, natural 15-second animation')
             ->toContain('the very first frame of the video must match keyframe 1 exactly, and the very last frame of the video must match keyframe 4 exactly')
@@ -140,7 +160,10 @@ describe('job', function () {
             ->toContain('Do not introduce new story events or visual elements.')
             ->toContain('Primary objective: faithfully animate the supplied storyboard');
 
-        VideoPromptWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "1. Moment 1: The man in moment 1.\n2. Moment 2"));
+        VideoPromptWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "1. Moment 1: The man in moment 1.\n2. Moment 2")
+            && count($prompt->attachments) === 4
+            && str_contains((string) $prompt->agent->instructions(), 'describe every person exactly as drawn in the keyframes')
+            && str_contains((string) $prompt->agent->instructions(), 'presses the handle down once, the door is locked and does not move, he lets go'));
 
         Http::assertSent(fn(Request $request) => $request->url() === 'https://openrouter.ai/api/v1/videos'
             && $request['model'] === config('pipeline.models.video')
@@ -150,9 +173,11 @@ describe('job', function () {
             && $request['resolution'] === '1080p'
             && count($request['input_references']) === 4
             && collect($request['input_references'])->every(fn(array $reference) => str_starts_with($reference['image_url']['url'], 'data:image/png;base64,'))
+            // No first frame: Wan 3.0 would leave the references out.
+            && ! isset($request['frame_images'])
             && $request['prompt'] === $shot->video_prompt);
 
-        Queue::assertPushed(PollVideo::class, fn(PollVideo $job) => $job->jobId === 'vid_123' && $job->shot->is($shot));
+        Queue::assertPushed(PollVideos::class);
     });
 
     it('renders at the project resolution or the default', function () {
@@ -178,32 +203,87 @@ describe('job', function () {
     });
 });
 
+/**
+ * A shot whose video was submitted the given number of seconds ago.
+ */
+function renderingShot(Project $project, string $jobId, int $secondsAgo = 60): Shot
+{
+    return renderedShot($project, attributes: [
+        'status' => ShotStatus::VIDEO_PENDING,
+        'video_job_id' => $jobId,
+        'video_submitted_at' => now()->subSeconds($secondsAgo),
+        'video_prompt' => 'The prompt',
+    ]);
+}
+
 describe('poll', function () {
-    it('checks again later while the video is rendering', function () {
-        Http::fake(['openrouter.ai/api/v1/videos/vid_123' => Http::response(['id' => 'vid_123', 'status' => 'in_progress'])]);
+    it('checks every rendering video in one round and queues the next round', function () {
+        Http::fake([
+            'openrouter.ai/api/v1/videos/vid_a' => Http::response(['id' => 'vid_a', 'status' => 'in_progress']),
+            'openrouter.ai/api/v1/videos/vid_b' => Http::response(['id' => 'vid_b', 'status' => 'in_progress']),
+        ]);
 
-        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'video_job_id' => 'vid_123']);
+        $a = renderingShot($this->project, 'vid_a');
+        $b = renderingShot($this->project, 'vid_b');
+        renderingShot($this->project, 'vid_new', secondsAgo: 5);
 
-        (new PollVideo($shot, 'vid_123', now()->getTimestamp()))->handle(app(App\Support\Video\OpenRouterVideoClient::class));
+        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
 
-        expect($shot->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING);
+        Http::assertSentCount(2);
+        expect($a->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING)
+            ->and($b->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING);
+        Queue::assertPushed(PollVideos::class, 1);
+    });
 
-        Queue::assertPushed(PollVideo::class, fn(PollVideo $job) => $job->jobId === 'vid_123');
+    it('waits for a new video before its first check', function () {
+        renderingShot($this->project, 'vid_new', secondsAgo: 5);
+
+        PollVideos::start();
+
+        Queue::assertPushed(PollVideos::class, fn(PollVideos $job) => $job->delay >= 35 && $job->delay <= 40);
+    });
+
+    it('hands finished videos to the download and marks failed ones, in the same round', function () {
+        Http::fake([
+            'openrouter.ai/api/v1/videos/vid_done' => Http::response(['id' => 'vid_done', 'status' => 'completed', 'usage' => ['cost' => 0.42]]),
+            'openrouter.ai/api/v1/videos/vid_bad' => Http::response(['id' => 'vid_bad', 'status' => 'failed', 'error' => 'Content policy']),
+            'openrouter.ai/api/v1/videos/vid_down' => Http::response('error code: 502', 502),
+        ]);
+
+        $done = renderingShot($this->project, 'vid_done');
+        $bad = renderingShot($this->project, 'vid_bad');
+        $down = renderingShot($this->project, 'vid_down');
+
+        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
+
+        Queue::assertPushed(DownloadVideo::class, fn(DownloadVideo $job) => $job->shot->is($done) && $job->usage === ['cost' => 0.42]);
+        expect($bad->fresh())->status->toBe(ShotStatus::KEYFRAMES_READY)->video_error->not->toBeNull()
+            ->and($bad->generations()->where('error', 'Content policy')->count())->toBe(1)
+            ->and($down->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING);
+
+        // Only the unreadable one is left to check; the finished one is not downloaded twice.
+        Queue::assertPushed(PollVideos::class, 1);
+        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
+        Queue::assertPushed(DownloadVideo::class, 1);
+    });
+
+    it('gives up when the video takes too long', function () {
+        Http::fake(['openrouter.ai/api/v1/videos/vid_123' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
+
+        $shot = renderingShot($this->project, 'vid_123', secondsAgo: 3600);
+
+        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
+
+        expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY);
+        Queue::assertNotPushed(PollVideos::class);
     });
 
     it('stores the finished video and logs its cost', function () {
-        Http::fake([
-            'openrouter.ai/api/v1/videos/vid_123/content*' => Http::response(fakeMp4(), 200, ['Content-Type' => 'video/mp4']),
-            'openrouter.ai/api/v1/videos/vid_123' => Http::response(['id' => 'vid_123', 'status' => 'completed', 'usage' => ['cost' => 0.42]]),
-        ]);
+        Http::fake(['openrouter.ai/api/v1/videos/vid_123/content*' => Http::response(fakeMp4(), 200, ['Content-Type' => 'video/mp4'])]);
 
-        $shot = renderedShot($this->project, attributes: [
-            'status' => ShotStatus::VIDEO_PENDING,
-            'video_job_id' => 'vid_123',
-            'video_prompt' => 'The prompt',
-        ]);
+        $shot = renderingShot($this->project, 'vid_123');
 
-        (new PollVideo($shot, 'vid_123', now()->subMinute()->getTimestamp()))->handle(app(App\Support\Video\OpenRouterVideoClient::class));
+        (new DownloadVideo($shot, 'vid_123', ['cost' => 0.42]))->handle(app(OpenRouterVideoClient::class));
 
         $shot->refresh();
         $generation = $shot->generations()->where('kind', 'video')->firstOrFail();
@@ -213,42 +293,25 @@ describe('poll', function () {
             ->and(Storage::disk(Disk::TENANT->value)->get($shot->video()->getPathRelativeToRoot()))->toBe(fakeMp4())
             ->and((float) $generation->cost)->toBe(0.42)
             ->and($generation->prompt)->toBe('The prompt');
-
-        Queue::assertNotPushed(PollVideo::class);
     });
 
-    it('fails when the provider reports a failure', function () {
-        Http::fake(['openrouter.ai/api/v1/videos/vid_123' => Http::response(['id' => 'vid_123', 'status' => 'failed', 'error' => 'Content policy'])]);
-
-        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'video_job_id' => 'vid_123']);
-        $job = new PollVideo($shot, 'vid_123', now()->getTimestamp());
-
-        expect(fn() => $job->handle(app(App\Support\Video\OpenRouterVideoClient::class)))->toThrow(RuntimeException::class, 'Content policy');
-
-        $job->failed(new RuntimeException('Content policy'));
-
-        expect($shot->fresh())->status->toBe(ShotStatus::KEYFRAMES_READY)->video_error->not->toBeNull();
-    });
-
-    it('gives up when the video takes too long', function () {
-        Http::fake(['openrouter.ai/api/v1/videos/vid_123' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
-
-        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'video_job_id' => 'vid_123']);
-
-        expect(fn() => (new PollVideo($shot, 'vid_123', now()->subHour()->getTimestamp()))->handle(app(App\Support\Video\OpenRouterVideoClient::class)))
-            ->toThrow(RuntimeException::class, 'too long');
-
-        Queue::assertNotPushed(PollVideo::class);
-    });
-
-    it('ignores a job that was replaced by a newer render', function () {
+    it('ignores a download for a render that was replaced', function () {
         Http::fake();
 
-        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'video_job_id' => 'vid_new']);
+        $shot = renderingShot($this->project, 'vid_new');
 
-        (new PollVideo($shot, 'vid_old', now()->getTimestamp()))->handle(app(App\Support\Video\OpenRouterVideoClient::class));
+        (new DownloadVideo($shot, 'vid_old'))->handle(app(OpenRouterVideoClient::class));
 
         Http::assertNothingSent();
+    });
+
+    it('hands checks queued before the shared round over to it', function () {
+        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'video_job_id' => 'vid_123']);
+
+        (new PollVideo($shot, 'vid_123', now()->subMinute()->getTimestamp()))->handle();
+
+        expect($shot->fresh()->video_submitted_at)->not->toBeNull();
+        Queue::assertPushed(PollVideos::class);
     });
 });
 

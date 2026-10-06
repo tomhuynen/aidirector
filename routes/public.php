@@ -13,6 +13,7 @@ use App\Http\Controllers\Public\Notifications\ReadController as NotificationRead
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CoverController as ProjectCoverController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
+use App\Http\Controllers\Public\Projects\DecisionsController as ProjectDecisionsController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\DestroyController as ElementDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
@@ -27,7 +28,10 @@ use App\Http\Controllers\Public\Projects\RuleController as ProjectRuleController
 use App\Http\Controllers\Public\Projects\Style\PinController as StylePinController;
 use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
+use App\Http\Controllers\Public\Projects\VoiceOverController as ProjectVoiceOverController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
+use App\Http\Controllers\Public\Shots\IssueController as ShotIssueController;
+use App\Http\Controllers\Public\Shots\Keyframes\CopyController as KeyframeCopyController;
 use App\Http\Controllers\Public\Shots\Keyframes\DestroyController as KeyframeDestroyController;
 use App\Http\Controllers\Public\Shots\Keyframes\FirstController as FirstKeyframeController;
 use App\Http\Controllers\Public\Shots\Keyframes\GenerateController as KeyframesGenerateController;
@@ -38,13 +42,18 @@ use App\Http\Controllers\Public\Shots\Keyframes\StoreController as KeyframeStore
 use App\Http\Controllers\Public\Shots\Keyframes\TweakController as KeyframeTweakController;
 use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpdateController;
 use App\Http\Controllers\Public\Shots\MergeController as ShotMergeController;
+use App\Http\Controllers\Public\Shots\Plan\ChatController as ShotPlanChatController;
+use App\Http\Controllers\Public\Shots\Plan\PlanController as ShotPlanController;
+use App\Http\Controllers\Public\Shots\Plan\PlateController as ShotPlateController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
+use App\Http\Controllers\Public\Shots\RetryController as ShotRetryController;
 use App\Http\Controllers\Public\Shots\Storyline\ChooseController as StorylineChooseController;
 use App\Http\Controllers\Public\Shots\Storyline\GenerateController as StorylineGenerateController;
 use App\Http\Controllers\Public\Shots\Storyline\SuggestController as StorylineSuggestController;
 use App\Http\Controllers\Public\Shots\UpdateController as ShotUpdateController;
 use App\Http\Controllers\Public\Shots\Video\GenerateController as VideoGenerateController;
 use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
+use App\Http\Controllers\Public\Shots\VoiceOverController as ShotVoiceOverController;
 use App\Http\Controllers\Uploads\StoreController as UploadStoreController;
 use App\Http\Controllers\Uploads\ViewController as UploadViewController;
 use App\Models\Keyframe;
@@ -81,6 +90,8 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{project}/setup', [ProjectCreateController::class, 'resume'])->name('setup');
             Route::get('{project}/cover', [ProjectCoverController::class, 'show'])->name('cover.view');
             Route::post('{project}/format', [ProjectFormatController::class, 'store'])->name('format');
+            Route::post('{project}/voice-over', [ProjectVoiceOverController::class, 'store'])->name('voice-over');
+            Route::get('{project}/decisions', [ProjectDecisionsController::class, 'view'])->name('decisions');
             Route::post('{project}/rules/{rule}/accept', [ProjectRuleController::class, 'accept'])->scopeBindings()->name('rules.accept');
             Route::post('{project}/rules/{rule}/dismiss', [ProjectRuleController::class, 'dismiss'])->scopeBindings()->name('rules.dismiss');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
@@ -128,6 +139,11 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/merge', [ShotMergeController::class, 'update'])->name('merge.update');
             Route::delete('{shot}/merge', [ShotMergeController::class, 'destroy'])->name('unmerge');
             Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
+            Route::post('{shot}/plan', [ShotPlanController::class, 'store'])->name('plan');
+            Route::post('{shot}/plate/choose', [ShotPlateController::class, 'choose'])->name('plate.choose');
+            Route::post('{shot}/plate/reset', [ShotPlateController::class, 'reset'])->name('plate.reset');
+            Route::post('{shot}/plan/changes', [ShotPlanChatController::class, 'changes'])->name('plan.changes');
+            Route::post('{shot}/plan/write', [ShotPlanChatController::class, 'write'])->name('plan.write');
             Route::post('{shot}/storyline/suggest', [StorylineSuggestController::class, 'store'])->name('storyline.suggest');
             Route::post('{shot}/storyline/choose', [StorylineChooseController::class, 'store'])->name('storyline.choose');
             Route::post('{shot}/storyline/generate', [StorylineGenerateController::class, 'store'])->name('storyline.generate');
@@ -135,6 +151,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/keyframes', [KeyframeStoreController::class, 'store'])->name('keyframes.store');
             Route::post('{shot}/keyframes/reorder', [KeyframeReorderController::class, 'store'])->name('keyframes.reorder');
             Route::delete('{shot}/keyframes/{keyframe}', [KeyframeDestroyController::class, 'destroy'])->name('keyframes.destroy');
+            Route::post('{shot}/keyframes/{keyframe}/copy', [KeyframeCopyController::class, 'store'])->name('keyframes.copy');
             Route::post('{shot}/keyframes/generate', [KeyframesGenerateController::class, 'store'])->name('keyframes.generate');
             Route::post('{shot}/keyframes/first/choose', [FirstKeyframeController::class, 'choose'])->name('keyframes.first.choose');
             Route::post('{shot}/keyframes/first/more', [FirstKeyframeController::class, 'more'])->name('keyframes.first.more');
@@ -145,7 +162,14 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{shot}/keyframes/{keyframe}/image/{conversion?}', [KeyframeImageController::class, 'view'])
                 ->whereIn('conversion', [Keyframe::THUMBNAIL])
                 ->name('keyframes.image');
+            Route::post('{shot}/issues/dismiss-all', [ShotIssueController::class, 'dismissAll'])->name('issues.dismiss-all');
+            Route::post('{shot}/issues/fix-all', [ShotIssueController::class, 'fixAll'])->name('issues.fix-all');
+            Route::post('{shot}/issues/{group}/fix', [ShotIssueController::class, 'fix'])->name('issues.fix');
+            Route::post('{shot}/issues/{group}/dismiss', [ShotIssueController::class, 'dismiss'])->name('issues.dismiss');
+            Route::post('{shot}/retry', [ShotRetryController::class, 'store'])->name('retry');
             Route::post('{shot}/video/generate', [VideoGenerateController::class, 'store'])->name('video.generate');
+            Route::post('{shot}/voice-over', [ShotVoiceOverController::class, 'store'])->name('voice-over');
+            Route::post('{shot}/voice-over/audio', [ShotVoiceOverController::class, 'audio'])->name('voice-over.audio');
             Route::get('{shot}/update', [ShotUpdateController::class, 'update'])->name('update');
             Route::post('{shot}/update', [ShotUpdateController::class, 'store']);
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');

@@ -10,12 +10,16 @@ use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
 use App\Events\ShotDeleting;
+use App\Jobs\GenerateVoiceOverAudio;
+use App\Jobs\ReviewShot;
+use Closure;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Config;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\MediaLibrary\HasMedia;
@@ -32,6 +36,31 @@ class Shot extends Model implements HasMedia
     use UsesTenantConnection;
 
     public const VIDEO = 'video';
+
+    /**
+     * The place of the shot without people, made from keyframe 1 when it
+     * shows people, so later keyframes add people to it instead of moving
+     * them through a redrawn place.
+     */
+    public const PLATE = 'plate';
+
+    /** On the plate: the render of keyframe 1 it was made from. */
+    public const PLATE_FROM = 'from_render';
+
+    /** Empty places drawn from the whole plan, for the director to choose the one every keyframe is drawn on. */
+    public const PLATE_OPTIONS = 'plate_options';
+
+    /** On the plate: it was chosen from the options, so it is the base of every keyframe. */
+    public const PLATE_CHOSEN = 'chosen';
+
+    /** The spoken voice-over tracks, one per language, with the locale as a custom property. */
+    public const VOICE_OVERS = 'voice_overs';
+
+    /** On a merged shot's video: when each part starts in it, in seconds. */
+    public const PART_STARTS = 'part_starts';
+
+    /** On a merged shot's video: how long it lasts, in seconds. */
+    public const VIDEO_SECONDS = 'seconds';
 
     protected $guarded = [];
 
@@ -53,10 +82,13 @@ class Shot extends Model implements HasMedia
      *  aspect_ratio_override: 'App\Enums\AspectRatio',
      *  preferred_elements: 'array',
      *  keyframe_review: 'array',
+     *  voice_over_tracks: 'array',
      *  storyline_options: 'array',
      *  chosen_storyline: 'array',
      *  storyline: 'array',
      *  merge_transition: 'App\Enums\ShotTransition',
+     *  video_submitted_at: 'datetime',
+     *  reviewing: 'boolean',
      * }
      */
     protected function casts(): array
@@ -67,10 +99,14 @@ class Shot extends Model implements HasMedia
             'aspect_ratio_override' => AspectRatio::class,
             'preferred_elements' => 'array',
             'keyframe_review' => 'array',
+            'voice_over_tracks' => 'array',
             'storyline_options' => 'array',
             'chosen_storyline' => 'array',
             'storyline' => 'array',
             'merge_transition' => ShotTransition::class,
+            'video_submitted_at' => 'datetime',
+            'reviewing' => 'boolean',
+            'rules' => 'array',
         ];
     }
 
@@ -156,6 +192,59 @@ class Shot extends Model implements HasMedia
     }
 
     /**
+     * Start the spoken tracks of every voice-over language of the project,
+     * when the shot has a voice-over text. Each language is its own job.
+     */
+    public function startVoiceOverAudio(): void
+    {
+        $locales = $this->project->settings->enabledLocales();
+
+        if ($locales === [] || blank($this->voice_over)) {
+            return;
+        }
+
+        foreach ($locales as $locale) {
+            $this->setVoiceOverTrack($locale, 'pending');
+            GenerateVoiceOverAudio::dispatch($this, $locale);
+        }
+    }
+
+    /**
+     * Record how the track of one language is doing: pending, ready or failed.
+     */
+    public function setVoiceOverTrack(string $locale, string $status, ?string $error = null): void
+    {
+        $this->updateStoredJson('voice_over_tracks', fn(?array $tracks) => [
+            ...($tracks ?? []),
+            $locale => array_filter(['status' => $status, 'error' => $error]),
+        ]);
+    }
+
+    /**
+     * Change one JSON column starting from what is stored right now, with the
+     * row locked, and save only that column. Jobs and requests that work on the
+     * same shot at the same time then add to each other's changes instead of
+     * writing back a copy they loaded earlier.
+     *
+     * @param  Closure(mixed): mixed  $change  gets the stored value and returns the new one
+     */
+    public function updateStoredJson(string $column, Closure $change): void
+    {
+        $this->getConnection()->transaction(function () use ($column, $change) {
+            $stored = static::query()->lockForUpdate()->find($this->getKey());
+
+            if ($stored === null) {
+                return;
+            }
+
+            $stored->forceFill([$column => $change($stored->getAttribute($column))])->save();
+
+            $this->setAttribute($column, $stored->getAttribute($column));
+            $this->syncOriginalAttribute($column);
+        });
+    }
+
+    /**
      * The cast and sets the director wants the storylines to use, in the
      * library's order. Elements deleted since are left out.
      *
@@ -185,11 +274,51 @@ class Shot extends Model implements HasMedia
     /**
      * The keyframes planned for the chosen storyline.
      *
-     * @return list<array{title: string, description: string, prompt?: string, must_show?: string, elements?: list<string>}>
+     * @return list<array{title: string, description: string, prompt?: string, must_show?: string, elements?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
         return array_values($this->storyline['keyframes'] ?? []);
+    }
+
+    /**
+     * The rules the director set for this shot, such as "she never crosses the red line with more than one foot".
+     *
+     * @return list<string>
+     */
+    public function shotRules(): array
+    {
+        return collect((array) ($this->rules ?? []))->map(fn(mixed $rule) => trim((string) $rule))->filter(fn(string $rule) => $rule !== '')->values()->all();
+    }
+
+    /**
+     * The shot's rules as lines for the writers, image prompts and checks; empty when there are none.
+     */
+    public function rulesBrief(): string
+    {
+        return collect($this->shotRules())->map(fn(string $rule) => "- {$rule}")->join("\n");
+    }
+
+    /**
+     * Add a rule for this shot, once.
+     */
+    public function addRule(string $rule): void
+    {
+        $rule = trim($rule);
+
+        if ($rule === '' || in_array(mb_strtolower($rule), array_map('mb_strtolower', $this->shotRules()), true)) {
+            return;
+        }
+
+        $this->forceFill(['rules' => [...$this->shotRules(), $rule]])->save();
+    }
+
+    /**
+     * Whether the director chose the empty place every keyframe is drawn on.
+     */
+    public function hasChosenPlate(): bool
+    {
+        return $this->media()->where('collection_name', self::PLATE)->where('custom_properties->' . self::PLATE_CHOSEN, true)->exists();
     }
 
     /**
@@ -224,7 +353,49 @@ class Shot extends Model implements HasMedia
      */
     public function replacePlannedKeyframes(array $keyframes): void
     {
-        $this->forceFill(['storyline' => [...($this->storyline ?? []), 'keyframes' => array_values($keyframes)]])->save();
+        $this->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'keyframes' => array_values($keyframes)]);
+    }
+
+    /**
+     * Add a planned keyframe at the end of the stored plan.
+     *
+     * @param  array<string, mixed>  $keyframe
+     */
+    public function appendPlannedKeyframe(array $keyframe): void
+    {
+        $this->updateStoredJson('storyline', fn(?array $storyline) => [
+            ...($storyline ?? []),
+            'keyframes' => [...array_values($storyline['keyframes'] ?? []), $keyframe],
+        ]);
+    }
+
+    /**
+     * Change the planned keyframe at a position: merge `$changes` into it and
+     * drop the `$forget` keys, such as a must show that no longer fits.
+     *
+     * @param  array<string, mixed>  $changes
+     * @param  list<string>  $forget
+     */
+    public function updatePlannedKeyframe(int $position, array $changes, array $forget = []): void
+    {
+        $this->updateStoredJson('storyline', function (?array $storyline) use ($position, $changes, $forget) {
+            $keyframes = array_values($storyline['keyframes'] ?? []);
+            $index = $position - 1;
+
+            if (isset($keyframes[$index])) {
+                $keyframes[$index] = Arr::except([...$keyframes[$index], ...$changes], $forget);
+            }
+
+            return [...($storyline ?? []), 'keyframes' => $keyframes];
+        });
+    }
+
+    /**
+     * Whether the planned keyframe at a position is a copy the director has not described yet.
+     */
+    public function plannedKeyframeIsCopy(int $position): bool
+    {
+        return (bool) ($this->storylineKeyframes()[$position - 1]['copied'] ?? false);
     }
 
     /**
@@ -265,12 +436,65 @@ class Shot extends Model implements HasMedia
             'prompt' => $keyframe->description,
         ], $keyframes);
 
+        // Old position => new one. A copy still has its original's position and comes after it, so the original keeps the mapping.
+        $moved = [];
+
+        foreach ($keyframes as $index => $keyframe) {
+            $moved[$keyframe->position] ??= $index + 1;
+        }
+
         foreach ($keyframes as $index => $keyframe) {
             $keyframe->forceFill(['position' => $index + 1])->save();
         }
 
         $this->unsetRelation('keyframes');
+        $this->updateStoredJson('keyframe_review', fn(?array $review) => self::renumberedReview($review, $moved));
         $this->replacePlannedKeyframes($arranged);
+
+        // The order is what the review judges, so it looks again; the renumbered notes stand until then.
+        ReviewShot::after($this);
+    }
+
+    /**
+     * The review with its notes and resolved issues moved along with their
+     * keyframes. Notes about deleted keyframes go; older notes that only name
+     * keyframes in their text cannot be moved and go too.
+     *
+     * @param  array<string, mixed>|null  $review
+     * @param  array<int, int>  $moved  old position => new position
+     * @return array<string, mixed>|null
+     */
+    private static function renumberedReview(?array $review, array $moved): ?array
+    {
+        if ($review === null) {
+            return null;
+        }
+
+        // Position 0 marks an issue resolved for the whole shot.
+        $renumber = fn(array $positions) => array_values(array_filter(
+            array_map(fn(mixed $position) => (int) $position === 0 ? 0 : ($moved[(int) $position] ?? null), $positions),
+            fn(?int $position) => $position !== null,
+        ));
+
+        $notes = collect((array) ($review['notes'] ?? []))
+            ->filter(fn(mixed $note) => is_array($note))
+            ->map(fn(array $note) => [...$note, 'keyframes' => $renumber((array) ($note['keyframes'] ?? [])), 'named' => (array) ($note['keyframes'] ?? []) !== []])
+            ->reject(fn(array $note) => $note['named'] && $note['keyframes'] === [])
+            ->map(fn(array $note) => Arr::except($note, 'named'))
+            ->values()
+            ->all();
+
+        $resolved = collect((array) ($review['resolved'] ?? []))
+            ->map(fn(mixed $positions) => $renumber((array) $positions))
+            ->filter()
+            ->all();
+
+        return [
+            ...$review,
+            'clear' => $notes === [] ? true : (bool) ($review['clear'] ?? true),
+            'notes' => $notes,
+            'resolved' => $resolved,
+        ];
     }
 
     /**
@@ -309,7 +533,10 @@ class Shot extends Model implements HasMedia
 
     public function registerMediaCollections(): void
     {
+        $this->addMediaCollection(self::VOICE_OVERS)->acceptsMimeTypes(['audio/mpeg', 'audio/mp3']);
         $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
+        $this->addMediaCollection(self::PLATE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::PLATE_OPTIONS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
     }
 
     /** @return BelongsTo<Project, $this> */

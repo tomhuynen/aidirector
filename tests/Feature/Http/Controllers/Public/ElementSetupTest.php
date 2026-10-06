@@ -16,6 +16,7 @@ use App\Jobs\AnalyzePhoto;
 use App\Jobs\GenerateCoverLoop;
 use App\Jobs\GenerateElementSuggestions;
 use App\Jobs\GenerateProjectCover;
+use App\Jobs\GenerateStoryline;
 use App\Jobs\RenderElementSuggestion;
 use App\Models\Director;
 use App\Models\Element;
@@ -330,6 +331,80 @@ describe('prepared rounds', function () {
             ->assertJsonPath('done', true);
 
         expect(ElementRound::query()->find($leftover->id))->toBeNull();
+    });
+});
+
+describe('generating shots', function () {
+    it('creates the shots the director asked for with their takeaway and context, and plans them without drawing', function () {
+        Queue::fake([GenerateStoryline::class, GenerateProjectCover::class]);
+        $conversationId = projectInElementStage($this->director, $this->project);
+        foreach (ElementType::cases() as $type) {
+            ElementRound::factory()->for($this->project)->type($type)->status(ElementRoundStatus::SKIPPED)->create();
+        }
+        ProjectIntake::fake([[
+            'reply' => 'Creating your shots now.', 'ask' => null, 'done' => true, 'skip' => null, 'element_round' => null,
+            'shots' => [
+                ['takeaway' => 'Never walk under a suspended load.', 'context' => 'On the quay a crane lifts a container.'],
+                ['takeaway' => 'Security keeps found items at reception.', 'context' => 'A visitor gets a lost phone back at the desk.'],
+                ['takeaway' => '', 'context' => 'Empty ones are skipped.'],
+            ],
+        ]]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Yes please'])
+            ->assertJsonPath('done', true);
+
+        $shots = $this->project->shots()->get();
+
+        expect($shots)->toHaveCount(2)
+            ->and($shots->first())
+            ->takeaway->toBe('Never walk under a suspended load.')
+            ->notes->toBe('On the quay a crane lifts a container.')
+            ->status->toBe(App\Enums\ShotStatus::STORYLINE_PENDING)
+            ->and($shots->pluck('position')->all())->toBe([1, 2]);
+
+        Queue::assertPushed(GenerateStoryline::class, fn(GenerateStoryline $job) => $job->draw === false);
+        Queue::assertPushed(GenerateStoryline::class, 2);
+    });
+
+    it('creates no shots when the director declines', function () {
+        Queue::fake([GenerateStoryline::class, GenerateProjectCover::class]);
+        $conversationId = projectInElementStage($this->director, $this->project);
+        foreach (ElementType::cases() as $type) {
+            ElementRound::factory()->for($this->project)->type($type)->status(ElementRoundStatus::SKIPPED)->create();
+        }
+        ProjectIntake::fake([['reply' => 'Your project is ready.', 'ask' => null, 'done' => true, 'skip' => null, 'element_round' => null, 'shots' => null]]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'No thanks'])
+            ->assertJsonPath('done', true);
+
+        expect($this->project->shots()->count())->toBe(0);
+        Queue::assertNotPushed(GenerateStoryline::class);
+    });
+
+    it('asks whether to generate the shots as the last step', function () {
+        expect((string) (new ProjectIntake())->instructions())
+            ->toContain('Last step, the shots.')
+            ->toContain('Ask in one short question whether you should generate the shots for them')
+            ->toContain('as many as the material needs to cover every point once');
+    });
+
+    it('creates at most thirty shots in one go', function () {
+        Queue::fake([GenerateStoryline::class, GenerateProjectCover::class]);
+        $conversationId = projectInElementStage($this->director, $this->project);
+        foreach (ElementType::cases() as $type) {
+            ElementRound::factory()->for($this->project)->type($type)->status(ElementRoundStatus::SKIPPED)->create();
+        }
+        ProjectIntake::fake([[
+            'reply' => 'Creating them.', 'ask' => null, 'done' => true, 'skip' => null, 'element_round' => null,
+            'shots' => array_map(fn(int $n) => ['takeaway' => "Point {$n}.", 'context' => 'Context.'], range(1, 34)),
+        ]]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.chat'), ['conversation' => $conversationId, 'message' => 'Yes']);
+
+        expect($this->project->shots()->count())->toBe(30);
     });
 });
 

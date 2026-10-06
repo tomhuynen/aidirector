@@ -12,9 +12,12 @@ use App\Http\Resources\Public\ShotListItemResource;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use App\Models\ProjectRule;
+use App\Support\Decisions\DecisionQueue;
 use App\Support\Video\VideoFormats;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
+use Locale;
 
 class ViewController
 {
@@ -34,11 +37,22 @@ class ViewController
 
         return Inertia::render('projects/view', [
             'project' => fn() => ProjectResource::make($project),
+            /** @var int How many decisions wait for the director in this project. */
+            'decisionsCount' => fn() => app(DecisionQueue::class)->count($project),
             'shots' => fn() => ShotListItemResource::collection($project->shots),
             /** @var array{aspectRatios: array<int, array{value: string, name: string}>, resolutions: array<int, string>, sizes: array<string, array{width: int, height: int}>} */
             'videoFormats' => fn() => VideoFormats::catalogue(),
             /** @var array<int, array{value: string, label: string, plural: string}> */
             'elementTypes' => fn() => ElementType::catalogue(),
+            /**
+             * The languages a voice-over can be made in, by name.
+             *
+             * @var array<int, array{code: string, name: string}>
+             */
+            'voiceOverLanguages' => fn() => array_map(fn(string $code) => [
+                'code' => $code,
+                'name' => Locale::getDisplayName($code, 'en'),
+            ], (array) Config::get('pipeline.voice_over.locales')),
             /**
              * Rules learned from recurring corrections: suggested ones to decide on, active ones in use.
              *

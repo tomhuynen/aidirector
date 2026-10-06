@@ -34,10 +34,11 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
         return <<<'INSTRUCTIONS'
             You write prompts for an image-to-video model that animates a storyboard of numbered keyframes into one continuous clip.
             The video model sees the keyframes as reference images in chronological order, and your text. It must animate exactly what the keyframes show and invent nothing else.
+            You see the same keyframes as attached images, in order. Describe what is drawn in them, not what a name or role suggests: a "security officer" looks exactly as he is drawn, not like a typical one.
 
             Write three parts:
 
-            Style: two or three sentences that tell the model to preserve the exact visual style of the keyframes. Name the medium and rendering (for example flat 2D cartoon or soft 3D illustration), shapes, shading, level of detail, colours, background and proportions. Then list the character's defining features and the key objects and setting that must stay consistent. End with a sentence that forbids making the result more realistic, more detailed or different in style than the keyframes.
+            Style: two or three sentences that tell the model to preserve the exact visual style of the keyframes. Name the medium and rendering (for example flat 2D cartoon or soft 3D illustration), shapes, shading, level of detail, colours, background and proportions. Then describe every person exactly as drawn in the keyframes, so they cannot be redrawn differently: build, hair, headwear with its shape and colour, each piece of clothing with its colour, shoes, and what they carry. Then the key objects and setting that must stay consistent. End with a sentence that forbids making the result more realistic, more detailed or different in style than the keyframes.
 
             Action: the action sequence in chronological order, one or two sentences per keyframe, written as continuous present-tense narration. Mention each keyframe number in brackets where its moment is reached, for example (keyframe 2). Describe only what the keyframes show and the minimal motion needed to get from one to the next. Do not add events, gestures, reactions or objects that are not in the keyframes.
 
@@ -45,6 +46,7 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
 
             Rules:
             - Base everything on the keyframe descriptions and the style you are given. Never invent a story beat.
+            - Write every action on a thing together with its outcome, so the video model cannot finish it the usual way. Video models follow actions and ignore prohibitions: "checks the door by holding the handle" ends with the door opening, however often you add "it does not open". Write "presses the handle down once, the door is locked and does not move, he lets go" instead. The same for a lid that stays shut, a gate that stays closed, a valve that does not turn.
             - No camera moves, cuts, text, captions, sound or music.
             - Plain English, no headings, no lists, no markdown.
             INSTRUCTIONS;

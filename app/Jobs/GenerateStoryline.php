@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Str;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use Throwable;
 
@@ -30,6 +31,8 @@ class GenerateStoryline implements ShouldQueue
     public function __construct(
         public readonly Shot $shot,
         public readonly ?string $instruction = null,
+        /** Off for shots created in bulk: they are planned, and drawn once the director asks for it. */
+        public readonly bool $draw = true,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
@@ -58,16 +61,30 @@ class GenerateStoryline implements ShouldQueue
 
         $shot->forgetKeyframes();
 
+        $title = trim((string) ($response['title'] ?? ''));
+
         $shot->forceFill([
+            // A shot still named after its takeaway gets the planner's title; a title someone gave it stays.
+            'title' => $title !== '' && (blank($shot->title) || $shot->title === Str::limit((string) $shot->takeaway, 80)) ? $title : $shot->title,
+            'chosen_storyline' => [
+                'title' => $title !== '' ? $title : (string) $shot->title,
+                'storyline' => trim((string) ($response['storyline'] ?? '')),
+            ],
             'storyline' => [
+                'mode' => 'auto',
                 'framing' => $response['framing'],
                 'keyframes' => array_values($response['keyframes']),
             ],
             'storyline_error' => null,
-            'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
+            'voice_over' => null,
+            'status' => $this->draw ? ShotStatus::FIRST_KEYFRAME_PENDING : ShotStatus::STORYLINE_READY,
         ])->save();
 
-        GenerateKeyframes::dispatch($shot);
+        if ($this->draw) {
+            GenerateKeyframes::dispatch($shot);
+        }
+
+        GenerateVoiceOver::dispatch($shot);
     }
 
     public function failed(?Throwable $exception): void
@@ -82,7 +99,7 @@ class GenerateStoryline implements ShouldQueue
 
         $this->shot->forceFill([
             'storyline_error' => __('The keyframes could not be planned. Please try again.'),
-            'status' => $this->shot->storyline === null ? ShotStatus::OPTIONS_READY : ShotStatus::STORYLINE_READY,
+            'status' => $this->shot->storyline === null ? ShotStatus::DRAFT : ShotStatus::STORYLINE_READY,
         ])->save();
     }
 }

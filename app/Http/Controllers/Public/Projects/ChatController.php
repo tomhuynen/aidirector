@@ -9,9 +9,11 @@ use App\Enums\AspectRatio;
 use App\Enums\CoverStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
+use App\Enums\ShotStatus;
 use App\Http\Requests\Public\ProjectChatRequest;
 use App\Jobs\AnalyzePhoto;
 use App\Jobs\GenerateProjectCover;
+use App\Jobs\GenerateStoryline;
 use App\Models\Director;
 use App\Models\ElementRound;
 use App\Models\Media;
@@ -20,6 +22,7 @@ use App\Models\Project;
 use App\Models\Upload;
 use App\Support\Elements\ElementRoundState;
 use App\Support\Elements\StartElementRound;
+use App\Support\Intake\DocumentText;
 use App\Support\Media\ClaimUploads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -41,6 +44,9 @@ use Throwable;
  */
 class ChatController
 {
+    /** The most shots the intake creates in one go. */
+    public const MAX_GENERATED_SHOTS = 30;
+
     public function __construct(
         private readonly ClaimUploads $claimUploads,
         private readonly StartElementRound $startElementRound,
@@ -56,6 +62,10 @@ class ChatController
         $conversationId = $request->validated('conversation');
         $uploads = $this->uploads($request->uploadIds());
         $project = $conversationId === null ? null : Project::query()->where('conversation_id', $conversationId)->first();
+
+        // Documents are read into the conversation right away; photos need the project to exist.
+        [$documents, $uploads] = $uploads->partition(fn(Upload $upload) => $upload->isDocument())->all();
+        $documentNote = $this->readDocuments($documents);
 
         if ($uploads->isNotEmpty() && $project === null) {
             throw ValidationException::withMessages([
@@ -77,7 +87,7 @@ class ChatController
         } else {
             $agent->forUser($director);
         }
-        $prompt = $this->prompt((string) $request->validated('message'), $photos);
+        $prompt = trim($this->prompt((string) $request->validated('message'), $photos) . "\n\n" . $documentNote);
         $model = Config::get('pipeline.models.text');
         $started = hrtime(true);
 
@@ -103,6 +113,10 @@ class ChatController
         $round = $project === null ? null : $this->elementAction($project, $data);
         $done = $project !== null && (bool) ($data['done'] ?? false) && $this->completeSetup($project);
 
+        if ($done) {
+            $this->createShots($project, (array) ($data['shots'] ?? []));
+        }
+
         return response()->json([
             'conversation' => $conversationId,
             /** @var string */
@@ -127,6 +141,60 @@ class ChatController
                 'caption' => $media->getCustomProperty(Project::CAPTION),
             ])->values()->all(),
         ]);
+    }
+
+    /**
+     * The shots the director asked the intake to generate: each gets its
+     * takeaway and context as its brief, and its storylines are suggested
+     * straight away, as if the director had filled in the brief.
+     *
+     * @param  array<mixed>  $shots
+     */
+    private function createShots(Project $project, array $shots): void
+    {
+        $position = (int) ($project->allShots()->max('position') ?? 0);
+
+        foreach (array_slice($shots, 0, self::MAX_GENERATED_SHOTS) as $brief) {
+            $takeaway = trim((string) (is_array($brief) ? ($brief['takeaway'] ?? '') : ''));
+
+            if ($takeaway === '') {
+                continue;
+            }
+
+            $shot = $project->allShots()->create([
+                'position' => ++$position,
+                'title' => Str::limit($takeaway, 80),
+                'takeaway' => $takeaway,
+                'notes' => trim((string) ($brief['context'] ?? '')) ?: null,
+                'status' => ShotStatus::STORYLINE_PENDING,
+            ]);
+
+            // Planned straight away, drawn once the director starts it from the decisions.
+            GenerateStoryline::dispatch($shot, draw: false);
+        }
+    }
+
+    /**
+     * The text of the shared documents, for the assistant to read. A document
+     * that cannot be read is named, so the assistant can ask for it again.
+     *
+     * @param  Collection<int, Upload>  $documents
+     */
+    private function readDocuments(Collection $documents): string
+    {
+        return $documents->map(function (Upload $document): string {
+            try {
+                $text = app(DocumentText::class)->read($document);
+            } catch (Throwable $exception) {
+                report($exception);
+
+                return "The director tried to share the document \"{$document->name}\", but it could not be read.";
+            } finally {
+                $document->delete();
+            }
+
+            return "The director shared the document \"{$document->name}\":\n<<<\n{$text}\n>>>";
+        })->join("\n\n");
     }
 
     /**

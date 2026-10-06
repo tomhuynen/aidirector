@@ -25,6 +25,21 @@ enum ShotSize: string
     /**
      * When the planner picks this size.
      */
+    /**
+     * The shot sizes for a picker, with a short name.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    public static function catalogue(): array
+    {
+        return [
+            ['value' => self::CLOSE_UP->value, 'label' => __('Close-up')],
+            ['value' => self::MEDIUM->value, 'label' => __('Medium shot')],
+            ['value' => self::FULL->value, 'label' => __('Full shot, head to feet')],
+            ['value' => self::WIDE->value, 'label' => __('Wide shot')],
+        ];
+    }
+
     public function useWhen(): string
     {
         return match ($this) {

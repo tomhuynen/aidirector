@@ -9,7 +9,9 @@ use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Enums\CorrectionSource;
 use App\Jobs\Concerns\MarksRenderFailures;
+use App\Models\Element;
 use App\Models\Keyframe;
+use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Corrections\RecordCorrection;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -49,13 +51,19 @@ class TweakKeyframeImage implements ShouldQueue
         public readonly Keyframe $keyframe,
         public readonly string $instruction,
         public readonly ?int $option = null,
+        /** The request came from the automatic check, through Fix, not from the director. */
+        public readonly bool $fromCheck = false,
+        /** Have the text model make the request precise first; off, the request goes to the image model as typed and only the description is updated. */
+        public readonly bool $rewrite = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
     public function handle(KeyframePainter $painter): void
     {
-        $keyframe = $this->keyframe->load('shot.project');
+        $keyframe = $this->keyframe->load(['shot.project', 'elements']);
+        // Taken before the change rewrites the description, so the correction keeps what the keyframe was meant to show.
+        $intent = RecordCorrection::keyframeContext($keyframe);
         $current = ($this->option !== null ? $keyframe->renders()->firstWhere('id', $this->option) : $keyframe->render())
             ?? throw new RuntimeException('The keyframe has no render to tweak.');
         $previous = $keyframe->position > 1
@@ -63,28 +71,56 @@ class TweakKeyframeImage implements ShouldQueue
             : null;
         $references = $previous ? [$painter->referenceFor($current), $painter->referenceFor($previous)] : [$painter->referenceFor($current)];
 
-        ['instruction' => $instruction, 'approach' => $approach] = $this->interpret($keyframe, $references);
+        ['instruction' => $instruction, 'approach' => $approach, 'description' => $description, 'absent' => $absent] = $this->interpret($keyframe, $references);
 
-        $render = $approach === 'redraw'
-            ? $this->redraw($painter, $keyframe, $instruction)
-            : $painter->paint(
+        // Without the rewrite the request goes to the image model as typed; the text model only keeps the description true.
+        if (! $this->rewrite) {
+            [$instruction, $approach] = [$this->instruction, 'edit'];
+        }
+
+        // Before drawing: a redraw is checked against the description, which must already describe the change.
+        if ($this->option === null) {
+            $this->describeChange($keyframe, $description, $absent);
+        }
+
+        $base = $painter->baseFor($keyframe, $keyframe->shot->keyframes()->with('media')->get()->each->setRelation('shot', $keyframe->shot));
+
+        $render = match (true) {
+            $approach === 'redraw' => $this->redraw($painter, $keyframe, $instruction),
+            // On a place the edit starts from the place again, so the background cannot creep with every adjustment.
+            $base?->collection_name === Shot::PLATE => $painter->paintOn(
+                $base,
                 $keyframe,
-                KeyframeImageBrief::tweak($instruction, withPreviousKeyframe: $previous !== null),
+                KeyframeImageBrief::tweakOnPlate($instruction, withPreviousKeyframe: $previous !== null, shotRules: $keyframe->shot->rulesBrief()),
+                [$painter->referenceFor($base), ...$references],
+                choose: $this->option === null,
+                model: (string) Config::get('pipeline.models.keyframe_edit'),
+                labels: ['The place without people, the image that is edited', 'This version, for the people and what changed', ...($previous !== null ? ['The keyframe before'] : [])],
+            ),
+            default => $painter->paintOn(
+                $base,
+                $keyframe,
+                KeyframeImageBrief::tweak($instruction, withPreviousKeyframe: $previous !== null, shotRules: $keyframe->shot->rulesBrief()),
                 $references,
                 choose: $this->option === null,
-                model: (string) Config::get('pipeline.models.image_edit'),
-            );
+                model: (string) Config::get('pipeline.models.keyframe_edit'),
+                labels: $previous !== null ? ['This version, the image that is edited', 'The keyframe before'] : ['This version, the image that is edited'],
+            ),
+        };
 
         if ($this->option !== null) {
             $keyframe->forceFill(['rendering' => false, 'render_error' => null])->save();
+        } else {
+            ReviewShot::after($keyframe->shot);
         }
 
         // Kept on the version, so the director can see what was asked and what the image model was told.
         $render->setCustomProperty(Keyframe::TWEAK_REQUEST, $this->instruction)
             ->setCustomProperty(Keyframe::TWEAK_INSTRUCTION, $instruction)
+            ->setCustomProperty(Keyframe::TWEAK_FROM_CHECK, $this->fromCheck)
             ->save();
 
-        RecordCorrection::record($keyframe->shot->project, CorrectionSource::ADJUSTMENT, $this->instruction, $keyframe->shot, $keyframe, RecordCorrection::keyframeContext($keyframe));
+        RecordCorrection::record($keyframe->shot->project, CorrectionSource::ADJUSTMENT, $this->instruction, $keyframe->shot, $keyframe, $intent);
 
         $shot = $keyframe->shot;
 
@@ -102,7 +138,7 @@ class TweakKeyframeImage implements ShouldQueue
      * rewrite fails, the request is used as typed, as an edit.
      *
      * @param  list<StoredImage>  $references
-     * @return array{instruction: string, approach: 'edit'|'redraw'}
+     * @return array{instruction: string, approach: 'edit'|'redraw', description: string, absent: list<string>}
      */
     private function interpret(Keyframe $keyframe, array $references): array
     {
@@ -126,7 +162,7 @@ class TweakKeyframeImage implements ShouldQueue
 
             report($exception);
 
-            return ['instruction' => $this->instruction, 'approach' => 'edit'];
+            return ['instruction' => $this->instruction, 'approach' => 'edit', 'description' => '', 'absent' => []];
         }
 
         $keyframe->generations()->create([
@@ -145,7 +181,34 @@ class TweakKeyframeImage implements ShouldQueue
         return [
             'instruction' => $instruction !== '' ? $instruction : $this->instruction,
             'approach' => ($result['approach'] ?? 'edit') === 'redraw' ? 'redraw' : 'edit',
+            'description' => trim((string) ($result['description'] ?? '')),
+            'absent' => array_values(array_filter(array_map('strval', (array) ($result['absent'] ?? [])))),
         ];
+    }
+
+    /**
+     * Keeps the keyframe's text true to the adjusted image: a new description
+     * replaces the old one and its must show, and cast or sets that left the
+     * picture are taken off the keyframe, so the check, the review and later
+     * redraws no longer expect them.
+     *
+     * @param  list<string>  $absent
+     */
+    private function describeChange(Keyframe $keyframe, string $description, array $absent): void
+    {
+        $shot = $keyframe->shot;
+        $gone = $keyframe->elements->filter(fn(Element $element) => in_array(mb_strtolower($element->name), array_map('mb_strtolower', $absent), true));
+
+        if ($gone->isNotEmpty()) {
+            $keyframe->elements()->detach($gone->modelKeys());
+            $keyframe->load('elements');
+            $shot->updatePlannedKeyframe($keyframe->position, ['elements' => $keyframe->elements->pluck('name')->values()->all()]);
+        }
+
+        if ($description !== '') {
+            $keyframe->forceFill(['description' => $description])->save();
+            $shot->updatePlannedKeyframe($keyframe->position, ['description' => $description, 'prompt' => $description], ['must_show', 'copied']);
+        }
     }
 
     /**
@@ -161,7 +224,7 @@ class TweakKeyframeImage implements ShouldQueue
         return $painter->render(
             $target,
             $siblings,
-            "The director asked for this change, and it matters most: {$instruction}",
+            "The director asked for this change, and it matters most; where it differs from the description, spot or keyframe references above, follow the change: {$instruction}",
             choose: $this->option === null,
         );
     }

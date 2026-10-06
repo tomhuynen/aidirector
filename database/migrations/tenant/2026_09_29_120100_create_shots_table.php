@@ -29,8 +29,13 @@ return new class extends Migration {
             $table->json('storyline')->nullable();
             $table->text('storyline_error')->nullable();
             $table->json('keyframe_review')->nullable();
+            $table->boolean('reviewing')->default(false);
+            $table->json('rules')->nullable();
+            $table->text('voice_over')->nullable();
+            $table->json('voice_over_tracks')->nullable();
             $table->text('video_prompt')->nullable();
             $table->string('video_job_id', 128)->nullable();
+            $table->timestamp('video_submitted_at')->nullable();
             $table->text('video_error')->nullable();
             $table->unsignedBigInteger('merged_into_id')->nullable()->index();
             $table->string('merge_transition', 16)->nullable();

@@ -81,11 +81,15 @@ it('puts the action in the centre and keeps the place\'s own logos and signs', f
         ->not->toContain('No text, captions, logos or watermarks');
 });
 
-it('keeps every fixed part of the place in later keyframes', function () {
+it('draws later keyframes as an edit of keyframe 1, so every fixed part of the place stays', function () {
     $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('first.png'))))
-        ->toContain('such as logos, signs, doors, windows and parked vehicles, stays in the same position and looks the same; nothing appears or disappears');
+        ->toStartWith('Edit the first attached image. It is keyframe 1 of this shot')
+        ->toContain('the floor and every marking or painted line on it, and the background, all at exactly the same place, size and angle')
+        ->toContain('never add a second copy of anyone')
+        ->not->toContain('Framing:')
+        ->not->toContain('Visual style:');
 });
 
 it('describes elements without a picture in words', function () {
@@ -112,3 +116,24 @@ it('keeps the style\'s light when the story names none', function (?string $ligh
     'as the style' => ['as the visual style'],
     'missing' => [null],
 ]);
+
+it('adds the people that keyframe 1 does not show yet', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
+
+    expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('first.png'), firstShowsCast: false, castNames: ['Female engineer'])))
+        ->toContain('Female engineer is not in the first image yet: add them into it')
+        ->not->toContain('never add a second copy of anyone');
+});
+
+it('takes the people from their pictures and the state of things from the keyframe before', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
+    $engineer = Element::factory()->for($shot->project)->create(['type' => 'person', 'name' => 'Female engineer']);
+
+    expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(
+        elementImages: [['element' => $engineer, 'image' => new StoredImage('engineer.png')]],
+        first: new StoredImage('first.png'),
+        previous: new StoredImage('previous.png'),
+    )))
+        ->toContain('The second attached image is the picture of Female engineer (person). Draw Female engineer exactly like it')
+        ->toContain('The third attached image is the keyframe directly before this one. Carry over the state and position of every object from it');
+});

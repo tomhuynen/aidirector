@@ -16,7 +16,7 @@ class MergeShotsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'shots' => ['required', 'array', 'min:2', 'max:20'],
+            'shots' => ['required', 'array', 'min:2', 'max:100'],
             /** @var string */
             'shots.*' => ['required', 'string', 'distinct'],
             'title' => ['required', 'string', 'min:2', 'max:120'],

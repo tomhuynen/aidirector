@@ -17,6 +17,8 @@ class FirstKeyframeAdjustRequest extends FormRequest
             /** The option for keyframe 1 to adjust. */
             'render' => ['required', 'integer'],
             'instruction' => ['required', 'string', 'max:500'],
+            /** Have the text model make the request precise before it goes to the image model. */
+            'rewrite' => ['sometimes', 'boolean'],
         ];
     }
 }

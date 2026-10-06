@@ -4,7 +4,7 @@
       <header class="space-y-2">
         <h2 class="text-3xl font-semibold">{{ $t('What should this shot tell?') }}</h2>
         <p class="text-lg text-muted-foreground">
-          {{ $t('Give the takeaway. The storyteller comes up with possible storylines.') }}
+          {{ $t('Give the takeaway. Then you check the plan, or write it yourself, before anything is drawn.') }}
         </p>
       </header>
 
@@ -43,7 +43,7 @@
         :hint="$t('optional')"
         :max="2000"
         rows="3"
-        :placeholder="$t('Anything the storyteller should know, such as where it happens or what went before.')"
+        :placeholder="$t('Anything the director should know, such as where it happens or what went before.')"
         :error="form.errors.notes"
       />
 
@@ -60,7 +60,7 @@
 
         <template v-if="choosing">
           <p class="text-sm text-muted-foreground">
-            {{ $t('Every storyline uses the people, places and objects you pick.') }}
+            {{ $t('The shot uses the people, places and objects you pick.') }}
           </p>
           <ElementPicker
             v-model="form.preferredElements"
@@ -70,6 +70,27 @@
           />
           <InputError :message="form.errors.preferredElements" />
         </template>
+      </fieldset>
+
+      <fieldset class="mt-6 space-y-3">
+        <legend class="text-[15px] font-medium">{{ $t('Who writes the keyframes?') }}</legend>
+        <div class="flex gap-2">
+          <Button type="button" :variant="form.manual ? 'outline' : 'default'" @click="form.manual = false">
+            {{ $t('Draft them for me') }}
+          </Button>
+          <Button type="button" :variant="form.manual ? 'default' : 'outline'" @click="form.manual = true">
+            {{ $t('I write them myself') }}
+          </Button>
+        </div>
+        <p class="text-sm text-muted-foreground">
+          {{
+            form.manual
+              ? $t('You get an empty plan to fill in. Nothing is generated until you draw the keyframes.')
+              : $t(
+                  'The director drafts the storyline and keyframes. You check and change the draft before anything is drawn.',
+                )
+          }}
+        </p>
       </fieldset>
 
       <footer class="mt-8 flex items-center justify-end gap-3">
@@ -103,6 +124,7 @@ type BriefForm = {
   notes: string
   duration: number | string | null
   preferredElements: string[]
+  manual: boolean
 }
 
 const props = defineProps<{
@@ -115,14 +137,12 @@ const props = defineProps<{
 
 const durationId = useId()
 
-// Debug default for a new shot, so the storyline flow can be tried with one click. Remove before release.
-const debugTakeaway = 'Smoking is prohibited on the shipyard.'
-
 const form = useForm<BriefForm>({
-  takeaway: props.shot.id ? props.shot.takeaway : debugTakeaway,
+  takeaway: props.shot.takeaway ?? '',
   notes: props.shot.notes ?? '',
   duration: props.shot.duration ?? null,
   preferredElements: [...(props.shot.preferredElements ?? [])],
+  manual: false,
 })
 
 const choosing = ref(form.preferredElements.length > 0)

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Support\Video;
 
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 
@@ -52,6 +54,42 @@ class OpenRouterVideoClient
     {
         /** @var VideoStatus */
         return $this->client()->get("videos/{$id}")->throw()->json();
+    }
+
+    /**
+     * The status of several jobs at once, asked in parallel. A job whose
+     * status could not be read, for example on a timeout, is left out.
+     *
+     * @param  list<string>  $ids
+     * @return array<string, VideoStatus>
+     */
+    public function statuses(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $responses = Http::pool(fn(Pool $pool) => array_map(
+            fn(string $id) => $pool->as($id)
+                ->baseUrl(Config::get('pipeline.video.url'))
+                ->withToken((string) Config::get('ai.providers.openrouter.key'))
+                ->acceptJson()
+                ->timeout(60)
+                ->get("videos/{$id}"),
+            $ids,
+        ), concurrency: 10);
+
+        $statuses = [];
+
+        foreach ($responses as $id => $response) {
+            if ($response instanceof Response && $response->successful() && is_string($response->json('status'))) {
+                /** @var VideoStatus $status */
+                $status = $response->json();
+                $statuses[(string) $id] = $status;
+            }
+        }
+
+        return $statuses;
     }
 
     /**

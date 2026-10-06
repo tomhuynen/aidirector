@@ -48,7 +48,7 @@ class StoreController
             'rendering' => true,
         ]);
 
-        $shot->replacePlannedKeyframes([...$shot->storylineKeyframes(), $plan]);
+        $shot->appendPlannedKeyframe($plan);
 
         GenerateKeyframeImage::dispatch($keyframe);
 
@@ -57,13 +57,13 @@ class StoreController
 
     /**
      * A keyframe can be added once keyframe 1 is chosen and rendered, nothing is
-     * rendering, and the shot is below the maximum number of keyframes.
+     * rendering, and the shot is below the maximum the director may add by hand.
      */
     public static function canAddTo(Shot $shot, int $count, bool $firstRendered, bool $anyRendering): bool
     {
         return in_array($shot->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_READY], true)
             && $count > 0
-            && $count < (int) Config::get('pipeline.keyframes.max')
+            && $count < (int) Config::get('pipeline.keyframes.max_manual')
             && $firstRendered
             && ! $anyRendering;
     }

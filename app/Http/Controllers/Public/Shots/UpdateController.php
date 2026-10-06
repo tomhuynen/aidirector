@@ -6,12 +6,13 @@ namespace App\Http\Controllers\Public\Shots;
 
 use App\Enums\ElementType;
 use App\Enums\ShotStatus;
+use App\Http\Controllers\Public\Shots\Concerns\GuardsBusyShots;
 use App\Http\Requests\Public\ShotRequest;
 use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotListItemResource;
 use App\Http\Resources\Public\ShotResource;
-use App\Jobs\GenerateStorylineOptions;
+use App\Jobs\GenerateStoryline;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
@@ -20,6 +21,8 @@ use Inertia\Inertia;
 
 class UpdateController
 {
+    use GuardsBusyShots;
+
     public function update(Project $project, Shot $shot)
     {
         $this->authorize($project, $shot);
@@ -45,19 +48,35 @@ class UpdateController
     {
         $this->authorize($project, $shot);
 
-        if (! $shot->exists) {
+        if ($shot->exists) {
+            $this->ensureShotIdle($shot, 'takeaway');
+        } else {
             $shot->project_id = $project->id;
             $shot->position = ($project->shots()->max('position') ?? 0) + 1;
         }
 
         $shot->fill($request->shotAttributes());
-        $shot->status = ShotStatus::OPTIONS_PENDING;
         $shot->storyline_options = null;
-        $shot->chosen_storyline = null;
         $shot->storyline_error = null;
+
+        // Written by the director: an empty plan to fill in, nothing is generated.
+        if ($request->boolean('manual')) {
+            $shot->forgetKeyframes();
+            $shot->status = ShotStatus::STORYLINE_READY;
+            $shot->chosen_storyline = ['title' => $shot->title, 'storyline' => ''];
+            $shot->storyline = ['mode' => 'manual', 'framing' => ['size' => 'full', 'spot' => (string) $shot->notes, 'light' => 'as the visual style', 'seconds' => null], 'keyframes' => []];
+            $shot->save();
+
+            return redirect()->route('public.shots.view', [$project, $shot]);
+        }
+
+        $shot->status = ShotStatus::STORYLINE_PENDING;
+        $shot->chosen_storyline = null;
+        $shot->storyline = null;
         $shot->save();
 
-        GenerateStorylineOptions::dispatch($shot);
+        // The planner drafts the storyline and keyframes; the director checks the draft before anything is drawn.
+        GenerateStoryline::dispatch($shot, draw: false);
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

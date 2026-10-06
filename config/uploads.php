@@ -21,6 +21,10 @@ return [
      */
     'mime_types' => [
         'application/pdf',
+        'text/plain',
+        'text/markdown',
+        'text/rtf',
+        'application/rtf',
         'image/jpeg',
         'image/png',
         'image/gif',
@@ -33,4 +37,9 @@ return [
      * app:cleanup.
      */
     'expires_after_hours' => 8,
+
+    /*
+     * Reads the text of PDFs shared in the intake chat.
+     */
+    'pdftotext' => env('PDFTOTEXT_BINARY', 'pdftotext'),
 ];

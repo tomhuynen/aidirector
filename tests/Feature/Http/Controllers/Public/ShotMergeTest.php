@@ -5,11 +5,14 @@ declare(strict_types=1);
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
+use App\Jobs\MergeShotAudio;
 use App\Jobs\MergeShotVideos;
 use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Audio\AudioLength;
+use App\Support\Projects\ProjectSettings;
 use App\Support\Video\ClipJoiner;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
@@ -55,6 +58,28 @@ function sequence(Project $project, int $count, array $withoutVideo = []): array
 }
 
 describe('merging', function () {
+    it('stores merged videos larger than an upload may be', function () {
+        $shot = Shot::factory()->for($this->project)->create();
+
+        $shot->addMediaFromString(stubClip() . str_repeat("\x00", 20 * 1024 * 1024))->usingFileName('merged.mp4')->toMediaCollection(Shot::VIDEO);
+
+        expect($shot->video()->size)->toBeGreaterThan(20 * 1024 * 1024);
+    });
+
+    it('merges more than twenty shots at once', function () {
+        $shots = sequence($this->project, 25);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.merge', $this->project), [
+                'shots' => array_map(fn(Shot $shot) => $shot->sqid, $shots),
+                'title' => 'Everything',
+                'transition' => 'cut',
+            ])
+            ->assertSessionHasNoErrors();
+
+        expect($this->project->shots()->sole()->parts()->count())->toBe(25);
+    });
+
     it('merges adjacent shots into one in their place and joins their clips', function () {
         [$one, $two, $three, $four, $five] = sequence($this->project, 5);
 
@@ -225,4 +250,55 @@ describe('joining', function () {
             ->and($merged->video())->not->toBeNull()
             ->and($this->director->notifications()->sole()->data['title'])->toContain('merged video');
     })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
+
+    it('merges the parts\' audio tracks, each where its part starts', function () {
+        $directory = storage_path('framework/testing/clips');
+        @mkdir($directory, 0777, true);
+
+        foreach ([1, 2] as $n) {
+            Process::run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x284:rate=24:duration=2', '-pix_fmt', 'yuv420p', "{$directory}/clip-{$n}.mp4"])->throw();
+            Process::run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', "{$directory}/voice-{$n}.mp3"])->throw();
+        }
+
+        $this->project->settings = new ProjectSettings(voiceOver: true, voiceOverLocales: ['nl-NL']);
+        $this->project->save();
+
+        $parts = collect([1, 2])->map(function (int $n) {
+            $shot = Shot::factory()->for($this->project)->create(['position' => $n, 'status' => ShotStatus::VIDEO_READY, 'voice_over' => "Line {$n}."]);
+            $shot->addMedia(storage_path("framework/testing/clips/clip-{$n}.mp4"))->preservingOriginal()->toMediaCollection(Shot::VIDEO);
+            $shot->addMedia(storage_path("framework/testing/clips/voice-{$n}.mp3"))->preservingOriginal()->withCustomProperties(['locale' => 'nl-NL'])->toMediaCollection(Shot::VOICE_OVERS);
+
+            return $shot;
+        });
+        $merged = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::VIDEO_PENDING, 'merge_transition' => ShotTransition::CUT]);
+        $parts->each(fn(Shot $part) => $part->forceFill(['merged_into_id' => $merged->id])->save());
+
+        (new MergeShotVideos($merged))->handle(app(ClipJoiner::class));
+
+        $merged->refresh();
+        $track = $merged->getFirstMedia(Shot::VOICE_OVERS);
+
+        expect($merged->video()->getCustomProperty(Shot::PART_STARTS))->toBe([0, 2])
+            ->and($merged->voice_over)->toBe('Line 1. Line 2.')
+            ->and($merged->voice_over_tracks)->toBe(['nl-NL' => ['status' => 'ready']])
+            ->and($track->getCustomProperty('locale'))->toBe('nl-NL')
+            ->and(app(AudioLength::class)->seconds((string) file_get_contents($track->getPath())))->toEqualWithDelta(4.0, 0.1);
+    })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
+});
+
+it('merges a part\'s audio again when its track is spoken again', function () {
+    Queue::fake([MergeShotAudio::class]);
+    Storage::fake(Disk::TENANT->value);
+    $this->project->settings = new ProjectSettings(voiceOver: true, voiceOverLocales: ['nl-NL', 'en-GB']);
+    $this->project->save();
+
+    $merged = Shot::factory()->for($this->project)->create(['merge_transition' => ShotTransition::CUT, 'status' => ShotStatus::VIDEO_READY]);
+    $merged->addMediaFromString("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" . str_repeat("\x00", 64))->usingFileName('merged.mp4')->toMediaCollection(Shot::VIDEO);
+    $part = Shot::factory()->for($this->project)->create(['merged_into_id' => $merged->id]);
+    $part->addMediaFromString("ID3\x03\x00\x00\x00\x00\x00\x00\xFF\xFB\x90\x64" . str_repeat("\x00", 400))->usingFileName('nl.mp3')->withCustomProperties(['locale' => 'nl-NL'])->toMediaCollection(Shot::VOICE_OVERS);
+
+    MergeShotAudio::start($merged->fresh(), ['nl-NL']);
+
+    Queue::assertPushed(MergeShotAudio::class, fn(MergeShotAudio $job) => $job->locales === ['nl-NL']);
+    expect($merged->fresh()->voice_over_tracks)->toBe(['nl-NL' => ['status' => 'pending']]);
 });

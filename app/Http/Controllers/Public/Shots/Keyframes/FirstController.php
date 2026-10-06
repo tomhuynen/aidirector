@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
 use App\Enums\ShotStatus;
+use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Http\Requests\Public\FirstKeyframeAdjustRequest;
 use App\Http\Requests\Public\KeyframeRenderRequest;
 use App\Jobs\GenerateKeyframes;
@@ -22,6 +23,8 @@ use Illuminate\Validation\ValidationException;
  */
 class FirstController
 {
+    use ReturnsToDecisions;
+
     /**
      * Choose an option for keyframe 1 and render the other keyframes from it.
      */
@@ -43,7 +46,7 @@ class FirstController
 
         GenerateRemainingKeyframes::startFor($shot);
 
-        return redirect()->route('public.shots.view', [$project, $shot]);
+        return $this->afterAction($project, $shot);
     }
 
     /**
@@ -66,9 +69,12 @@ class FirstController
             'storyline_error' => null,
         ])->save();
 
-        GenerateKeyframes::dispatch($shot, more: true);
+        // On a chosen place another version of keyframe 1 is drawn on it; otherwise another round of options.
+        $shot->hasChosenPlate()
+            ? GenerateRemainingKeyframes::dispatch($shot, onlyFirst: true)
+            : GenerateKeyframes::dispatch($shot, more: true);
 
-        return redirect()->route('public.shots.view', [$project, $shot]);
+        return $this->afterAction($project, $shot);
     }
 
     /**
@@ -91,9 +97,9 @@ class FirstController
 
         $first->forceFill(['rendering' => true, 'render_error' => null])->save();
 
-        TweakKeyframeImage::dispatch($first, $request->validated('instruction'), $render->id);
+        TweakKeyframeImage::dispatch($first, $request->validated('instruction'), $render->id, rewrite: $request->boolean('rewrite'));
 
-        return redirect()->route('public.shots.view', [$project, $shot]);
+        return $this->afterAction($project, $shot);
     }
 
     private function ensureChoosing(Shot $shot, string $field): void

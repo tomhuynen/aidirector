@@ -15,6 +15,8 @@ class KeyframeTweakRequest extends FormRequest
     {
         return [
             'instruction' => ['required', 'string', 'max:500'],
+            /** Have the text model make the request precise before it goes to the image model. */
+            'rewrite' => ['sometimes', 'boolean'],
         ];
     }
 }

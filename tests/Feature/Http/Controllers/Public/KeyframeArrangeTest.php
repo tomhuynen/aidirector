@@ -3,11 +3,14 @@
 declare(strict_types=1);
 
 use App\Enums\ShotStatus;
+use App\Jobs\ReviewShot;
 use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Queue;
 
 use function Pest\Laravel\actingAs;
 
@@ -144,5 +147,80 @@ describe('destroy', function () {
             ->assertInertia(fn($page) => $page
                 ->where('shot.links.keyframesReorder', route('public.shots.keyframes.reorder', [$this->project, $shot]))
                 ->where('keyframes.0.links.destroy', route('public.shots.keyframes.destroy', [$this->project, $shot, $arrive])));
+    });
+});
+
+describe('review', function () {
+    /**
+     * Notes on keyframe 3, on keyframe 2 and on the whole shot, with the first resolved for keyframe 3.
+     *
+     * @return array<string, mixed>
+     */
+    $review = fn() => [
+        'clear' => false,
+        'notes' => [
+            ['text' => 'She still stands on the line.', 'keyframes' => [3]],
+            ['text' => 'The sign is too small.', 'keyframes' => [2]],
+            ['text' => 'The point is unclear.', 'keyframes' => []],
+        ],
+        'resolved' => ['line' => [3], 'shot' => [0]],
+    ];
+
+    it('moves the notes and what was resolved along with their keyframes', function () use ($review) {
+        [$shot, [$arrive, $notice, $leave]] = arrangedShot($this->project, ['keyframe_review' => $review()]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.reorder', [$this->project, $shot]), ['keyframes' => [$leave->sqid, $arrive->sqid, $notice->sqid]]);
+
+        expect($shot->fresh()->keyframe_review)->toBe([
+            'clear' => false,
+            'notes' => [
+                ['text' => 'She still stands on the line.', 'keyframes' => [1]],
+                ['text' => 'The sign is too small.', 'keyframes' => [3]],
+                ['text' => 'The point is unclear.', 'keyframes' => []],
+            ],
+            'resolved' => ['line' => [1], 'shot' => [0]],
+        ]);
+    });
+
+    it('drops the notes about a deleted keyframe', function () use ($review) {
+        [$shot, [, $notice]] = arrangedShot($this->project, ['keyframe_review' => $review()]);
+
+        actingAs($this->director, 'director')
+            ->delete(route('public.shots.keyframes.destroy', [$this->project, $shot, $notice]));
+
+        expect($shot->fresh()->keyframe_review['notes'])->toBe([
+            ['text' => 'She still stands on the line.', 'keyframes' => [2]],
+            ['text' => 'The point is unclear.', 'keyframes' => []],
+        ]);
+    });
+
+    it('keeps the notes on the original when a keyframe is copied', function () use ($review) {
+        [$shot, [, $notice]] = arrangedShot($this->project, ['keyframe_review' => $review()]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.copy', [$this->project, $shot, $notice]));
+
+        expect(array_column($shot->fresh()->keyframe_review['notes'], 'keyframes'))->toBe([[4], [2], []]);
+    });
+
+    it('drops older notes that only name keyframes in their text, since they cannot be moved', function () {
+        [$shot, [$arrive, $notice, $leave]] = arrangedShot($this->project, ['keyframe_review' => ['clear' => false, 'notes' => ['In keyframe 3 she still stands on the line.']]]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.reorder', [$this->project, $shot]), ['keyframes' => [$leave->sqid, $arrive->sqid, $notice->sqid]]);
+
+        expect($shot->fresh()->keyframe_review)->toMatchArray(['clear' => true, 'notes' => []]);
+    });
+
+    it('reviews the new order again', function () {
+        Config::set('pipeline.keyframe_check', true);
+        Queue::fake();
+        [$shot, [$arrive, $notice, $leave]] = arrangedShot($this->project);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.reorder', [$this->project, $shot]), ['keyframes' => [$leave->sqid, $arrive->sqid, $notice->sqid]]);
+
+        Queue::assertPushed(ReviewShot::class, fn(ReviewShot $job) => $job->shot->is($shot));
     });
 });

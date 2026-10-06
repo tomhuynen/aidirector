@@ -1,20 +1,13 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-4">
     <!-- One row: as many options fit as the first batch, further ones scroll sideways. -->
-    <div
-      ref="row"
-      class="grid min-h-0 flex-1 gap-4 overflow-x-auto pb-2"
-      :style="{
-        gridAutoFlow: 'column',
-        gridAutoColumns: `calc((100% - ${optionCount - 1}rem) / ${optionCount})`,
-        gridTemplateRows: 'minmax(0, 1fr)',
-      }"
-    >
+    <!-- One row at full height; options beyond the width scroll sideways. -->
+    <div ref="row" class="flex min-h-0 flex-1 gap-2 overflow-x-auto pb-2">
       <button
         v-for="(option, i) in options"
         :key="option.id"
         type="button"
-        class="group flex min-h-0 items-center justify-center"
+        class="group flex h-full min-h-0 shrink-0 items-center justify-center"
         :aria-pressed="option.id === selectedId"
         :disabled="pending || adjusting"
         @click="selectedId = option.id"
@@ -23,7 +16,7 @@
         <span class="relative inline-flex max-h-full max-w-full" :style="tileSize">
           <img
             :src="option.imageUrl"
-            :alt="$t('Option :n', { n: String(i + 1) })"
+            :alt="field === 'plate' ? $t('Place :n', { n: String(i + 1) }) : $t('Option :n', { n: String(i + 1) })"
             :class="
               cn(
                 'size-full rounded-xl border border-border bg-card object-cover transition',
@@ -47,7 +40,11 @@
         </span>
       </button>
 
-      <div v-for="n in placeholders" :key="`pending-${n}`" class="flex min-h-0 items-center justify-center">
+      <div
+        v-for="n in placeholders"
+        :key="`pending-${n}`"
+        class="flex h-full min-h-0 shrink-0 items-center justify-center"
+      >
         <Placeholder class="max-h-full max-w-full rounded-xl bg-card" :style="tileSize">
           <LoaderCircle class="size-6 animate-spin text-signal" />
         </Placeholder>
@@ -55,18 +52,30 @@
     </div>
 
     <div class="flex shrink-0 items-center justify-between gap-3">
-      <Button type="button" variant="outline" :disabled="pending || adjusting || more.processing" @click="askMore">
-        <RefreshCw class="size-4" />
-        {{ $t('More options') }}
-      </Button>
+      <div class="flex items-center gap-2">
+        <Button type="button" variant="outline" :disabled="pending || adjusting || more.processing" @click="askMore">
+          <RefreshCw class="size-4" />
+          {{ resetUrl ? $t('Draw again') : $t('More options') }}
+        </Button>
+        <Button
+          v-if="resetUrl"
+          type="button"
+          variant="ghost"
+          :disabled="pending || adjusting || reset.processing"
+          @click="reset.post(resetUrl, { preserveScroll: true })"
+        >
+          <ArrowLeft class="size-4" />
+          {{ $t('Choose another place') }}
+        </Button>
+      </div>
       <div class="flex items-center gap-3">
-        <InputError :message="choice.errors.render" />
+        <InputError :message="choice.errors.render ?? choice.errors.plate ?? reset.errors.plate" />
         <Button
           type="button"
           :disabled="pending || adjusting || selectedId === null || choice.processing"
           @click="choose"
         >
-          {{ $t('Use this keyframe') }}
+          {{ field === 'plate' ? $t('Use this place') : $t('Use this keyframe') }}
           <ArrowRight class="size-4" />
         </Button>
       </div>
@@ -79,7 +88,7 @@ import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { ArrowRight, Check, LoaderCircle, RefreshCw } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, LoaderCircle, RefreshCw } from 'lucide-vue-next'
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
 
 import Placeholder from './Placeholder.vue'
@@ -93,6 +102,10 @@ const props = defineProps<{
   moreUrl: string
   /** An adjusted option is being drawn. */
   adjusting?: boolean
+  /** What the choice is sent as: an option of keyframe 1, or an empty place. */
+  field?: 'render' | 'plate'
+  /** Keyframe 1 is drawn on a chosen place; this goes back to the places. */
+  resetUrl?: string | null
 }>()
 
 /** The option the director selected; shared with the column on the right, which adjusts it. */
@@ -110,25 +123,22 @@ const placeholders = computed(() => {
   return props.optionCount - drawn
 })
 
-const isPortrait = computed(() => {
-  const [w, h] = props.aspectRatio.split(':').map(Number)
-
-  return h >= w
-})
-
+// Always the full height of the row; the ratio sets the width, and the row scrolls when they do not fit.
 const tileSize = computed(() => ({
   aspectRatio: props.aspectRatio.replace(':', ' / '),
-  height: isPortrait.value ? '100%' : undefined,
-  width: isPortrait.value ? undefined : '100%',
+  height: '100%',
 }))
 
-const choice = useForm<{ render: number | null }>({ render: null })
+const choice = useForm<{ render?: number | null; plate?: number | null }>({})
 const more = useForm({})
+const reset = useForm<{ plate?: string }>({})
 
 const choose = () => {
   if (selectedId.value === null) return
 
-  choice.transform(() => ({ render: selectedId.value })).post(props.chooseUrl, { preserveScroll: true })
+  choice
+    .transform(() => ({ [props.field ?? 'render']: selectedId.value }))
+    .post(props.chooseUrl, { preserveScroll: true })
 }
 
 const askMore = () => more.post(props.moreUrl, { preserveScroll: true })

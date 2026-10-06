@@ -1,18 +1,31 @@
 <template>
   <aside class="flex w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto border-l border-border p-6">
     <div class="space-y-1">
-      <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">{{ $t('Keyframe 1') }}</p>
-      <h2 v-if="keyframe" class="text-xl font-semibold">{{ keyframe.title }}</h2>
+      <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {{ plates ? $t('The place') : $t('Keyframe 1') }}
+      </p>
+      <h2 v-if="plates" class="text-xl font-semibold">{{ $t('Where the shot plays') }}</h2>
+      <h2 v-else-if="keyframe" class="text-xl font-semibold">{{ keyframe.title }}</h2>
       <div v-else class="h-7 w-40 animate-pulse rounded bg-secondary" />
     </div>
 
     <div class="space-y-3 rounded-xl border border-signal/40 bg-signal-soft/30 px-4 py-4 text-sm leading-relaxed">
-      <p class="font-semibold">{{ $t('Choose the first keyframe') }}</p>
+      <p class="font-semibold">
+        {{ plates ? $t('Choose the place') : onPlate ? $t('Check keyframe 1') : $t('Choose the first keyframe') }}
+      </p>
       <p class="text-muted-foreground">
         {{
-          $t(
-            'The first keyframe sets the character, the place and the look for the whole shot. Pick the option you like best; the other keyframes are then drawn to match it.',
-          )
+          plates
+            ? $t(
+                'These are empty places drawn from the whole plan. Every keyframe is drawn on the one you choose, so the place and the camera stay exactly the same.',
+              )
+            : onPlate
+              ? $t(
+                  'Keyframe 1 is drawn on the place you chose. Adjust it until it is right; the other keyframes are only drawn once you use it.',
+                )
+              : $t(
+                  'The first keyframe sets the character, the place and the look for the whole shot. Pick the option you like best; the other keyframes are then drawn to match it.',
+                )
         }}
       </p>
     </div>
@@ -34,6 +47,10 @@
           class="text-[15px] leading-relaxed"
         />
         <InputError :message="adjustment.errors.instruction ?? adjustment.errors.render" />
+        <label class="flex items-start gap-2 text-sm text-muted-foreground">
+          <Checkbox v-model="adjustment.rewrite" :disabled="busy || selected === null" class="mt-0.5" />
+          <span>{{ $t('Let the director make my request precise first') }}</span>
+        </label>
         <p class="text-sm text-muted-foreground">{{ $t('The adjusted version is added as a new option.') }}</p>
       </div>
       <Button
@@ -47,7 +64,17 @@
       </Button>
     </form>
 
-    <div class="space-y-1.5">
+    <div v-if="plates && steps?.length" class="space-y-1.5">
+      <p class="text-sm text-muted-foreground">{{ $t('What happens in this place') }}</p>
+      <ol class="space-y-1 rounded-lg border border-border bg-card px-3.5 py-2.5 text-[15px] leading-relaxed">
+        <li v-for="(step, i) in steps" :key="i" class="flex gap-2">
+          <span class="text-muted-foreground tabular-nums">{{ i + 1 }}.</span>
+          <span>{{ step }}</span>
+        </li>
+      </ol>
+    </div>
+
+    <div v-else class="space-y-1.5">
       <p class="text-sm text-muted-foreground">{{ $t('Description') }}</p>
       <p v-if="keyframe" class="rounded-lg border border-border bg-card px-3.5 py-2.5 text-[15px] leading-relaxed">
         {{ keyframe.description }}
@@ -65,6 +92,7 @@ import { useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { Button } from '@shared:ui/button'
+import { Checkbox } from '@shared:ui/checkbox'
 import { Label } from '@shared:ui/label'
 import { Textarea } from '@shared:ui/textarea'
 import { LoaderCircle, Wand2 } from 'lucide-vue-next'
@@ -74,6 +102,12 @@ import { LoaderCircle, Wand2 } from 'lucide-vue-next'
  * with placeholders, so the layout does not jump when the plan arrives.
  */
 const props = defineProps<{
+  /** The options are empty places, not versions of keyframe 1. */
+  plates?: boolean
+  /** Keyframe 1 is drawn on a chosen place and waits for confirmation. */
+  onPlate?: boolean
+  /** The titles of the planned keyframes, shown while choosing a place. */
+  steps?: string[]
   keyframe?: { title: string; description: string }
   /** Adjusts the selected option; the result is added as a new option. */
   adjustUrl?: string
@@ -82,7 +116,10 @@ const props = defineProps<{
   busy?: boolean
 }>()
 
-const adjustment = useForm<{ instruction: string; render?: number }>({ instruction: '' })
+const adjustment = useForm<{ instruction: string; render?: number; rewrite: boolean }>({
+  instruction: '',
+  rewrite: false,
+})
 
 const adjust = () => {
   if (!props.adjustUrl || props.selected == null) return

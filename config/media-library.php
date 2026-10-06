@@ -52,7 +52,7 @@ return [
      * The maximum file size of an item in bytes.
      * Adding a larger file will result in an exception.
      */
-    'max_file_size' => 1024 * 1024 * 10, // 10MB
+    'max_file_size' => 1024 * 1024 * 500, // 500MB: merged videos of many shots are large; uploads have their own limit in config/uploads.php
 
     /*
      * Uploads whose file name contains any of these extensions will be rejected.

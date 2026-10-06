@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\Agents\VideoPromptWriter;
+use App\Ai\KeyframePainter;
 use App\Ai\Prompts\VideoPrompt;
 use App\Enums\ShotStatus;
 use App\Models\Keyframe;
@@ -24,7 +25,7 @@ use Throwable;
 /**
  * Turns the shot's keyframes into a video request: has the text model write
  * the shot-specific prompt and submits it with every keyframe image, in order,
- * as a reference to the video model before handing off to {@see PollVideo}.
+ * as a reference to the video model before handing off to {@see PollVideos}.
  */
 #[DeleteWhenMissingModels]
 class GenerateVideo implements ShouldQueue
@@ -41,7 +42,7 @@ class GenerateVideo implements ShouldQueue
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
-    public function handle(OpenRouterVideoClient $videos): void
+    public function handle(OpenRouterVideoClient $videos, KeyframePainter $painter): void
     {
         $shot = $this->shot->load(['project', 'keyframes.media']);
         $keyframes = $shot->keyframes;
@@ -52,7 +53,7 @@ class GenerateVideo implements ShouldQueue
 
         $duration = self::duration($shot);
         $prompt = VideoPrompt::compose(
-            $this->writePrompt($shot, $keyframes, $duration),
+            $this->writePrompt($shot, $keyframes, $duration, $painter),
             self::timeline($keyframes, $duration),
             $duration,
         );
@@ -62,6 +63,7 @@ class GenerateVideo implements ShouldQueue
             ->values()
             ->all();
 
+        // No first frame: with one, Wan 3.0 animates from that image alone and leaves the references out, so the cast changes.
         $jobId = $videos->submit(
             Config::get('pipeline.models.video'),
             $prompt,
@@ -74,11 +76,14 @@ class GenerateVideo implements ShouldQueue
         $shot->forceFill([
             'video_prompt' => $prompt,
             'video_job_id' => $jobId,
+            'video_submitted_at' => now(),
             'video_error' => null,
         ])->save();
 
-        PollVideo::dispatch($shot, $jobId, now()->getTimestamp())
-            ->delay(now()->addSeconds((int) Config::get('pipeline.video.poll_seconds')));
+        // The spoken tracks are made while the video renders.
+        $shot->startVoiceOverAudio();
+
+        PollVideos::start();
     }
 
     public function failed(?Throwable $exception): void
@@ -135,14 +140,17 @@ class GenerateVideo implements ShouldQueue
      * @param  Collection<int, Keyframe>  $keyframes
      * @return array{style: string, action: string, details: string}
      */
-    private function writePrompt(Shot $shot, Collection $keyframes, int $duration): array
+    private function writePrompt(Shot $shot, Collection $keyframes, int $duration, KeyframePainter $painter): array
     {
         $writer = new VideoPromptWriter($shot);
         $model = Config::get('pipeline.models.text');
         $started = hrtime(true);
 
+        // The writer sees the keyframes, so it describes the cast as drawn instead of as their role suggests.
+        $images = $keyframes->map(fn(Keyframe $keyframe) => $painter->referenceFor($keyframe->render()))->values()->all();
+
         /** @var StructuredAgentResponse $response */
-        $response = $writer->prompt($writer->promptFor($keyframes, $duration), provider: 'openrouter', model: $model);
+        $response = $writer->prompt($writer->promptFor($keyframes, $duration), attachments: $images, provider: 'openrouter', model: $model);
 
         $shot->generations()->create([
             'director_id' => $shot->project->director_id,

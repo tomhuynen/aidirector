@@ -16,7 +16,8 @@ use Illuminate\Validation\Validator;
 
 /**
  * The shot brief: the takeaway, optional context, and optionally the cast and
- * sets the storylines must use. The storyteller writes the rest.
+ * sets the shot must use. The planner drafts the storyline and keyframes, or
+ * the director writes the keyframes themselves.
  */
 class ShotRequest extends FormRequest
 {
@@ -37,6 +38,8 @@ class ShotRequest extends FormRequest
             'purposeOverride' => ['nullable', Rule::enum(ProjectPurpose::class)],
             'aspectRatioOverride' => ['nullable', Rule::enum(AspectRatio::class)],
             'duration' => ['nullable', 'integer', 'min:2', 'max:30'],
+            /** Skip the planner: the director writes the keyframes themselves. */
+            'manual' => ['sometimes', 'boolean'],
         ];
     }
 
