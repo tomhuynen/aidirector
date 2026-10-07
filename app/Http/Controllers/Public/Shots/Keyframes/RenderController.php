@@ -27,8 +27,10 @@ class RenderController
         Gate::authorize(ShotPolicy::UPDATE, $shot);
         $this->ensureKeyframeIdle($shot, $keyframe, 'render');
 
-        // Keyframe 1 is chosen through its options until the other keyframes are drawn.
-        if (! in_array($shot->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_READY], true)) {
+        // Before the other keyframes are drawn, only keyframe 1 on a chosen place has versions to pick from.
+        $checkingFirst = $shot->status === ShotStatus::FIRST_KEYFRAME_READY && $shot->hasChosenPlate() && $keyframe->position === 1;
+
+        if (! $checkingFirst && ! in_array($shot->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_READY], true)) {
             throw ValidationException::withMessages([
                 'render' => __('A version can be chosen once every keyframe is drawn.'),
             ]);

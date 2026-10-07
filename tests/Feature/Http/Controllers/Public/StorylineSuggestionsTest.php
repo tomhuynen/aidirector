@@ -314,12 +314,13 @@ describe('jobs', function () {
             ->toContain('Never write "forward", "looking forward", "ahead" or "angled into"');
     });
 
-    it('asks the keyframe writer for an image prompt per keyframe', function () {
+    it('asks the keyframe writer for a description the image model can draw from', function () {
         $shot = Shot::factory()->for($this->project)->create();
 
         expect((string) (new StorylineWriter($shot->load('project')))->instructions())
-            ->toContain('Prompt: a brief for an image model that renders this keyframe')
-            ->toContain('the spot in the place with the context objects on it')
+            ->toContain('Description: exactly what is visible in this keyframe')
+            ->toContain('It goes to the image model as written')
+            ->toContain('Describe the spot with the context objects on it')
             ->toContain('nothing crosses or touches a figure')
             ->toContain('Never invent a separate wall, panel or backdrop in front of the place');
     });
@@ -360,7 +361,12 @@ describe('jobs', function () {
             ->toContain('never introduce a new person')
             ->toContain('Light: the time of day and light the storyline calls for')
             ->toContain('Do not list background extras such as vehicles, containers, cranes or people')
-            ->toContain('Must show: the one spatial fact the story depends on in this keyframe')
+            ->toContain('End every description with the one spatial fact the story depends on in this keyframe')
+            ->toContain('The kind of shot, choose one by the takeaway and give it as the kind:')
+            ->toContain('For a montage:')
+            ->toContain('the shot plays without words, voice-over, sound or text, so the pictures alone must carry the takeaway')
+            ->toContain('Talking, explaining, welcoming, smiling, nodding, listening, agreeing, signalling or acknowledging never carry the takeaway')
+            ->not->toContain('Must show:')
             ->toContain('stage the person and the danger close together in the same frame')
             ->toContain('sit together in the centre of the frame and take most of it');
     });

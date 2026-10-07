@@ -6,7 +6,9 @@ namespace App\Http\Controllers\Public\Projects\Elements;
 
 use App\Enums\ElementRoundStatus;
 use App\Enums\ElementSuggestionStatus;
+use App\Enums\ElementType;
 use App\Http\Requests\Public\ElementPickRequest;
+use App\Jobs\JudgeElementVoice;
 use App\Models\Element;
 use App\Models\ElementRound;
 use App\Models\ElementSuggestion;
@@ -59,6 +61,10 @@ class PickController
                 }
 
                 $suggestion->forceFill(['picked_at' => now()])->save();
+
+                if ($element->type === ElementType::PERSON) {
+                    JudgeElementVoice::dispatch($element)->afterCommit();
+                }
 
                 return $element;
             })->values();

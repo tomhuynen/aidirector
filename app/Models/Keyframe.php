@@ -49,14 +49,20 @@ class Keyframe extends Model implements HasMedia
     /** While rendering: the image is redrawn to fix what the check found. */
     public const STAGE_FIXING = 'fixing';
 
-    /** On a render: what the keyframe must show that the check could still not see after a redraw. */
-    public const CHECK_WARNING = 'check_warning';
-
     /** On a render: how the place differs from keyframe 1, found after drawing. */
     public const PLACE_ISSUES = 'place_issues';
 
     /** On a redrawn render: the mistakes the automatic check found in the render before it. */
     public const CHECK_PROBLEMS = 'check_problems';
+
+    /** On a render: the director moved a person in it by hand; the pose is redrawn from it. */
+    public const MOVED_BY_HAND = 'moved_by_hand';
+
+    /** On a render: redrawn after a move, but the person no longer stood where they were put. */
+    public const MOVED_AWAY = 'moved_away';
+
+    /** On a render: after a move, why the image no longer fits the keyframe's point in the story. */
+    public const MOVE_WARNING = 'move_warning';
 
     /** On a render drawn on a base image: the share of the background that stayed in place, from 0 to 1. */
     public const STILLNESS = 'stillness';

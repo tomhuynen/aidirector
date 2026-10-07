@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
+use App\Enums\ShotKind;
 use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
@@ -62,6 +63,12 @@ class Shot extends Model implements HasMedia
     /** On a merged shot's video: how long it lasts, in seconds. */
     public const VIDEO_SECONDS = 'seconds';
 
+    /** The clip of each still of a montage, with its position as a custom property, kept until they are joined. */
+    public const MONTAGE_CLIPS = 'montage_clips';
+
+    /** The video of a presenter shot per language, with its sound, with the locale as a custom property. */
+    public const PRESENTER_VIDEOS = 'presenter_videos';
+
     protected $guarded = [];
 
     /**
@@ -78,6 +85,8 @@ class Shot extends Model implements HasMedia
     /**
      * @return array{
      *  status: 'App\Enums\ShotStatus',
+     *  kind: 'App\Enums\ShotKind',
+     *  montage_clips: 'array',
      *  purpose_override: 'App\Enums\ProjectPurpose',
      *  aspect_ratio_override: 'App\Enums\AspectRatio',
      *  preferred_elements: 'array',
@@ -95,6 +104,8 @@ class Shot extends Model implements HasMedia
     {
         return [
             'status' => ShotStatus::class,
+            'kind' => ShotKind::class,
+            'montage_clips' => 'array',
             'purpose_override' => ProjectPurpose::class,
             'aspect_ratio_override' => AspectRatio::class,
             'preferred_elements' => 'array',
@@ -199,7 +210,8 @@ class Shot extends Model implements HasMedia
     {
         $locales = $this->project->settings->enabledLocales();
 
-        if ($locales === [] || blank($this->voice_over)) {
+        // A presenter speaks the voice-over in the video itself, in every language.
+        if ($locales === [] || blank($this->voice_over) || $this->isPresenter()) {
             return;
         }
 
@@ -274,6 +286,8 @@ class Shot extends Model implements HasMedia
     /**
      * The keyframes planned for the chosen storyline.
      *
+     * Older plans also carry a `prompt`: an image instruction no longer written or used; the description goes to the image model.
+     *
      * @return list<array{title: string, description: string, prompt?: string, must_show?: string, elements?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
@@ -311,6 +325,30 @@ class Shot extends Model implements HasMedia
         }
 
         $this->forceFill(['rules' => [...$this->shotRules(), $rule]])->save();
+    }
+
+    /**
+     * Whether the shot is a row of separate stills instead of one place with a camera that does not move.
+     */
+    public function isMontage(): bool
+    {
+        return $this->kind === ShotKind::MONTAGE;
+    }
+
+    /**
+     * Whether one person speaks the voice-over to the camera, with a video per language.
+     */
+    public function isPresenter(): bool
+    {
+        return $this->kind === ShotKind::PRESENTER;
+    }
+
+    /**
+     * Whether every keyframe is drawn on its own instead of on one shared place.
+     */
+    public function drawsStandalone(): bool
+    {
+        return $this->isMontage() || $this->isPresenter();
     }
 
     /**
@@ -433,7 +471,6 @@ class Shot extends Model implements HasMedia
         $arranged = array_map(fn(Keyframe $keyframe) => $plans[$keyframe->position - 1] ?? [
             'title' => $keyframe->title,
             'description' => $keyframe->description,
-            'prompt' => $keyframe->description,
         ], $keyframes);
 
         // Old position => new one. A copy still has its original's position and comes after it, so the original keeps the mapping.
@@ -537,6 +574,8 @@ class Shot extends Model implements HasMedia
         $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::PLATE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PLATE_OPTIONS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
+        $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }
 
     /** @return BelongsTo<Project, $this> */

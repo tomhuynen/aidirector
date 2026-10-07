@@ -27,6 +27,8 @@ class ElementResource extends JsonResource
             'typeLabel' => $this->type->description(),
             'name' => $this->name,
             'description' => $this->description,
+            /** The voice a person speaks with as a presenter: male, female, or null until it is judged from their picture. */
+            'voice' => $this->settings->voice,
             /** @var bool */
             'rendering' => $this->rendering,
             /**

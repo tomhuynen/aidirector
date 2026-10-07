@@ -55,6 +55,8 @@ class TweakKeyframeImage implements ShouldQueue
         public readonly bool $fromCheck = false,
         /** Have the text model make the request precise first; off, the request goes to the image model as typed and only the description is updated. */
         public readonly bool $rewrite = false,
+        /** The director wrote the new description and the request comes from it: it is kept as written. */
+        public readonly bool $describedByDirector = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
@@ -66,7 +68,8 @@ class TweakKeyframeImage implements ShouldQueue
         $intent = RecordCorrection::keyframeContext($keyframe);
         $current = ($this->option !== null ? $keyframe->renders()->firstWhere('id', $this->option) : $keyframe->render())
             ?? throw new RuntimeException('The keyframe has no render to tweak.');
-        $previous = $keyframe->position > 1
+        // A still of a montage has its own place, so the keyframe before is no reference for it.
+        $previous = $keyframe->position > 1 && ! $keyframe->shot->drawsStandalone()
             ? $keyframe->shot->keyframes()->with('media')->where('position', $keyframe->position - 1)->first()?->render()
             : null;
         $references = $previous ? [$painter->referenceFor($current), $painter->referenceFor($previous)] : [$painter->referenceFor($current)];
@@ -80,7 +83,7 @@ class TweakKeyframeImage implements ShouldQueue
 
         // Before drawing: a redraw is checked against the description, which must already describe the change.
         if ($this->option === null) {
-            $this->describeChange($keyframe, $description, $absent);
+            $this->describeChange($keyframe, $this->describedByDirector ? '' : $description, $absent);
         }
 
         $base = $painter->baseFor($keyframe, $keyframe->shot->keyframes()->with('media')->get()->each->setRelation('shot', $keyframe->shot));
@@ -120,7 +123,10 @@ class TweakKeyframeImage implements ShouldQueue
             ->setCustomProperty(Keyframe::TWEAK_FROM_CHECK, $this->fromCheck)
             ->save();
 
-        RecordCorrection::record($keyframe->shot->project, CorrectionSource::ADJUSTMENT, $this->instruction, $keyframe->shot, $keyframe, $intent);
+        // A changed description is recorded as such when it is saved.
+        if (! $this->describedByDirector) {
+            RecordCorrection::record($keyframe->shot->project, CorrectionSource::ADJUSTMENT, $this->instruction, $keyframe->shot, $keyframe, $intent);
+        }
 
         $shot = $keyframe->shot;
 
@@ -207,7 +213,7 @@ class TweakKeyframeImage implements ShouldQueue
 
         if ($description !== '') {
             $keyframe->forceFill(['description' => $description])->save();
-            $shot->updatePlannedKeyframe($keyframe->position, ['description' => $description, 'prompt' => $description], ['must_show', 'copied']);
+            $shot->updatePlannedKeyframe($keyframe->position, ['description' => $description], ['must_show', 'copied', 'prompt']);
         }
     }
 

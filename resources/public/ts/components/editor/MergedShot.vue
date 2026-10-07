@@ -86,10 +86,8 @@
         </Button>
       </div>
 
-      <!-- Above the video, top right, so it never covers the picture. -->
-      <div v-if="videoUrl && !pending" class="flex shrink-0 justify-end">
-        <VideoActions :video-url="videoUrl" :download-url="downloadUrl" :title="$t('Video')" class="flex-nowrap" />
-      </div>
+      <!-- In the top right corner of the video area. -->
+      <VideoActions v-if="videoUrl && !pending" :download-url="downloadUrl" class="absolute top-4 right-4 z-10" />
 
       <div class="flex min-h-0 flex-1 items-center justify-center">
         <video

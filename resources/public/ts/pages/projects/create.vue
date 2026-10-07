@@ -6,8 +6,8 @@
     <Chat
       class="min-h-0 flex-1"
       :messages="messages"
-      :busy="busy || styleActivity !== null"
-      :busy-label="styleActivity"
+      :busy="busy || styleActivity !== null || done"
+      :busy-label="styleActivity ?? (done ? doneNotice : null)"
       :error="error"
       :disabled="done"
       :user-initial="userInitial"
@@ -28,11 +28,6 @@
         <StyleOptionsGrid :message="message" :disabled="done || styleActivity !== null" @more="moreLike" @pin="pin" />
       </template>
     </Chat>
-
-    <p v-if="done" class="flex items-center gap-2 text-sm text-muted-foreground">
-      <LoaderCircle class="size-4 animate-spin" />
-      {{ doneNotice }}
-    </p>
   </div>
 </template>
 <script setup lang="ts">
@@ -46,7 +41,6 @@ import ElementOptionsGrid from '@public:components/chat/ElementOptionsGrid.vue'
 import StyleOptionsGrid from '@public:components/chat/StyleOptionsGrid.vue'
 import type { ChatMessage, ElementRoundState, NewChatMessage, StyleOptionTile } from '@public:components/chat/types'
 import { useChat } from '@public:components/chat/useChat'
-import { LoaderCircle } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 defineOptions({

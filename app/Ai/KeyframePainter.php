@@ -191,18 +191,13 @@ class KeyframePainter
 
         // The keyframe stays busy while it is checked, so the director sees why it takes longer.
         $keyframe->forceFill(['rendering' => true, 'render_stage' => Keyframe::STAGE_CHECKING])->save();
-        $mustShow = isset($plan['must_show']) ? (string) $plan['must_show'] : null;
-        $check = $this->check($keyframe, $render, $references, $mustShow);
+        $check = $this->check($keyframe, $render, $references);
 
         $keyframe->forceFill(['rendering' => false, 'render_stage' => null])->save();
 
         // The check advises and never redraws by itself: what it found becomes notes the director can have fixed or dismiss.
         if ($check !== null && ! $check['passes']) {
             $render->setCustomProperty(Keyframe::CHECK_ISSUES, $check['problems'])->save();
-        }
-
-        if ($check !== null && filled($mustShow) && ! $check['must_show_visible']) {
-            $render->setCustomProperty(Keyframe::CHECK_WARNING, $mustShow)->save();
         }
 
         $keyframe->load('media');
@@ -265,6 +260,11 @@ class KeyframePainter
      */
     public function baseFor(Keyframe $keyframe, Collection $siblings): ?Media
     {
+        // Every still of a montage is drawn on its own.
+        if ($keyframe->shot->drawsStandalone()) {
+            return null;
+        }
+
         $firstKeyframe = KeyframeImageBrief::usesFirstKeyframe($keyframe->position) ? $siblings->firstWhere('position', 1) : null;
         $plate = $this->chosenPlate($keyframe->shot) ?? ($firstKeyframe !== null ? $this->plateFor($keyframe->shot, $firstKeyframe) : null);
 
@@ -345,19 +345,19 @@ class KeyframePainter
      * state of objects. High issues count against the render. Returns null
      * when the check itself fails, so a broken check never holds up the shot.
      *
-     * @return array{passes: bool, must_show_visible: bool, problems: list<string>, fix: string}|null
+     * @return array{passes: bool, problems: list<string>, fix: string}|null
      */
-    private function check(Keyframe $keyframe, Media $render, KeyframeReferences $references, ?string $mustShow = null): ?array
+    private function check(Keyframe $keyframe, Media $render, KeyframeReferences $references): ?array
     {
-        if ($references->first === null) {
+        if ($references->first === null && ! $keyframe->shot->drawsStandalone()) {
             return null;
         }
 
-        [$images, $roles] = $this->checkImages($references->first, $references);
+        [$images, $roles] = $references->first === null ? $this->stillCheckImages($references) : $this->checkImages($references->first, $references);
         $images[] = $this->referenceFor($render);
         $roles[] = 'the keyframe to check';
 
-        $checker = new KeyframeChecker($keyframe, $roles, $mustShow);
+        $checker = new KeyframeChecker($keyframe, $roles);
         $result = $this->runChecker($keyframe, $checker, $images, (string) Config::get('pipeline.models.keyframe_check'));
 
         if ($result === null) {
@@ -369,7 +369,6 @@ class KeyframePainter
 
         return [
             'passes' => $problems === [],
-            'must_show_visible' => $result['must_show_visible'],
             'problems' => $problems,
             'fix' => $problems === [] ? '' : 'Keep everything else as it is and correct this: ' . implode(' ', $problems),
         ];
@@ -434,8 +433,29 @@ class KeyframePainter
     }
 
     /**
+     * The pictures a still of a montage is checked against: the people and
+     * objects in it, each for how it looks. It has no place to keep.
+     *
+     * @return array{0: list<StoredImage>, 1: list<string>}
+     */
+    private function stillCheckImages(KeyframeReferences $references): array
+    {
+        $images = [];
+        $roles = [];
+
+        foreach ($references->elementImages as $entry) {
+            if ($entry['element']->type !== ElementType::PLACE) {
+                $images[] = $entry['image'];
+                $roles[] = "the picture of {$entry['element']->name}: the reference for how " . ($entry['element']->type === ElementType::PERSON ? 'this person' : 'this object') . ' looks';
+            }
+        }
+
+        return [$images, $roles];
+    }
+
+    /**
      * @param  list<StoredImage>  $images
-     * @return array{issues: list<array{category: string, change: string, severity: string}>, must_show_visible: bool}|null
+     * @return array{issues: list<array{category: string, change: string, severity: string}>}|null
      */
     private function runChecker(Keyframe $keyframe, KeyframeChecker $checker, array $images, string $model): ?array
     {
@@ -476,7 +496,7 @@ class KeyframePainter
             'severity' => ($issue['severity'] ?? 'low') === 'high' ? 'high' : 'low',
         ] : null, (array) ($result['issues'] ?? [])), fn(?array $issue) => $issue !== null && $issue['change'] !== ''));
 
-        return ['issues' => $issues, 'must_show_visible' => (bool) ($result['must_show_visible'] ?? true)];
+        return ['issues' => $issues];
     }
 
     /**
@@ -489,13 +509,15 @@ class KeyframePainter
     public function referencesFor(Keyframe $keyframe, Collection $siblings): KeyframeReferences
     {
         $elements = $keyframe->elements->values();
-        $firstKeyframe = KeyframeImageBrief::usesFirstKeyframe($keyframe->position) ? $siblings->firstWhere('position', 1) : null;
+        // A still of a montage has its own place: it is drawn like keyframe 1, from the style sheet and the pictures.
+        $standalone = $keyframe->shot->drawsStandalone();
+        $firstKeyframe = ! $standalone && KeyframeImageBrief::usesFirstKeyframe($keyframe->position) ? $siblings->firstWhere('position', 1) : null;
         // A chosen place is the base of every keyframe, keyframe 1 included; otherwise the place made from keyframe 1, if any.
-        $plate = $this->chosenPlate($keyframe->shot) ?? ($firstKeyframe !== null ? $this->plateFor($keyframe->shot, $firstKeyframe) : null);
+        $plate = $standalone ? null : $this->chosenPlate($keyframe->shot) ?? ($firstKeyframe !== null ? $this->plateFor($keyframe->shot, $firstKeyframe) : null);
         $first = $plate ?? $firstKeyframe?->render();
 
         // On the plate keyframe 1 is not the base, so from keyframe 2 on the keyframe before carries how the people look.
-        $previous = ($plate !== null && $keyframe->position > 1) || KeyframeImageBrief::usesPreviousKeyframe($keyframe->position)
+        $previous = ! $standalone && (($plate !== null && $keyframe->position > 1) || KeyframeImageBrief::usesPreviousKeyframe($keyframe->position))
             ? $siblings->firstWhere('position', $keyframe->position - 1)?->render()
             : null;
 
@@ -552,14 +574,43 @@ class KeyframePainter
             ->values()
             ->all();
         $references = new KeyframeReferences(style: $this->styleReferenceFor($shot->project), elementImages: $elementImages);
-        $prompt = KeyframeImageBrief::plate($shot, $references, $variation);
-        $model = (string) Config::get('pipeline.models.keyframe');
+
+        return $this->drawPlateOption($shot, KeyframeImageBrief::plate($shot, $references, $variation), $references->images(), $references->labels(), (string) Config::get('pipeline.models.keyframe'));
+    }
+
+    /**
+     * Adjust one empty place with a change the director asks for; the result
+     * is added as a new place, so the original stays available.
+     */
+    public function adjustPlateOption(Shot $shot, Media $option, string $instruction): Media
+    {
+        $plate = $this->drawPlateOption(
+            $shot,
+            KeyframeImageBrief::tweakPlate($instruction, $shot->rulesBrief()),
+            [$this->referenceFor($option)],
+            ['This place, the image that is edited'],
+            (string) Config::get('pipeline.models.keyframe_edit'),
+        );
+
+        $plate->setCustomProperty(Keyframe::TWEAK_REQUEST, $instruction)->save();
+
+        return $plate;
+    }
+
+    /**
+     * Draw an empty place and add it to the places to choose from.
+     *
+     * @param  list<StoredImage>  $images
+     * @param  list<string>  $labels
+     */
+    private function drawPlateOption(Shot $shot, string $prompt, array $images, array $labels, string $model): Media
+    {
         $started = hrtime(true);
 
         try {
             $result = OpenRouterImageClient::serves($model)
-                ? $this->viaImagesEndpoint($model, $prompt, $references->images(), $shot->aspectRatio()->value)
-                : $this->viaChat($model, $prompt, $references->images(), $shot->aspectRatio()->value);
+                ? $this->viaImagesEndpoint($model, $prompt, $images, $shot->aspectRatio()->value)
+                : $this->viaChat($model, $prompt, $images, $shot->aspectRatio()->value);
         } catch (Throwable $exception) {
             $shot->generations()->create(['director_id' => $shot->project->director_id, 'kind' => 'image', 'provider' => 'openrouter', 'model' => $model, 'prompt' => $prompt, 'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000), 'error' => $exception->getMessage()]);
 
@@ -570,7 +621,7 @@ class KeyframePainter
 
         return $shot->addMediaFromString($result['content'])
             ->usingFileName('place.' . ($result['mime'] === 'image/jpeg' ? 'jpg' : 'png'))
-            ->withCustomProperties([Keyframe::SENT => ['model' => $result['model'], 'prompt' => $prompt, 'images' => $references->labels()]])
+            ->withCustomProperties([Keyframe::SENT => ['model' => $result['model'], 'prompt' => $prompt, 'images' => $labels]])
             ->toMediaCollection(Shot::PLATE_OPTIONS);
     }
 

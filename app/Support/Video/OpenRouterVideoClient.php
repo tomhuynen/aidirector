@@ -48,6 +48,26 @@ class OpenRouterVideoClient
     }
 
     /**
+     * Submit a lip-synced clip: the person in the image speaks the script
+     * with the given voice, and the clip keeps that sound.
+     *
+     * @param  string  $image  The still as a data URL.
+     */
+    public function submitPresenter(string $model, string $script, string $image, string $voiceId, string $aspectRatio, string $resolution): string
+    {
+        $response = $this->client()->post('videos', [
+            'model' => $model,
+            'prompt' => $script,
+            'aspect_ratio' => $aspectRatio,
+            'resolution' => $resolution,
+            'input_references' => [['type' => 'image_url', 'image_url' => ['url' => $image]]],
+            'provider' => ['options' => ['heygen' => ['voice_id' => $voiceId]]],
+        ])->throw();
+
+        return (string) $response->json('id');
+    }
+
+    /**
      * @return VideoStatus
      */
     public function status(string $id): array

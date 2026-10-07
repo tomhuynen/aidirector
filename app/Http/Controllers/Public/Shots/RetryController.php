@@ -34,7 +34,7 @@ class RetryController
         if ($shot->status === ShotStatus::DRAFT && filled($shot->storyline_error)) {
             $shot->forceFill(['status' => ShotStatus::STORYLINE_PENDING, 'storyline_error' => null])->save();
             GenerateStoryline::dispatch($shot);
-        } elseif ($failed->contains(fn(Keyframe $keyframe) => $keyframe->position === 1 && $keyframe->renders()->isEmpty())) {
+        } elseif (! $shot->drawsStandalone() && $failed->contains(fn(Keyframe $keyframe) => $keyframe->position === 1 && $keyframe->renders()->isEmpty())) {
             $shot->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_PENDING, 'storyline_error' => null])->save();
             GenerateKeyframes::dispatch($shot);
         } elseif ($failed->isNotEmpty()) {

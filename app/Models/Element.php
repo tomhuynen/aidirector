@@ -6,11 +6,13 @@ namespace App\Models;
 
 use App\Enums\ElementType;
 use App\Events\ElementDeleting;
+use App\Support\Elements\ElementSettings;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\Config;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Image\Enums\Fit;
 use Spatie\MediaLibrary\HasMedia;
@@ -55,6 +57,7 @@ class Element extends Model implements HasMedia
      * @return array{
      *  type: 'App\Enums\ElementType',
      *  rendering: 'boolean',
+     *  settings: 'App\Support\Elements\ElementSettings',
      * }
      */
     protected function casts(): array
@@ -62,7 +65,30 @@ class Element extends Model implements HasMedia
         return [
             'type' => ElementType::class,
             'rendering' => 'boolean',
+            'settings' => ElementSettings::class,
         ];
+    }
+
+    /**
+     * The voice this person speaks a language with as a presenter. The first
+     * time a language is spoken the voice is chosen by the person's male or
+     * female voice and kept, so the person always sounds the same.
+     */
+    public function voiceIdFor(string $locale): string
+    {
+        $language = strtolower((string) strtok($locale, '-'));
+        $settings = $this->settings;
+
+        if (isset($settings->voices[$language])) {
+            return $settings->voices[$language];
+        }
+
+        $voices = (array) Config::get('pipeline.presenter.voices.' . ($settings->voice ?? 'male'));
+        $voiceId = (string) ($voices[$language] ?? $voices['*']);
+
+        $this->forceFill(['settings' => $settings->withVoiceFor($language, $voiceId)])->save();
+
+        return $voiceId;
     }
 
     /** @return BelongsTo<Project, $this> */

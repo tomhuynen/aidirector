@@ -230,7 +230,7 @@ describe('issues', function () {
             'In keyframes 2 and 4 she still stands on the line.',
             'The point of the shot is unclear.',
         ]);
-        $shot->keyframes()->where('position', 2)->first()->render()->setCustomProperty(Keyframe::CHECK_WARNING, 'The hand points at the valve')->save();
+        $shot->keyframes()->where('position', 2)->first()->render()->setCustomProperty(Keyframe::CHECK_ISSUES, ['The hand does not point at the valve.'])->save();
 
         $groups = app(ShotIssues::class)->groups($shot->fresh(), $shot->keyframes()->with('media')->get());
 
@@ -239,7 +239,7 @@ describe('issues', function () {
             ->and($groups[0]['issues'])->toBe([
                 'In keyframes 1 through 3 a padlock already hangs on the panel.',
                 'In keyframes 2 and 4 she still stands on the line.',
-                'The check could not see that the hand points at the valve',
+                'The check found: The hand does not point at the valve.',
             ])
             ->and(array_column($groups, 'fixable'))->toBe([true, true, true, false]);
     });
@@ -279,7 +279,7 @@ describe('issues', function () {
 
     it('redraws one keyframe with all its issues and keeps a shared note for the other keyframes', function () {
         $shot = reviewedShot($this->project, ['In keyframes 2 and 3 the padlock already hangs.']);
-        $shot->keyframes()->where('position', 2)->first()->render()->setCustomProperty(Keyframe::CHECK_WARNING, 'The hand points at the valve')->save();
+        $shot->keyframes()->where('position', 2)->first()->render()->setCustomProperty(Keyframe::CHECK_ISSUES, ['The hand does not point at the valve.'])->save();
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.issues.fix', [$this->project, $shot, 'keyframe-2']), ['return' => 'decisions'])
@@ -289,7 +289,7 @@ describe('issues', function () {
         Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->position === 2
             && $job->fromCheck
             && str_contains($job->instruction, 'the padlock already hangs')
-            && str_contains($job->instruction, 'The hand points at the valve'));
+            && str_contains($job->instruction, 'The hand does not point at the valve.'));
 
         $groups = app(ShotIssues::class)->groups($shot->fresh(), $shot->keyframes()->with('media')->get());
 
@@ -348,7 +348,7 @@ describe('issues', function () {
 
     it('dismisses every issue at once without redrawing anything', function () {
         $shot = reviewedShot($this->project, ['In keyframe 3 the bin is gone.', 'The point is unclear.']);
-        $shot->keyframes()->where('position', 2)->first()->render()->setCustomProperty(Keyframe::CHECK_WARNING, 'The hand points at the valve')->save();
+        $shot->keyframes()->where('position', 2)->first()->render()->setCustomProperty(Keyframe::CHECK_ISSUES, ['The hand does not point at the valve.'])->save();
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.issues.dismiss-all', [$this->project, $shot]))

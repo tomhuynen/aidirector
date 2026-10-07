@@ -19,10 +19,14 @@ use App\Models\Shot;
 class KeyframeImageBrief
 {
     /**
-     * @param  array{title: string, description: string, prompt?: string, must_show?: string}  $keyframe
+     * @param  array{title: string, description: string}  $keyframe
      */
     public static function for(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
+        if ($shot->isPresenter()) {
+            return self::presenter($shot, $keyframe, $references);
+        }
+
         if ($references->first !== null) {
             return self::onFirstKeyframe($shot, $keyframe, $references);
         }
@@ -34,12 +38,7 @@ class KeyframeImageBrief
             '',
         ];
 
-        if (filled($keyframe['must_show'] ?? null)) {
-            $lines[] = "Most important, this must be clearly visible: {$keyframe['must_show']}";
-            $lines[] = '';
-        }
-
-        array_push($lines, $keyframe['prompt'] ?? $keyframe['description'], '');
+        array_push($lines, $keyframe['description'], '');
 
         if ($references->elements !== []) {
             $pictured = collect($references->elementImages)->map(fn(array $entry) => $entry['element']->getKey())->all();
@@ -102,11 +101,46 @@ class KeyframeImageBrief
     }
 
     /**
+     * The prompt for the still a presenter speaks from: the person exactly
+     * like their picture, frontal from the chest up with a large face, in
+     * front of the place softly out of focus, so lip sync can read the face.
+     *
+     * @param  array{title: string, description: string}  $keyframe
+     */
+    private static function presenter(Shot $shot, array $keyframe, KeyframeReferences $references): string
+    {
+        $style = $shot->project->style;
+        $lines = [
+            "A presenter shot for an e-learning film. Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
+            $keyframe['description'],
+            'Framing: a medium close-up from the chest up. The person is centred, faces the camera straight on and looks into the lens, shoulders square, with a friendly, calm expression and the mouth closed. The head and face fill about a third of the frame height, the eyes in the upper third.',
+            'Background: the place, softly out of focus, calm and muted, with no readable details and nothing behind the head that draws attention.',
+            'Soft, even light on the face. Only this one person. Do not add text, captions or watermarks; logos on clothing and helmets stay as in the picture.',
+        ];
+
+        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
+        $attached = 0;
+
+        if ($references->style !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly. Do not copy its subjects or layout.';
+        }
+
+        foreach ($references->elementImages as $entry) {
+            $element = $entry['element'];
+            $lines[] = $element->type === ElementType::PLACE
+                ? 'The ' . $ordinals[$attached++] . " attached image shows {$element->name}: use it only for the blurred background."
+                : 'The ' . $ordinals[$attached++] . " attached image is the picture of {$element->name}. Draw {$element->name} exactly like it: same face, hair, build, clothing and headwear. Do not copy its background or pose.";
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
      * The prompt for a keyframe after the first: an edit of keyframe 1, which
      * is attached first, so the place, the camera and the style cannot shift.
      * Only the people, their poses and the objects they handle change.
      *
-     * @param  array{title: string, description: string, prompt?: string, must_show?: string}  $keyframe
+     * @param  array{title: string, description: string}  $keyframe
      */
     private static function onFirstKeyframe(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
@@ -124,11 +158,7 @@ class KeyframeImageBrief
             '',
         ];
 
-        if (filled($keyframe['must_show'] ?? null)) {
-            $lines[] = "Most important, this must be clearly visible: {$keyframe['must_show']}";
-        }
-
-        $lines[] = 'This keyframe shows: ' . ($keyframe['prompt'] ?? $keyframe['description']);
+        $lines[] = 'This keyframe shows: ' . $keyframe['description'];
         $lines[] = '';
 
         // The place comes from the first image; the people and objects are named, described in words when they have no picture.
@@ -183,7 +213,6 @@ class KeyframeImageBrief
         $framing = $shot->storylineFraming();
         $size = $framing['size'] ?? ShotSize::FULL;
         $steps = collect($shot->storylineKeyframes())->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . $keyframe['description'])->join("\n");
-        $mustShow = collect($shot->storylineKeyframes())->pluck('must_show')->filter(fn($line) => is_string($line) && filled($line))->unique()->map(fn(string $line) => "- {$line}")->join("\n");
 
         $lines = [
             "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
@@ -202,11 +231,7 @@ class KeyframeImageBrief
             $lines[] = "Light: {$light}. This overrides the lighting in the visual style.";
         }
 
-        array_push($lines, '', "What happens at this spot during the shot, for where things must be; do not draw the people or what they hold:\n{$steps}", '');
-
-        if ($mustShow !== '') {
-            array_push($lines, "What the keyframes must show clearly; place the fixed objects and zones so this can happen in this picture, for example a hanging load right above the path someone must not walk:\n{$mustShow}", '');
-        }
+        array_push($lines, '', "What happens at this spot during the shot; place the fixed objects and zones so all of it can happen in this picture, for example a hanging load right above the path someone must not walk. Do not draw the people or what they hold:\n{$steps}", '');
 
         array_push(
             $lines,
@@ -274,6 +299,22 @@ class KeyframeImageBrief
         ];
 
         return 'Variation for this place: ' . $directions[$index % count($directions)] . ' Keep the framing for the people as above.';
+    }
+
+    /**
+     * The prompt for a change to an empty place before it is chosen: only the
+     * asked change is made, and the place stays without people.
+     */
+    public static function tweakPlate(string $instruction, string $shotRules = ''): string
+    {
+        return implode("\n", array_filter([
+            'Edit the attached image. It is the empty place of this shot, without any people, seen from a camera that does not move.',
+            "Change only this: {$instruction}",
+            'Keep everything else exactly as it is: the walls, doors, machines, objects, the floor and every marking or painted line on it, the background, the framing, the camera, the light and the style.',
+            'Do not add people.',
+            $shotRules !== '' ? "Rules for this shot, the change never breaks them:\n{$shotRules}" : null,
+            'Do not add text, captions or watermarks. Signs and markings already in the image stay exactly as they are.',
+        ]));
     }
 
     /**

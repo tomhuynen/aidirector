@@ -32,7 +32,9 @@
 
     <form v-if="adjustUrl" class="space-y-3" @submit.prevent="adjust">
       <div class="space-y-1.5">
-        <Label for="option-adjust">{{ $t('Adjust the selected option') }}</Label>
+        <Label for="option-adjust">{{
+          plates ? $t('Adjust the selected place') : $t('Adjust the selected option')
+        }}</Label>
         <Textarea
           id="option-adjust"
           v-model="adjustment.instruction"
@@ -41,17 +43,27 @@
           :disabled="busy || selected === null"
           :placeholder="
             selected === null
-              ? $t('Select an option first')
-              : $t('For example: the line runs across the quay in front of her')
+              ? plates
+                ? $t('Select a place first')
+                : $t('Select an option first')
+              : plates
+                ? $t('For example: put the bin to the left of the door')
+                : $t('For example: the line runs across the quay in front of her')
           "
           class="text-[15px] leading-relaxed"
         />
-        <InputError :message="adjustment.errors.instruction ?? adjustment.errors.render" />
-        <label class="flex items-start gap-2 text-sm text-muted-foreground">
+        <InputError :message="adjustment.errors.instruction ?? adjustment.errors.render ?? adjustment.errors.plate" />
+        <label v-if="!plates" class="flex items-start gap-2 text-sm text-muted-foreground">
           <Checkbox v-model="adjustment.rewrite" :disabled="busy || selected === null" class="mt-0.5" />
           <span>{{ $t('Let the director make my request precise first') }}</span>
         </label>
-        <p class="text-sm text-muted-foreground">{{ $t('The adjusted version is added as a new option.') }}</p>
+        <p class="text-sm text-muted-foreground">
+          {{
+            plates
+              ? $t('The adjusted place is added as a new one.')
+              : $t('The adjusted version is added as a new option.')
+          }}
+        </p>
       </div>
       <Button
         type="submit"
@@ -109,14 +121,14 @@ const props = defineProps<{
   /** The titles of the planned keyframes, shown while choosing a place. */
   steps?: string[]
   keyframe?: { title: string; description: string }
-  /** Adjusts the selected option; the result is added as a new option. */
+  /** Adjusts the selected option or place; the result is added as a new one. */
   adjustUrl?: string
   selected?: number | null
   /** Options or an adjustment are being drawn. */
   busy?: boolean
 }>()
 
-const adjustment = useForm<{ instruction: string; render?: number; rewrite: boolean }>({
+const adjustment = useForm<{ instruction: string; render?: number; plate?: number; rewrite: boolean }>({
   instruction: '',
   rewrite: false,
 })
@@ -125,7 +137,11 @@ const adjust = () => {
   if (!props.adjustUrl || props.selected == null) return
 
   adjustment
-    .transform((data) => ({ ...data, render: props.selected ?? undefined }))
+    .transform((data) =>
+      props.plates
+        ? { instruction: data.instruction, plate: props.selected ?? undefined }
+        : { ...data, render: props.selected ?? undefined },
+    )
     .post(props.adjustUrl, { preserveScroll: true, onSuccess: () => adjustment.reset() })
 }
 </script>

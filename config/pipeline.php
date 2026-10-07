@@ -32,6 +32,8 @@ return [
         'voice' => env('AI_VOICE_MODEL', 'microsoft/mai-voice-2.1'),
         // Animates the project cover into a seamless loop; needs first and last frame control.
         'cover_loop' => env('AI_COVER_LOOP_MODEL', 'bytedance/seedance-2.0'),
+        // Makes a person in one still speak a text to the camera, lip-synced, with a voice of its own.
+        'presenter' => env('AI_PRESENTER_MODEL', 'heygen/avatar-iv'),
         // Checks each drawn keyframe and decides on a redraw: few false alarms (benchmark of 2026-10-04).
         'keyframe_check' => env('AI_KEYFRAME_CHECK_MODEL', 'google/gemini-3.8-flash'),
         // Checks afterwards whether the place stayed the same; sees shifted floor lines best, its findings become notes.
@@ -68,6 +70,8 @@ return [
         'voice_over_writer' => env('AI_VOICE_OVER_REASONING', 'low'),
         'voice_over_translator' => env('AI_VOICE_OVER_REASONING', 'low'),
         'bench_judge' => 'low',
+        'moved_person_describer' => 'low',
+        'voice_judge' => 'low',
     ],
 
     /*
@@ -127,6 +131,12 @@ return [
         'plate_options' => (int) env('AI_PLATE_OPTIONS', 3),
         // Reference images of the cast and sets attached to one keyframe render.
         'max_element_references' => 3,
+        // Moving a person by hand: the pose is redrawn for the new spot, again when the redraw moves them off it.
+        'move' => [
+            'attempts' => 2,
+            // How far the feet may end up from where they were put, as a share of the image.
+            'tolerance' => 0.06,
+        ],
         // Measured in code after each edit: a render whose background moved compared with the image it was drawn on is drawn again.
         'drift' => [
             'enabled' => (bool) env('AI_DRIFT_CHECK', true),
@@ -193,6 +203,18 @@ return [
         ],
         // A spoken track may be sped up this much at most to fit the clip; beyond that it is rewritten shorter.
         'max_speed' => 1.25,
+    ],
+
+    /*
+     * Presenter shots: the HeyGen voice per language and gender. A language
+     * without its own voice uses the multilingual one.
+     */
+    'presenter' => [
+        'resolution' => '720p',
+        'voices' => [
+            'male' => ['en' => '6be73833ef9a4eb0aeee399b8fe9d62b', 'es' => '707365599f8545d5b6ce7a32a20e9c93', 'fr' => '29b464727cc249f3bdf42f82562409f8', 'de' => '0971fe1493314d1f9a43602cf4a3b210', 'ja' => '662e1397965c484e8f65fa58c77effde', '*' => '3097f9a8fd3b4340b6bbe913177b378f'],
+            'female' => ['en' => '16a09e4706f74997ba4ed05ea11470f6', 'es' => '246cdbf530954380a62109f3107fce0d', 'fr' => '4b1de1582d2c477485ad2e0c2717f0ff', 'de' => '5d25200b1d4442d6b7265a9ff5fad582', 'ja' => '926a3d25100b4687a80fc76ec8f2bf38', '*' => '80441555167a467e967ab9487d844a30'],
+        ],
     ],
 
     'video' => [

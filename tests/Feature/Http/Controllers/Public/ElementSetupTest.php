@@ -25,6 +25,7 @@ use App\Models\ElementSuggestion;
 use App\Models\Project;
 use App\Support\Elements\PhotoInventory;
 use App\Support\Elements\StartElementRound;
+use App\Support\Intake\DocumentText;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -549,6 +550,21 @@ describe('background work', function () {
 
         (new GenerateElementSuggestions($round))->failed(new RuntimeException('x'));
         expect($round->fresh()->status)->toBe(ElementRoundStatus::FAILED);
+    });
+
+    it('gives the suggester the documents shared in the intake conversation', function () {
+        Queue::fake([RenderElementSuggestion::class]);
+        ProjectIntake::fake([['reply' => 'Thanks', 'ask' => null, 'done' => false]]);
+        $conversationId = projectInElementStage($this->director, $this->project);
+        (new ProjectIntake())->continue($conversationId, as: $this->director)
+            ->prompt("Here it is\n\n" . DocumentText::SHARED . " \"design.pdf\":\n<<<\nThe Entry receptionist wears a teal blazer.\n>>>", provider: 'openrouter', model: 'test');
+        $round = ElementRound::factory()->for($this->project)->status(ElementRoundStatus::SUGGESTING)->create();
+        ElementSuggester::fake([['suggestions' => collect(range(1, 8))->map(fn(int $i) => ['name' => "Person {$i}", 'description' => "Look {$i}", 'photo' => null])->all()]]);
+
+        (new GenerateElementSuggestions($round))->handle(app(StartElementRound::class));
+
+        expect($this->project->fresh()->sharedDocuments())->toStartWith(DocumentText::SHARED . ' "design.pdf"')->not->toContain('Here it is');
+        ElementSuggester::assertPrompted(fn(AgentPrompt $prompt) => str_contains((string) $prompt->agent->instructions(), 'The Entry receptionist wears a teal blazer.'));
     });
 
     it('renders a suggestion, restyling its source photo', function () {

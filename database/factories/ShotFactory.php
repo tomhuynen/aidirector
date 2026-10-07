@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Models\Project;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -26,5 +27,13 @@ class ShotFactory extends Factory
             'notes' => null,
             'status' => ShotStatus::DRAFT,
         ];
+    }
+
+    /**
+     * A row of separate stills joined with crossfades, instead of one place.
+     */
+    public function montage(): static
+    {
+        return $this->state(['kind' => ShotKind::MONTAGE]);
     }
 }

@@ -55,31 +55,74 @@
       {{ keyframe.renderError }}
     </p>
 
-    <form class="space-y-3" @submit.prevent="applyTweak">
+    <p v-if="moveWarning" class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
+      {{ moveWarning }}
+    </p>
+    <KeyframeMoverControls v-if="mover?.state.active" :mover="mover" />
+    <Button
+      v-else-if="keyframe.moveUrl"
+      type="button"
+      variant="outline"
+      class="w-full"
+      :disabled="!canTweak"
+      @click="emit('move')"
+    >
+      <Move class="size-4" />
+      {{ $t('Move a person') }}
+    </Button>
+
+    <form class="space-y-3" @submit.prevent="applyChange">
       <div class="space-y-1.5">
-        <Label for="keyframe-tweak">{{ $t('Adjust this image') }}</Label>
+        <Label for="keyframe-description">{{ $t('Description') }}</Label>
         <Textarea
-          id="keyframe-tweak"
-          v-model="tweak.instruction"
-          rows="3"
+          id="keyframe-description"
+          v-model="description.description"
+          rows="6"
           maxlength="500"
-          :disabled="!canTweak"
-          :placeholder="$t('For example: remove the lighter from his hand')"
+          :disabled="!canEdit"
           class="text-[15px] leading-relaxed"
         />
-        <InputError :message="tweak.errors.instruction" />
-        <label class="flex items-start gap-2 text-sm text-muted-foreground">
-          <Checkbox v-model="tweak.rewrite" :disabled="!canTweak" class="mt-0.5" />
-          <span>{{ $t('Let the director make my request precise first') }}</span>
-        </label>
-        <p v-if="!hasRender && !keyframe.rendering" class="text-sm text-muted-foreground">
-          {{ $t('Adjustments are possible once the image is rendered.') }}
+        <InputError :message="description.errors.description" />
+        <p
+          v-if="keyframe.needsDescription"
+          class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
+        >
+          {{
+            $t(
+              'This copy still has the description of the keyframe it came from. Describe what this step shows, so the check can judge it.',
+            )
+          }}
+        </p>
+        <p class="text-sm text-muted-foreground">
+          {{
+            hasRender
+              ? $t(
+                  'Apply change adjusts this image to the new description. Draw again starts over from the description.',
+                )
+              : $t('The image is drawn from the description.')
+          }}
         </p>
       </div>
-      <Button type="submit" class="w-full" :disabled="!canTweak || tweak.instruction.trim() === '' || tweak.processing">
+      <Button
+        v-if="hasRender"
+        type="submit"
+        class="w-full"
+        :disabled="!canEdit || !descriptionChanged || description.processing"
+      >
         <LoaderCircle v-if="keyframe.rendering" class="size-4 animate-spin" />
         <Wand2 v-else class="size-4" />
         {{ keyframe.rendering ? busyLabel : $t('Apply change') }}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        class="w-full"
+        :disabled="!canEdit || description.processing"
+        @click="drawAgain"
+      >
+        <LoaderCircle v-if="keyframe.rendering && !hasRender" class="size-4 animate-spin" />
+        <RefreshCw v-else class="size-4" />
+        {{ keyframe.rendering && !hasRender ? busyLabel : $t('Draw again') }}
       </Button>
     </form>
 
@@ -113,11 +156,6 @@
         </li>
       </ul>
     </div>
-
-    <p v-if="checkWarning" class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
-      <span class="font-medium">{{ $t('The check could not see this') }}</span>
-      <span class="text-muted-foreground"> · {{ checkWarning }}</span>
-    </p>
 
     <p v-if="checkIssues.length > 0" class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
       <span class="font-medium">{{ $t('The check found') }}</span>
@@ -165,43 +203,6 @@
       </div>
     </section>
 
-    <form class="space-y-3 border-t border-border pt-6" @submit.prevent="rewrite">
-      <div class="space-y-1.5">
-        <Label for="keyframe-description">{{ $t('Description') }}</Label>
-        <Textarea
-          id="keyframe-description"
-          v-model="description.description"
-          rows="6"
-          maxlength="500"
-          :disabled="!keyframe.updateUrl || keyframe.rendering"
-          class="text-[15px] leading-relaxed"
-        />
-        <InputError :message="description.errors.description" />
-        <p
-          v-if="keyframe.needsDescription"
-          class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
-        >
-          {{
-            $t(
-              'This copy still has the description of the keyframe it came from. Describe what this step shows, so the check can judge it.',
-            )
-          }}
-        </p>
-        <p class="text-sm text-muted-foreground">
-          {{ $t('Changing the description renders the keyframe again from scratch.') }}
-        </p>
-      </div>
-      <Button
-        type="submit"
-        variant="outline"
-        class="w-full"
-        :disabled="!keyframe.updateUrl || keyframe.rendering || !descriptionChanged || description.processing"
-      >
-        <RefreshCw class="size-4" />
-        {{ $t('Render from description') }}
-      </Button>
-    </form>
-
     <div v-if="keyframe.destroyUrl || keyframe.copyUrl" class="mt-auto space-y-2 border-t border-border pt-6">
       <Button
         v-if="keyframe.copyUrl"
@@ -245,12 +246,13 @@ import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { Checkbox } from '@shared:ui/checkbox'
 import { Label } from '@shared:ui/label'
 import { Textarea } from '@shared:ui/textarea'
-import { Copy, LoaderCircle, RefreshCw, Trash2, TriangleAlert, Wand2 } from 'lucide-vue-next'
+import { Copy, LoaderCircle, Move, RefreshCw, Trash2, TriangleAlert, Wand2 } from 'lucide-vue-next'
 import { computed, watch } from 'vue'
 
+import type { KeyframeMoverState } from './keyframeMover'
+import KeyframeMoverControls from './KeyframeMoverControls.vue'
 import type { PanelIssueGroup, PanelKeyframe } from './KeyframesPanel.vue'
 
 const props = defineProps<{
@@ -261,7 +263,11 @@ const props = defineProps<{
   canCopy: boolean
   /** What the checks found wrong with this keyframe, with how to fix or dismiss it. */
   issues?: PanelIssueGroup | null
+  /** Moving a person on the image; its controls show here while it is active. */
+  mover?: KeyframeMoverState
 }>()
+
+const emit = defineEmits<{ move: [] }>()
 
 const hasRender = computed(() => props.keyframe.renders.length > 0)
 
@@ -281,12 +287,14 @@ const busyLabel = computed(() => {
 })
 
 /** What the automatic check found wrong in the attempt before the chosen version, if it redrew. */
-const checkWarning = computed(() => props.keyframe.renders.find((render) => render.chosen)?.checkWarning ?? null)
 
 const checkIssues = computed(() => props.keyframe.renders.find((render) => render.chosen)?.checkIssues ?? [])
 
 /** What the image model got for the chosen version. */
 const sent = computed(() => props.keyframe.renders.find((render) => render.chosen)?.sent ?? null)
+
+/** After a person was moved: why the image no longer fits the keyframe's point in the story. */
+const moveWarning = computed(() => props.keyframe.renders.find((render) => render.chosen)?.moveWarning ?? null)
 
 /** How much of the background stayed in place compared with the image it was drawn on. */
 const stillness = computed(() => props.keyframe.renders.find((render) => render.chosen)?.stillness ?? null)
@@ -298,8 +306,6 @@ const canTweak = computed(() => hasRender.value && Boolean(props.keyframe.tweakU
 /** Fixing redraws the keyframe told what is wrong; dismissing only takes the issues off the list. */
 const resolving = useForm({})
 const resolve = (url: string) => resolving.post(url, { preserveScroll: true })
-
-const tweak = useForm({ instruction: '', rewrite: false })
 const copying = useForm({})
 const copy = () => props.keyframe.copyUrl && copying.post(props.keyframe.copyUrl, { preserveScroll: true })
 const pick = useForm({ render: 0 })
@@ -321,21 +327,25 @@ watch(
 
 const descriptionChanged = computed(() => description.description.trim() !== props.keyframe.description.trim())
 
-const applyTweak = () => {
-  if (!props.keyframe.tweakUrl) return
-
-  tweak.post(props.keyframe.tweakUrl, { preserveScroll: true, onSuccess: () => tweak.reset() })
-}
-
 const chooseRender = (id: number) => {
   if (!props.keyframe.chooseRenderUrl) return
 
   pick.transform(() => ({ render: id })).post(props.keyframe.chooseRenderUrl, { preserveScroll: true })
 }
 
-const rewrite = () => {
+const canEdit = computed(() => Boolean(props.keyframe.updateUrl) && !props.keyframe.rendering)
+
+/** Adjust the current image to the changed description. */
+const applyChange = () => {
   if (!props.keyframe.updateUrl) return
 
-  description.post(props.keyframe.updateUrl, { preserveScroll: true })
+  description.transform((data) => ({ ...data, redraw: false })).post(props.keyframe.updateUrl, { preserveScroll: true })
+}
+
+/** Draw the keyframe again from the description, as it reads now. */
+const drawAgain = () => {
+  if (!props.keyframe.updateUrl) return
+
+  description.transform((data) => ({ ...data, redraw: true })).post(props.keyframe.updateUrl, { preserveScroll: true })
 }
 </script>

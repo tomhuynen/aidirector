@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Projects\Elements;
 
+use App\Enums\ElementType;
 use App\Http\Requests\Public\ElementUpdateRequest;
 use App\Jobs\UpdateElementImage;
 use App\Models\Element;
@@ -31,6 +32,12 @@ class UpdateController
         $redraw = $change === '' && trim($request->validated('description')) !== trim($element->description);
 
         $element->fill($request->safe()->only(['name', 'description']));
+
+        // A voice the director picks is kept; emptying it has it judged from the picture again.
+        if ($request->has('voice') && $element->type === ElementType::PERSON) {
+            $voice = $request->validated('voice');
+            $element->settings = $element->settings->withVoice(is_string($voice) ? $voice : null);
+        }
 
         if ($change !== '' || $redraw || $element->reference() === null) {
             $element->forceFill(['rendering' => true, 'render_error' => null]);

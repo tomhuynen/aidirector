@@ -24,17 +24,25 @@ class ClipJoiner
 
     /**
      * @param  list<string>  $paths  local clip files, in order
+     * @param  list<float>  $lengths  the longest each clip may last, in seconds, by its index; a clip is cut off after it
      * @return array{starts: list<float>, duration: float} when each clip starts in the joined video, and its length, in seconds
      *
      * @throws RuntimeException when ffprobe or ffmpeg fails
      */
-    public function join(array $paths, ShotTransition $transition, string $output): array
+    public function join(array $paths, ShotTransition $transition, string $output, array $lengths = []): array
     {
         if (count($paths) < 2) {
             throw new RuntimeException('At least two clips are needed to join.');
         }
 
         $clips = array_map(fn(string $path) => $this->probe($path), $paths);
+
+        foreach ($clips as $i => $clip) {
+            if (isset($lengths[$i]) && $lengths[$i] > 0 && $lengths[$i] < $clip['duration']) {
+                $clips[$i]['duration'] = $lengths[$i];
+            }
+        }
+
         $width = $clips[0]['width'];
         $height = $clips[0]['height'];
         $fps = $clips[0]['fps'];
@@ -44,7 +52,7 @@ class ClipJoiner
         $filters = [];
 
         foreach ($clips as $i => $clip) {
-            $filters[] = "[{$i}:v]scale={$width}:{$height}:force_original_aspect_ratio=decrease,pad={$width}:{$height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={$fps},format=yuv420p,settb=AVTB[v{$i}]";
+            $filters[] = "[{$i}:v]trim=duration={$this->number($clip['duration'])},setpts=PTS-STARTPTS,scale={$width}:{$height}:force_original_aspect_ratio=decrease,pad={$width}:{$height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={$fps},format=yuv420p,settb=AVTB[v{$i}]";
 
             if ($withSound) {
                 $filters[] = $clip['audio']

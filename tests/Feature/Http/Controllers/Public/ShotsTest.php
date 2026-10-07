@@ -78,7 +78,7 @@ describe('create', function () {
                 'rules' => ['The crate always hangs above the zone.'],
                 'keyframes' => [
                     ['title' => 'In the lane', 'description' => 'She walks in the blue lane.'],
-                    ['title' => 'Wrong zone', 'description' => 'She stands in the red zone.', 'prompt' => 'She stands side-on inside the red zone.', 'mustShow' => 'Both feet are inside the red zone.'],
+                    ['title' => 'Wrong zone', 'description' => 'She stands in the red zone.'],
                 ],
             ])
             ->assertOk()
@@ -90,15 +90,14 @@ describe('create', function () {
         expect($shot->fresh()->shotRules())->toBe(['The crate always hangs above the zone.', 'The visitor never crosses the red line with more than one foot.']);
         \App\Ai\Agents\PlanChangeInterpreter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Storyline: She steps into the red zone')
             && str_contains($prompt->prompt, '- The crate always hangs above the zone.')
-            && str_contains($prompt->prompt, 'Must show: Both feet are inside the red zone.')
-            && str_contains($prompt->prompt, 'Image instruction: She stands side-on inside the red zone.'));
+            && ! str_contains($prompt->prompt, 'Must show:'));
     });
 
     it('writes the asked keyframes in full in a drafted plan and only the director\'s words in their own plan', function () {
         $engineer = \App\Models\Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
         \App\Ai\Agents\PlanFrameWriter::fake([
-            ['keyframes' => [['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'prompt' => 'At the door, the Female engineer, back to the camera.', 'must_show' => 'She is two steps from the door.', 'elements' => ['Female engineer']]]],
-            ['keyframes' => [['position' => 1, 'title' => 'Walks up', 'description' => 'She walks up to the door.', 'prompt' => '', 'must_show' => '', 'elements' => []]]],
+            ['keyframes' => [['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'elements' => ['Female engineer']]]],
+            ['keyframes' => [['position' => 1, 'title' => 'Walks up', 'description' => 'She walks up to the door.', 'elements' => []]]],
         ]);
         $drafted = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['mode' => 'auto', 'keyframes' => []]]);
         $own = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['mode' => 'manual', 'keyframes' => []]]);
@@ -107,12 +106,12 @@ describe('create', function () {
         actingAs($this->director, 'director')
             ->postJson(route('public.shots.plan.write', [$this->project, $drafted]), $body)
             ->assertOk()
-            ->assertJsonPath('keyframes.0', ['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'prompt' => 'At the door, the Female engineer, back to the camera.', 'mustShow' => 'She is two steps from the door.', 'elements' => [$engineer->sqid]]);
+            ->assertJsonPath('keyframes.0', ['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'elements' => [$engineer->sqid]]);
 
         actingAs($this->director, 'director')
             ->postJson(route('public.shots.plan.write', [$this->project, $own]), $body)
             ->assertOk()
-            ->assertJsonPath('keyframes.0.prompt', '');
+            ->assertJsonPath('keyframes.0.description', 'She walks up to the door.');
 
         \App\Ai\Agents\PlanFrameWriter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'you write only the keyframes you are given')
             && str_contains($prompt->prompt, "1. (new, to write)\n2. At the sign: She reads the sign."));
@@ -127,12 +126,12 @@ describe('create', function () {
             ->postJson(route('public.shots.plan.write', [$this->project, $shot]), [
                 'message' => 'never more than one foot over the line',
                 'storyline' => 'She puts one foot over the line and steps back.',
-                'keyframes' => [['title' => 'Wrong zone', 'description' => 'She stands in the red zone.', 'mustShow' => 'Both feet are inside the red zone.']],
+                'keyframes' => [['title' => 'Wrong zone', 'description' => 'She stands in the red zone.']],
                 'targets' => [['position' => 1, 'instruction' => 'Only one foot over the red line.']],
             ])
             ->assertOk();
 
-        \App\Ai\Agents\PlanFrameWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '1. (to rewrite) now: Wrong zone: She stands in the red zone. Must show: Both feet are inside the red zone.')
+        \App\Ai\Agents\PlanFrameWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '1. (to rewrite) now: Wrong zone: She stands in the red zone.')
             && str_contains((string) $prompt->agent->instructions(), "Rules the director set for this shot; the storyline and every keyframe follow them, never break one:\n- The visitor never crosses the red line with more than one foot."));
     });
 
@@ -165,8 +164,8 @@ describe('create', function () {
                 'framing' => ['size' => 'medium', 'spot' => 'At the yard gate, the bin by the post.', 'light' => '', 'seconds' => 8],
                 'rules' => ['She never drops the cigarette on the ground.', ' '],
                 'keyframes' => [
-                    ['title' => 'At the bin', 'description' => 'The female engineer holds a cigarette next to the bin.', 'prompt' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.', 'mustShow' => 'The cigarette is in her right hand.'],
-                    ['title' => 'Empty gate', 'description' => 'The gate without anyone.', 'prompt' => '', 'mustShow' => ''],
+                    ['title' => 'At the bin', 'description' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.'],
+                    ['title' => 'Empty gate', 'description' => 'The gate without anyone.'],
                 ],
             ])
             ->assertSessionHasNoErrors()
@@ -177,8 +176,8 @@ describe('create', function () {
         expect($shot->chosenStoryline()['storyline'])->toBe('She drops the cigarette in the bin and walks in.')
             ->and($shot->shotRules())->toBe(['She never drops the cigarette on the ground.'])
             ->and($shot->storylineKeyframes())->toEqual([
-                ['title' => 'At the bin', 'description' => 'The female engineer holds a cigarette next to the bin.', 'prompt' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.', 'must_show' => 'The cigarette is in her right hand.', 'elements' => ['Female engineer']],
-                ['title' => 'Empty gate', 'description' => 'The gate without anyone.', 'prompt' => 'The gate without anyone.', 'elements' => []],
+                ['title' => 'At the bin', 'description' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.', 'elements' => ['Female engineer']],
+                ['title' => 'Empty gate', 'description' => 'The gate without anyone.', 'elements' => []],
             ])
             ->and($shot->storyline['framing'])->toEqual(['size' => 'medium', 'spot' => 'At the yard gate, the bin by the post.', 'light' => 'as the visual style', 'seconds' => 8]);
 

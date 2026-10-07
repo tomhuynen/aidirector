@@ -49,6 +49,12 @@ class GenerateRemainingKeyframes implements ShouldQueue
         $first = $siblings->first();
         $plate = $painter->chosenPlate($shot);
 
+        if ($first !== null && $shot->drawsStandalone()) {
+            $this->drawStills($painter, $shot, $siblings, $first);
+
+            return;
+        }
+
         if ($first === null || ($plate === null && $first->render() === null)) {
             throw new RuntimeException('Choose the first keyframe before rendering the others.');
         }
@@ -103,6 +109,49 @@ class GenerateRemainingKeyframes implements ShouldQueue
 
         GenerationFinished::ready(__('The first keyframe of “:shot” is ready to confirm', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $first->refresh()->render(), Keyframe::THUMBNAIL)
             ->sendTo($shot->project);
+    }
+
+    /**
+     * Draws every keyframe of a montage or a presenter shot on its own, once the cast and sets have pictures.
+     *
+     * @param  \Illuminate\Support\Collection<int, Keyframe>  $siblings
+     */
+    private function drawStills(KeyframePainter $painter, Shot $shot, \Illuminate\Support\Collection $siblings, Keyframe $first): void
+    {
+        if (! $this->elementsDrawn && $this->drawMissingElements($shot, $siblings, $first)) {
+            return;
+        }
+
+        foreach ($siblings as $keyframe) {
+            $painter->render($keyframe, $siblings);
+            $keyframe->load('media');
+        }
+
+        $shot->forceFill([
+            'storyline_error' => null,
+            'keyframe_review' => null,
+            'status' => ShotStatus::KEYFRAMES_READY,
+        ])->save();
+
+        ReviewShot::after($shot);
+
+        GenerationFinished::ready(__('All keyframes of “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $siblings->last()?->render(), Keyframe::THUMBNAIL)
+            ->sendTo($shot->project);
+    }
+
+    /**
+     * Starts drawing every keyframe of a montage or a presenter shot; there is no place or keyframe 1 to choose first.
+     */
+    public static function startStandalone(Shot $shot): void
+    {
+        $shot->keyframes()->update(['rendering' => true, 'render_error' => null]);
+
+        $shot->forceFill([
+            'status' => ShotStatus::KEYFRAMES_PENDING,
+            'storyline_error' => null,
+        ])->save();
+
+        self::dispatch($shot);
     }
 
     /**
@@ -194,7 +243,10 @@ class GenerateRemainingKeyframes implements ShouldQueue
             'render_error' => $exception?->getMessage(),
         ]);
 
-        $this->shot->forceFill([
+        $this->shot->forceFill($this->shot->drawsStandalone() ? [
+            'storyline_error' => __('Not every still could be drawn. Draw the missing ones again.'),
+            'status' => ShotStatus::KEYFRAMES_READY,
+        ] : [
             'storyline_error' => $this->onlyFirst
                 ? __('The first keyframe could not be drawn on this place. Try again or choose another place.')
                 : __('The other keyframes could not be rendered. Please try again.'),

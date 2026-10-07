@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots;
 
 use App\Enums\ElementType;
+use App\Enums\ShotKind;
 use App\Enums\ShotSize;
 use App\Enums\ShotTransition;
 use App\Http\Resources\Public\ElementResource;
@@ -35,6 +36,8 @@ class ViewController
             'shot' => fn() => ShotResource::make($shot),
             /** @var array<int, array{value: string, label: string}> */
             'shotSizes' => fn() => ShotSize::catalogue(),
+            /** @var array<int, array{value: string, label: string, description: string}> */
+            'shotKinds' => fn() => ShotKind::catalogue(),
             'keyframes' => fn() => KeyframeResource::collection(
                 $shot->keyframes()->with(['media', 'elements'])->get()->each->setRelation('shot', $shot)
             ),

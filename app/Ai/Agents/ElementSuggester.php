@@ -37,6 +37,8 @@ class ElementSuggester implements Agent, HasReasoningEffort, HasStructuredOutput
         $count = $this->count();
         $photos = PhotoInventory::describe($project);
         $existing = $project->elements()->get()->map(fn(Element $element) => "- {$element->promptLine()}")->join("\n") ?: 'none yet';
+        $documents = $project->sharedDocuments();
+        $documents = $documents === '' ? '' : "\nDocuments the director shared. They may name and describe the {$type->plural()} of this project:\n{$documents}\n";
 
         return <<<INSTRUCTIONS
             You suggest recurring {$type->plural()} for an animated production, so the director can pick which ones to keep as cast and sets. Each suggestion will be drawn on its own as a reference image.
@@ -44,7 +46,7 @@ class ElementSuggester implements Agent, HasReasoningEffort, HasStructuredOutput
             Project: {$project->title}
             Description: {$project->description}
             Purpose: {$project->purpose->description()}
-
+            {$documents}
             Uploaded photos:
             {$photos}
 
@@ -57,6 +59,7 @@ class ElementSuggester implements Agent, HasReasoningEffort, HasStructuredOutput
             - "photo": the number of the uploaded photo it is taken from, when it is something visible in that photo; otherwise null.
             Rules:
             - Follow the director's brief closely. Cover its variety first, then add useful alternatives.
+            - Within the brief, take what the shared documents name before your own ideas, and describe it as they do.
             - Prefer things from the photos where they fit the brief, and describe them as they look there.
             - Every suggestion must be clearly different from the others and from what is already in the cast and sets.
             - No names of real people. Write in English.

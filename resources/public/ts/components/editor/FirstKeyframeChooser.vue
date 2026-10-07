@@ -51,46 +51,23 @@
       </div>
     </div>
 
-    <div class="flex shrink-0 items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <Button type="button" variant="outline" :disabled="pending || adjusting || more.processing" @click="askMore">
-          <RefreshCw class="size-4" />
-          {{ resetUrl ? $t('Draw again') : $t('More options') }}
-        </Button>
-        <Button
-          v-if="resetUrl"
-          type="button"
-          variant="ghost"
-          :disabled="pending || adjusting || reset.processing"
-          @click="reset.post(resetUrl, { preserveScroll: true })"
-        >
-          <ArrowLeft class="size-4" />
-          {{ $t('Choose another place') }}
-        </Button>
-      </div>
-      <div class="flex items-center gap-3">
-        <InputError :message="choice.errors.render ?? choice.errors.plate ?? reset.errors.plate" />
-        <Button
-          type="button"
-          :disabled="pending || adjusting || selectedId === null || choice.processing"
-          @click="choose"
-        >
-          {{ field === 'plate' ? $t('Use this place') : $t('Use this keyframe') }}
-          <ArrowRight class="size-4" />
-        </Button>
-      </div>
-    </div>
+    <FirstKeyframeActions
+      :selected="selectedId"
+      :choose-url="chooseUrl"
+      :more-url="moreUrl"
+      :field="field"
+      :reset-url="resetUrl"
+      :disabled="pending || adjusting"
+    />
   </div>
 </template>
 <script setup lang="ts">
-import { useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
-import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
-import { Button } from '@shared:ui/button'
-import { ArrowLeft, ArrowRight, Check, LoaderCircle, RefreshCw } from 'lucide-vue-next'
+import { Check, LoaderCircle } from 'lucide-vue-next'
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
 
+import FirstKeyframeActions from './FirstKeyframeActions.vue'
 import Placeholder from './Placeholder.vue'
 
 const props = defineProps<{
@@ -129,20 +106,6 @@ const tileSize = computed(() => ({
   height: '100%',
 }))
 
-const choice = useForm<{ render?: number | null; plate?: number | null }>({})
-const more = useForm({})
-const reset = useForm<{ plate?: string }>({})
-
-const choose = () => {
-  if (selectedId.value === null) return
-
-  choice
-    .transform(() => ({ [props.field ?? 'render']: selectedId.value }))
-    .post(props.chooseUrl, { preserveScroll: true })
-}
-
-const askMore = () => more.post(props.moreUrl, { preserveScroll: true })
-
 const row = useTemplateRef<HTMLElement>('row')
 
 const scrollToEnd = async () => {
@@ -156,6 +119,15 @@ watch(
   (adjusting) => {
     if (adjusting) void scrollToEnd()
   },
+)
+
+// A single option, such as keyframe 1 drawn on the chosen place, is selected straight away so it can be adjusted or used.
+watch(
+  () => props.options.map((option) => option.id),
+  (ids) => {
+    if (ids.length === 1 && (selectedId.value === null || !ids.includes(selectedId.value))) selectedId.value = ids[0]
+  },
+  { immediate: true },
 )
 
 // When an adjusted option arrives, select it and scroll it into view, so it can be compared and used straight away.

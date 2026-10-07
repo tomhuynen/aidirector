@@ -38,7 +38,6 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
     public function __construct(
         private readonly Keyframe $keyframe,
         private readonly array $roles,
-        private readonly ?string $mustShow = null,
         private readonly string $scope = self::FULL,
     ) {}
 
@@ -61,7 +60,6 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
                 'change' => $schema->string()->required(),
                 'severity' => $schema->string()->enum(['high', 'low'])->required(),
             ]))->required(),
-            'must_show_visible' => $schema->boolean()->required(),
         ];
     }
 
@@ -80,10 +78,22 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             ->join("\n");
     }
 
+    /**
+     * A scene keeps one place; a still of a montage has its own.
+     */
+    private function setting(): string
+    {
+        return match (true) {
+            $this->keyframe->shot->isMontage() => 'This keyframe is one still of a montage: it has its own place and camera, so the place is never an issue; the people and objects must match their pictures and the image must show its description.',
+            $this->keyframe->shot->isPresenter() => 'This keyframe is the still of a presenter who speaks to the camera: one person, from the chest up, facing the camera straight on with the face large and clear, in front of a softly blurred place. The place is never an issue; the person must match their picture, and a face that is small, turned away or covered is a high issue.',
+            default => 'The camera stands still: the place does not move between keyframes.',
+        };
+    }
+
     private function fullInstructions(): string
     {
         return <<<INSTRUCTIONS
-            You check the continuity of a keyframe of an animated e-learning film against its references. The camera stands still: the place does not move between keyframes.
+            You check the continuity of a keyframe of an animated e-learning film against its references. {$this->setting()}
 
             {$this->imageList()}
 
@@ -102,14 +112,13 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             - high: a viewer notices it at a glance, or it makes the story wrong, such as a different helmet, glasses that appear or disappear, an object that is both in a hand and in its box, lettering that appears, or a floor line that runs elsewhere.
             - low: you only see it when you look for it.
 
-            Must show: {$this->mustShowLine()}
+            The point of the keyframe: what the description says about where people stand and what they do relative to lines, zones, doors, objects and hazards is what the keyframe is for. When a viewer cannot see that at a glance, add it as a high issue in category state.
 
             {$this->projectRules()}
 
             Output:
             - inventory: short lines from step 1.
             - issues: each issue with category (person, object, state, place, lettering), what changed in one plain sentence for the director, as you would say it to a colleague, and severity. Empty when nothing changed that should not.
-            - must_show_visible: true when the must show is clearly visible, or when there is none.
             Write in English.
             INSTRUCTIONS;
     }
@@ -133,16 +142,8 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             Output:
             - inventory: short lines from step 1.
             - issues: each change with category (place or lettering), what changed in one plain sentence for the director, and severity. Empty when the place stays the same.
-            - must_show_visible: always true.
             Write in English.
             INSTRUCTIONS;
-    }
-
-    private function mustShowLine(): string
-    {
-        return filled($this->mustShow)
-            ? "{$this->mustShow} This is what the keyframe is for; if a viewer cannot see it at a glance, set must_show_visible to false and add it as a high issue in category state."
-            : 'nothing specific for this keyframe.';
     }
 
     private function projectRules(): string

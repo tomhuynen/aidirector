@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\Agents\StorylineWriter;
+use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Models\Shot;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,6 +41,12 @@ class GenerateStoryline implements ShouldQueue
     public function handle(): void
     {
         $shot = $this->shot->load('project');
+
+        // A fresh plan lets the planner choose the kind again; a revision keeps the current one.
+        if (blank($this->instruction) || $shot->storyline === null) {
+            $shot->kind = null;
+        }
+
         $writer = new StorylineWriter($shot);
         $started = hrtime(true);
 
@@ -70,6 +77,7 @@ class GenerateStoryline implements ShouldQueue
                 'title' => $title !== '' ? $title : (string) $shot->title,
                 'storyline' => trim((string) ($response['storyline'] ?? '')),
             ],
+            'kind' => $shot->kind ?? ShotKind::tryFrom((string) ($response['kind'] ?? '')) ?? ShotKind::SCENE,
             'storyline' => [
                 'mode' => 'auto',
                 'framing' => $response['framing'],

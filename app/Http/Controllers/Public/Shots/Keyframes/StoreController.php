@@ -36,7 +36,6 @@ class StoreController
         $plan = [
             'title' => $request->validated('title'),
             'description' => $request->validated('description'),
-            'prompt' => $request->validated('description'),
         ];
 
         $position = (int) $keyframes->max('position') + 1;
@@ -62,6 +61,7 @@ class StoreController
     public static function canAddTo(Shot $shot, int $count, bool $firstRendered, bool $anyRendering): bool
     {
         return in_array($shot->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_READY], true)
+            && ! $shot->isPresenter()
             && $count > 0
             && $count < (int) Config::get('pipeline.keyframes.max_manual')
             && $firstRendered

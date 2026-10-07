@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\Agents\VideoPromptWriter;
+use App\Ai\Agents\VoiceOverTranslator;
 use App\Ai\KeyframePainter;
 use App\Ai\Prompts\VideoPrompt;
+use App\Enums\ElementType;
 use App\Enums\ShotStatus;
+use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
@@ -49,6 +52,18 @@ class GenerateVideo implements ShouldQueue
 
         if ($keyframes->isEmpty() || $keyframes->contains(fn(Keyframe $keyframe) => $keyframe->render() === null)) {
             throw new RuntimeException('Every keyframe needs an image before the video can be rendered.');
+        }
+
+        if ($shot->isMontage()) {
+            $this->submitStills($shot, $keyframes, $videos);
+
+            return;
+        }
+
+        if ($shot->isPresenter()) {
+            $this->submitPresenter($shot, $keyframes->first(), $videos);
+
+            return;
         }
 
         $duration = self::duration($shot);
@@ -104,6 +119,126 @@ class GenerateVideo implements ShouldQueue
 
         GenerationFinished::failed(__('The video of “:shot” could not be started', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
             ->sendTo($this->shot->project);
+    }
+
+    /**
+     * A montage gets one clip per still, each starting on its still; they are
+     * joined with crossfades once all are rendered, by {@see PollShotClips}.
+     *
+     * @param  Collection<int, Keyframe>  $keyframes
+     */
+    private function submitStills(Shot $shot, Collection $keyframes, OpenRouterVideoClient $videos): void
+    {
+        $duration = (int) Config::get('pipeline.video.min_duration');
+        $model = (string) Config::get('pipeline.models.video');
+
+        $clips = $keyframes->values()->map(function (Keyframe $keyframe) use ($shot, $videos, $duration, $model): array {
+            $still = 'data:' . $keyframe->render()->mime_type . ';base64,' . base64_encode($this->bytes($keyframe));
+
+            return [
+                'position' => $keyframe->position,
+                'job_id' => $videos->submit($model, VideoPrompt::still($keyframe->description, $duration), [], $duration, $shot->aspectRatio()->value, $shot->videoResolution(), ['first_frame' => $still]),
+                'status' => 'pending',
+            ];
+        })->all();
+
+        $shot->clearMediaCollection(Shot::MONTAGE_CLIPS);
+
+        $shot->forceFill([
+            'video_prompt' => VideoPrompt::still('(the description of each still)', $duration),
+            'video_job_id' => null,
+            'montage_clips' => $clips,
+            'video_submitted_at' => now(),
+            'video_error' => null,
+        ])->save();
+
+        $shot->startVoiceOverAudio();
+
+        PollShotClips::dispatch($shot)->delay((int) Config::get('pipeline.video.first_poll_seconds'));
+    }
+
+    /**
+     * A presenter shot gets one lip-synced clip per language of the project,
+     * each with its own sound; {@see PollShotClips} stores them once rendered.
+     */
+    private function submitPresenter(Shot $shot, Keyframe $still, OpenRouterVideoClient $videos): void
+    {
+        if (blank($shot->voice_over)) {
+            throw new RuntimeException('A presenter needs a voice-over to speak.');
+        }
+
+        $image = 'data:' . $still->render()->mime_type . ';base64,' . base64_encode($this->bytes($still));
+        $model = (string) Config::get('pipeline.models.presenter');
+        // The presenter keeps one voice per language across shots; it is chosen the first time they speak.
+        $presenter = $still->elements()->get()->first(fn(Element $element) => $element->type === ElementType::PERSON);
+
+        if ($presenter !== null) {
+            JudgeElementVoice::judge($presenter);
+        }
+
+        $voices = (array) Config::get('pipeline.presenter.voices.male');
+        // Without languages switched on, the voice-over is spoken as written.
+        $locales = $shot->project->settings->enabledLocales() ?: ['en-GB'];
+
+        $clips = array_map(function (string $locale) use ($shot, $videos, $image, $model, $voices, $presenter): array {
+            $voice = $presenter?->voiceIdFor($locale) ?? (string) ($voices[strtolower((string) strtok($locale, '-'))] ?? $voices['*']);
+
+            return [
+                'locale' => $locale,
+                'job_id' => $videos->submitPresenter($model, $this->presenterText($shot, $locale), $image, $voice, $shot->aspectRatio()->value, (string) Config::get('pipeline.presenter.resolution')),
+                'status' => 'pending',
+            ];
+        }, $locales);
+
+        $shot->clearMediaCollection(Shot::MONTAGE_CLIPS);
+
+        $shot->forceFill([
+            'video_prompt' => $shot->voice_over,
+            'video_job_id' => null,
+            'montage_clips' => $clips,
+            'video_submitted_at' => now(),
+            'video_error' => null,
+        ])->save();
+
+        PollShotClips::dispatch($shot)->delay((int) Config::get('pipeline.video.first_poll_seconds'));
+    }
+
+    /**
+     * What the presenter says in one language: the translation of its spoken
+     * track when that is up to date, the voice-over itself in English, and
+     * otherwise a fresh translation.
+     */
+    private function presenterText(Shot $shot, string $locale): string
+    {
+        $script = (string) $shot->voice_over;
+        $track = $shot->getMedia(Shot::VOICE_OVERS)->first(fn($media) => $media->getCustomProperty('locale') === $locale && $media->getCustomProperty('script') === $script);
+
+        if ($track !== null) {
+            return (string) $track->getCustomProperty('text');
+        }
+
+        if (str_starts_with($locale, 'en-')) {
+            return $script;
+        }
+
+        $translator = new VoiceOverTranslator($locale, $shot->durationInSeconds());
+        $model = (string) Config::get('pipeline.models.text');
+
+        /** @var StructuredAgentResponse $response */
+        $response = $translator->prompt($translator->promptFor($script), provider: 'openrouter', model: $model);
+
+        $shot->generations()->create([
+            'director_id' => $shot->project->director_id,
+            'kind' => 'text',
+            'provider' => $response->meta->provider ?? 'openrouter',
+            'model' => $response->meta->model ?? $model,
+            'prompt' => $translator->promptFor($script),
+            'usage' => $response->usage->toArray(),
+        ]);
+
+        $translated = trim((string) ($response->toArray()['text'] ?? ''));
+
+        return $translated !== '' ? $translated : $script;
     }
 
     /**

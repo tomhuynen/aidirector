@@ -24,7 +24,7 @@ class PlanChangeInterpreter implements Agent, HasReasoningEffort, HasStructuredO
     use SetsReasoningEffort;
 
     /**
-     * @param  list<array{title: string, description: string, prompt: string, mustShow: string}>  $keyframes  the plan as it is in the editor, in order
+     * @param  list<array{title: string, description: string}>  $keyframes  the plan as it is in the editor, in order
      * @param  list<string>  $rules  the rules already set for this shot
      */
     public function __construct(
@@ -49,7 +49,7 @@ class PlanChangeInterpreter implements Agent, HasReasoningEffort, HasStructuredO
 
             A rule for the whole shot: the message may set something that must always or never happen, such as "never let her cross the red line with more than one foot" or "the crate always hangs above the zone".
             - rule: that rule as one short clear sentence in English, naming the people and things as the plan names them. Empty when the message sets no rule.
-            - Check every keyframe against the rule: its description, its image instruction and what it must show. Add an update for each keyframe that breaks it, or that would not show it the way the rule wants, with an instruction that says exactly how that keyframe follows the rule. Do not touch keyframes that already follow it.
+            - Check every keyframe against the rule: its description. Add an update for each keyframe that breaks it, or that would not show it the way the rule wants, with an instruction that says exactly how that keyframe follows the rule. Do not touch keyframes that already follow it.
             - storyline: when the storyline breaks the rule, the storyline rewritten so it follows it, changing nothing else; empty when it already follows it or there is no rule.
             - When the rule goes against the point of the shot, follow the rule and keep the point as close as possible, for example the mistake becomes one foot over the line instead of standing in the zone.
 
@@ -78,11 +78,7 @@ class PlanChangeInterpreter implements Agent, HasReasoningEffort, HasStructuredO
     public function promptFor(string $message): string
     {
         $lines = collect($this->keyframes)
-            ->map(fn(array $keyframe, int $index) => implode("\n   ", array_filter([
-                ($index + 1) . ". {$keyframe['title']}: {$keyframe['description']}",
-                filled($keyframe['prompt']) && $keyframe['prompt'] !== $keyframe['description'] ? "Image instruction: {$keyframe['prompt']}" : null,
-                filled($keyframe['mustShow']) ? "Must show: {$keyframe['mustShow']}" : null,
-            ])))
+            ->map(fn(array $keyframe, int $index) => ($index + 1) . ". {$keyframe['title']}: {$keyframe['description']}")
             ->join("\n");
 
         $rules = collect($this->rules)->map(fn(string $rule) => "- {$rule}")->join("\n");

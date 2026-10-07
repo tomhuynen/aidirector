@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\ElementPainter;
+use App\Enums\ElementType;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Element;
 use App\Notifications\Public\GenerationFinished;
@@ -49,6 +50,11 @@ class UpdateElementImage implements ShouldQueue
             : $painter->paint($element, includes: $includes);
 
         $element->forceFill(['rendering' => false, 'render_error' => null])->save();
+
+        // A person's voice follows from how they look; one chosen before stays.
+        if ($element->type === ElementType::PERSON && $element->settings->voice === null) {
+            JudgeElementVoice::dispatch($element);
+        }
 
         GenerationFinished::ready(
             __('The image of “:name” is ready', ['name' => $element->name]),

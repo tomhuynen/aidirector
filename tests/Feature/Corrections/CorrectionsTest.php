@@ -39,8 +39,8 @@ function readyShot(Project $project, int $position = 1): Shot
         'position' => $position,
         'status' => ShotStatus::KEYFRAMES_READY,
         'storyline' => ['keyframes' => [
-            ['title' => 'Arrive', 'description' => 'She walks up.', 'prompt' => 'She walks up.'],
-            ['title' => 'Stop', 'description' => 'She stops at the line.', 'prompt' => 'She stops at the line.', 'must_show' => 'Both feet behind the line.'],
+            ['title' => 'Arrive', 'description' => 'She walks up.'],
+            ['title' => 'Stop', 'description' => 'She stops at the line.'],
         ]],
     ]);
 

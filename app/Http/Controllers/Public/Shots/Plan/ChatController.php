@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Public\Shots\Plan;
 
 use App\Ai\Agents\PlanChangeInterpreter;
 use App\Ai\Agents\PlanFrameWriter;
+use App\Enums\ShotKind;
 use App\Http\Requests\Public\PlanChatRequest;
 use App\Models\Element;
 use App\Models\Policies\Public\ShotPolicy;
@@ -73,6 +74,11 @@ class ChatController
             ->mapWithKeys(fn(array $target) => [(int) $target['position'] => (string) $target['instruction']])
             ->all();
 
+        // Written by the rules of the kind in the plan, also when the director switched it without saving.
+        if ($request->has('kind')) {
+            $shot->kind = ShotKind::from((string) $request->validated('kind'));
+        }
+
         $writer = new PlanFrameWriter($shot, ($shot->storyline['mode'] ?? 'auto') !== 'manual');
         $result = $this->ask($shot, $writer, $writer->promptFor((string) $request->validated('storyline'), $request->keyframes(), $targets));
         $elements = $project->elements()->get();
@@ -83,8 +89,6 @@ class ChatController
                 'position' => (int) $keyframe['position'],
                 'title' => trim((string) ($keyframe['title'] ?? '')),
                 'description' => trim((string) ($keyframe['description'] ?? '')),
-                'prompt' => trim((string) ($keyframe['prompt'] ?? '')),
-                'mustShow' => trim((string) ($keyframe['must_show'] ?? '')),
                 'elements' => $elements
                     ->filter(fn(Element $element) => in_array($element->name, (array) ($keyframe['elements'] ?? []), true))
                     ->pluck('sqid')

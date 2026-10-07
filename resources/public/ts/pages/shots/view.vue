@@ -56,7 +56,7 @@
           :choose-url="shot.links?.storylineChoose ?? '#'"
         />
         <template v-else-if="state === 'keyframes' || state === 'planning'">
-          <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" />
+          <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" :in-plan="planEditable" />
           <!-- Planned or still to be written: the plan can be changed until the keyframes are drawn. -->
           <PlanEditor
             v-if="planEditable"
@@ -65,6 +65,9 @@
             :keyframes="shot.storyline?.keyframes ?? []"
             :framing="planFraming"
             :sizes="shotSizes"
+            :kind="shot.kind"
+            :kind-url="shot.links?.planKind ?? '#'"
+            :kinds="shotKinds"
             :elements="elements"
             :types="elementTypes"
             :preferred="shot.preferredElements ?? []"
@@ -92,16 +95,21 @@
             :error="shot.storylineError"
             :images-url="shot.links?.keyframesGenerate ?? '#'"
             :choosing="{
-              active: shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready',
+              // A montage draws every still straight away: no place or keyframe 1 to choose first.
+              active:
+                shot.kind === 'scene' &&
+                (shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready'),
               pending: shot.status === 'first-keyframe-pending',
               optionCount: usesPlates ? shot.plateOptionCount : shot.firstKeyframeOptions,
               plates: usesPlates ? shot.plateOptions : null,
               chooseUrl: (usesPlates ? shot.links?.plateChoose : shot.links?.firstKeyframeChoose) ?? '#',
               moreUrl: shot.links?.firstKeyframeMore ?? '#',
-              adjustUrl: shot.links?.firstKeyframeAdjust,
-              adjusting: !usesPlates && shot.status === 'first-keyframe-ready' && Boolean(keyframes[0]?.rendering),
+              adjustUrl: usesPlates ? shot.links?.plateAdjust : shot.links?.firstKeyframeAdjust,
+              adjusting: shot.status === 'first-keyframe-ready' && Boolean(keyframes[0]?.rendering),
               resetUrl: shot.plateChosen ? shot.links?.plateReset : null,
             }"
+            :montage="shot.kind === 'montage'"
+            :presenter="shot.kind === 'presenter'"
             :reorder-url="shot.links?.keyframesReorder ?? '#'"
             :new-keyframe="{
               storeUrl: shot.links?.keyframesStore ?? '#',
@@ -115,6 +123,7 @@
               resolutions: shot.videoResolutions,
               pending: shot.status === 'video-pending',
               generateUrl: shot.links?.videoGenerate ?? '#',
+              languages: shot.languageVideos,
             }"
           />
         </template>
@@ -198,6 +207,7 @@ const planMode = computed(() =>
 /** The shot starts from empty places to choose from, instead of options for keyframe 1. */
 const usesPlates = computed(
   () =>
+    props.shot.kind === 'scene' &&
     !props.shot.plateChosen &&
     (props.shot.plateOptions.length > 0 || (props.shot.startsWithPlate && !(props.keyframes[0]?.renders.length ?? 0))),
 )
@@ -225,6 +235,8 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         chooseRenderUrl: keyframe.links.chooseRender,
         destroyUrl: keyframe.links.destroy,
         copyUrl: keyframe.links.copy,
+        moveSelectUrl: keyframe.links.moveSelect,
+        moveUrl: keyframe.links.move,
       }))
     : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
         id: String(i),

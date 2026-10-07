@@ -64,6 +64,16 @@
         <!-- The camera for the whole shot: one size, one spot, one light. -->
         <fieldset class="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2">
           <legend class="px-1 text-[15px] font-medium">{{ $t('Framing') }}</legend>
+          <div class="space-y-1.5 sm:col-span-2">
+            <Label for="plan-kind">{{ $t('Kind of shot') }}</Label>
+            <!-- Another kind needs another plan: switching asks first, then the director rewrites it. -->
+            <NativeSelect id="plan-kind" v-model="kindChoice" class="w-full" :disabled="switching.processing">
+              <option v-for="option in kinds" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </NativeSelect>
+            <p class="text-sm text-muted-foreground">
+              {{ kinds.find((option) => option.value === form.kind)?.description }}
+            </p>
+          </div>
           <div class="space-y-1.5">
             <Label for="plan-size">{{ $t('Shot size') }}</Label>
             <NativeSelect id="plan-size" v-model="form.framing.size" class="w-full">
@@ -81,7 +91,8 @@
               :placeholder="$t('Automatic')"
             />
           </div>
-          <div class="space-y-1.5 sm:col-span-2">
+          <!-- A montage and a presenter name their own setting in the description. -->
+          <div v-if="form.kind === 'scene'" class="space-y-1.5 sm:col-span-2">
             <Label for="plan-spot">{{ $t('Spot') }}</Label>
             <Input
               id="plan-spot"
@@ -168,7 +179,9 @@
                 </div>
               </div>
               <Label :for="`plan-description-${i}`" class="text-xs text-muted-foreground">
-                {{ $t('Description: what you see; the check judges the image by it') }}
+                {{
+                  $t('Description: what is drawn, sent to the image model as written; the check judges the image by it')
+                }}
               </Label>
               <Textarea
                 :id="`plan-description-${i}`"
@@ -184,31 +197,12 @@
                 "
                 class="text-[15px] leading-relaxed"
               />
-              <div class="space-y-1.5">
-                <Label :for="`plan-prompt-${i}`" class="text-xs text-muted-foreground">
-                  {{ $t('Instruction for the image model: how it is drawn, sent exactly as written') }}
-                </Label>
-                <Textarea
-                  :id="`plan-prompt-${i}`"
-                  v-model="keyframe.prompt"
-                  :placeholder="$t('Leave empty to send the description above instead.')"
-                  rows="3"
-                  maxlength="3000"
-                  class="text-sm leading-relaxed"
-                />
-              </div>
               <!-- Who and what is in the keyframe: their pictures go to the image model. -->
               <KeyframeCastPicker
                 v-if="elements.length > 0"
                 v-model="keyframe.elements"
                 :elements="elements"
                 :types="types"
-              />
-              <Input
-                v-model="keyframe.mustShow"
-                maxlength="500"
-                :aria-label="$t('Must show in keyframe :n', { n: String(i + 1) })"
-                :placeholder="$t('Must show (optional): the one thing a viewer has to see, checked after drawing')"
               />
               <InputError :message="form.errors[`keyframes.${i}.title`] ?? form.errors[`keyframes.${i}.description`]" />
             </template>
@@ -268,21 +262,58 @@
         </Button>
       </div>
     </footer>
+
+    <Dialog v-model:open="switchOpen">
+      <DialogContent>
+        <DialogHeader class="space-y-3">
+          <DialogTitle class="font-display text-2xl font-medium">
+            {{ $t('Switch to :kind?', { kind: kindLabel(switchTo) }) }}
+          </DialogTitle>
+          <DialogDescription>
+            {{
+              $t(
+                'The director rewrites the plan as a :kind, from the same brief and storyline. Changes to this plan that are not saved are lost.',
+                { kind: kindLabel(switchTo).toLowerCase() },
+              )
+            }}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="gap-2">
+          <DialogClose as-child>
+            <Button type="button" variant="secondary">{{ $t('Cancel') }}</Button>
+          </DialogClose>
+          <Button type="button" :disabled="switching.processing" @click="confirmSwitch">
+            <LoaderCircle v-if="switching.processing" class="size-4 animate-spin" />
+            {{ $t('Rewrite the plan') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 <script setup lang="ts">
 import { router, useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
+import { postJson } from '@public/ts/shared/postJson'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@shared:ui/dialog'
 import { Input } from '@shared:ui/input'
 import { Label } from '@shared:ui/label'
 import { NativeSelect } from '@shared:ui/native-select'
 import { Skeleton } from '@shared:ui/skeleton'
 import { Textarea } from '@shared:ui/textarea'
 import { ArrowDown, ArrowUp, LoaderCircle, Plus, Send, ShieldCheck, Trash2, Wand, X } from 'lucide-vue-next'
-import { reactive } from 'vue'
+import { reactive, ref, watch } from 'vue'
 
 import KeyframeCastPicker from './KeyframeCastPicker.vue'
 
@@ -290,8 +321,6 @@ type PlanKeyframe = {
   uid: number
   title: string
   description: string
-  prompt: string
-  mustShow: string
   elements: string[]
   /** Being written from the chat. */
   pending?: boolean
@@ -304,8 +333,6 @@ const props = defineProps<{
   keyframes: {
     title: string
     description: string
-    prompt?: string | null
-    must_show?: string | null
     elements?: string[]
   }[]
   /** The project's cast and sets to pick from. */
@@ -316,6 +343,11 @@ const props = defineProps<{
   preferred: string[]
   framing: { size?: string; spot?: string; light?: string; seconds?: number | null } | null
   sizes: { value: string; label: string }[]
+  /** A scene at one place, or a montage of separate stills. */
+  kind: string
+  kinds: { value: string; label: string; description: string }[]
+  /** Switches the kind and has the director rewrite the plan for it. */
+  kindUrl: string
   /** The most keyframes the director may have in one shot. */
   max: number
   saveUrl: string
@@ -339,8 +371,15 @@ function idsFor(names: string[]): string[] {
   return ids.length > 0 ? ids : [...props.preferred]
 }
 
-const form = useForm<{ storyline: string; rules: string[]; framing: Framing; keyframes: PlanKeyframe[] }>({
+const form = useForm<{
+  storyline: string
+  kind: string
+  rules: string[]
+  framing: Framing
+  keyframes: PlanKeyframe[]
+}>({
   storyline: props.storyline,
+  kind: props.kind,
   rules: [...props.rules],
   framing: {
     size: props.framing?.size ?? 'full',
@@ -352,20 +391,41 @@ const form = useForm<{ storyline: string; rules: string[]; framing: Framing; key
     uid: nextUid++,
     title: keyframe.title,
     description: keyframe.description,
-    // The planner's prompt is kept as is; only a prompt that just repeats the description is shown empty.
-    prompt: keyframe.prompt && keyframe.prompt !== keyframe.description ? keyframe.prompt : '',
-    mustShow: keyframe.must_show ?? '',
     elements: idsFor(keyframe.elements ?? []),
   })),
 })
+
+const switchOpen = ref(false)
+const switchTo = ref('')
+const switching = useForm<{ kind: string }>({ kind: '' })
+
+const kindLabel = (value: string) => props.kinds.find((option) => option.value === value)?.label ?? value
+
+/** What the select shows; it only becomes the kind once the director confirms the rewrite. */
+const kindChoice = ref(form.kind)
+
+watch(kindChoice, (value) => {
+  if (value === form.kind) return
+
+  switchTo.value = value
+  switchOpen.value = true
+})
+
+// Cancelling the switch puts the select back on the current kind.
+watch(switchOpen, (open) => {
+  if (!open && !switching.processing) kindChoice.value = form.kind
+})
+
+const confirmSwitch = () => {
+  switching.kind = switchTo.value
+  switching.post(props.kindUrl, { preserveScroll: true, onSuccess: () => (switchOpen.value = false) })
+}
 
 const add = () =>
   form.keyframes.push({
     uid: nextUid++,
     title: '',
     description: '',
-    prompt: '',
-    mustShow: '',
     elements: [...props.preferred],
   })
 
@@ -381,11 +441,9 @@ const save = (draw: boolean) =>
   form
     .transform((data) => ({
       ...data,
-      keyframes: data.keyframes.map(({ title, description, prompt, mustShow, elements }) => ({
+      keyframes: data.keyframes.map(({ title, description, elements }) => ({
         title,
         description,
-        prompt,
-        mustShow,
         elements,
       })),
     }))
@@ -395,26 +453,6 @@ const save = (draw: boolean) =>
         if (draw) router.post(props.drawUrl, {}, { preserveScroll: true })
       },
     })
-
-const xsrfToken = () => decodeURIComponent(document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/)?.[1] ?? '')
-
-const postJson = async <T,>(url: string, body: unknown): Promise<T> => {
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'XMLHttpRequest',
-      'X-XSRF-TOKEN': xsrfToken(),
-    },
-    body: JSON.stringify(body),
-  })
-
-  if (!response.ok) throw new Error(String(response.status))
-
-  return (await response.json()) as T
-}
 
 type Change = { op: 'insert' | 'update' | 'remove' | 'move'; at: number; from: number; instruction: string }
 type Written = Omit<PlanKeyframe, 'uid' | 'pending'> & { position: number }
@@ -426,8 +464,7 @@ const chat = reactive<{ message: string; busy: boolean; reply: string | null; er
   error: null,
 })
 
-const outline = () =>
-  form.keyframes.map(({ title, description, prompt, mustShow }) => ({ title, description, prompt, mustShow }))
+const outline = () => form.keyframes.map(({ title, description }) => ({ title, description }))
 
 /**
  * Two steps: first the changes, applied straight away so the order is
@@ -469,8 +506,6 @@ const sendChat = async () => {
           uid: nextUid++,
           title: '',
           description: '',
-          prompt: '',
-          mustShow: '',
           elements: [...props.preferred],
           pending: true,
         }
@@ -493,6 +528,7 @@ const sendChat = async () => {
       const { keyframes } = await postJson<{ keyframes: Written[] }>(props.writeUrl, {
         message,
         storyline: form.storyline,
+        kind: form.kind,
         keyframes: outline(),
         targets: [...targets].map(([keyframe, instruction]) => ({
           position: form.keyframes.indexOf(keyframe) + 1,
@@ -508,8 +544,6 @@ const sendChat = async () => {
         Object.assign(keyframe, {
           title: written.title,
           description: written.description,
-          prompt: written.prompt,
-          mustShow: written.mustShow,
           elements: written.elements.length > 0 ? written.elements : keyframe.elements,
         })
       }

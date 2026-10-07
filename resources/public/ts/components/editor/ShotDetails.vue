@@ -50,7 +50,7 @@
         <p class="text-[15px] leading-relaxed">{{ shot.takeaway }}</p>
       </section>
 
-      <section v-if="storyline" class="space-y-2 border-t border-border p-6">
+      <section v-if="storyline && !inPlan" class="space-y-2 border-t border-border p-6">
         <h3 class="flex items-center gap-2 font-semibold">
           <ListOrdered class="size-4 text-muted-foreground" />
           {{ $t('Storyline') }}
@@ -58,7 +58,7 @@
         <p class="text-[15px] leading-relaxed text-muted-foreground">{{ storyline.storyline }}</p>
       </section>
 
-      <section v-if="shot.rules.length > 0" class="space-y-2 border-t border-border p-6">
+      <section v-if="shot.rules.length > 0 && !inPlan" class="space-y-2 border-t border-border p-6">
         <h3 class="flex items-center gap-2 font-semibold">
           <ShieldCheck class="size-4 text-muted-foreground" />
           {{ $t('Rules for this shot') }}
@@ -146,7 +146,7 @@
           :confirm-label="$t('Delete shot')"
         >
           <template #trigger>
-            <Button type="button" variant="ghost" size="sm" class="text-destructive hover:text-destructive">
+            <Button type="button" variant="outline" size="sm" class="text-destructive hover:text-destructive">
               <Trash2 class="size-4" />
               {{ $t('Delete shot') }}
             </Button>
@@ -195,6 +195,8 @@ import AudioTracks from './AudioTracks.vue'
 const props = defineProps<{
   shot: Inertia.Pages.Shots.View['shot']
   storyline: { title: string; storyline: string } | null
+  /** The plan editor next to it shows the storyline and the rules, so they are not repeated here. */
+  inPlan?: boolean
 }>()
 
 /** Remembered for this browser tab's session, so the column stays folded while moving between shots. */

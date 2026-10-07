@@ -36,6 +36,7 @@ use App\Http\Controllers\Public\Shots\Keyframes\DestroyController as KeyframeDes
 use App\Http\Controllers\Public\Shots\Keyframes\FirstController as FirstKeyframeController;
 use App\Http\Controllers\Public\Shots\Keyframes\GenerateController as KeyframesGenerateController;
 use App\Http\Controllers\Public\Shots\Keyframes\ImageController as KeyframeImageController;
+use App\Http\Controllers\Public\Shots\Keyframes\MoveController as KeyframeMoveController;
 use App\Http\Controllers\Public\Shots\Keyframes\RenderController as KeyframeRenderController;
 use App\Http\Controllers\Public\Shots\Keyframes\ReorderController as KeyframeReorderController;
 use App\Http\Controllers\Public\Shots\Keyframes\StoreController as KeyframeStoreController;
@@ -140,8 +141,10 @@ Route::middleware('auth:director')->group(function () {
             Route::delete('{shot}/merge', [ShotMergeController::class, 'destroy'])->name('unmerge');
             Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
             Route::post('{shot}/plan', [ShotPlanController::class, 'store'])->name('plan');
+            Route::post('{shot}/plan/kind', [ShotPlanController::class, 'kind'])->name('plan.kind');
             Route::post('{shot}/plate/choose', [ShotPlateController::class, 'choose'])->name('plate.choose');
             Route::post('{shot}/plate/reset', [ShotPlateController::class, 'reset'])->name('plate.reset');
+            Route::post('{shot}/plate/adjust', [ShotPlateController::class, 'adjust'])->name('plate.adjust');
             Route::post('{shot}/plan/changes', [ShotPlanChatController::class, 'changes'])->name('plan.changes');
             Route::post('{shot}/plan/write', [ShotPlanChatController::class, 'write'])->name('plan.write');
             Route::post('{shot}/storyline/suggest', [StorylineSuggestController::class, 'store'])->name('storyline.suggest');
@@ -158,6 +161,8 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/keyframes/first/adjust', [FirstKeyframeController::class, 'adjust'])->name('keyframes.first.adjust');
             Route::post('{shot}/keyframes/{keyframe}/update', [KeyframeUpdateController::class, 'store'])->name('keyframes.update');
             Route::post('{shot}/keyframes/{keyframe}/tweak', [KeyframeTweakController::class, 'store'])->name('keyframes.tweak');
+            Route::post('{shot}/keyframes/{keyframe}/move/select', [KeyframeMoveController::class, 'select'])->name('keyframes.move.select');
+            Route::post('{shot}/keyframes/{keyframe}/move', [KeyframeMoveController::class, 'store'])->name('keyframes.move');
             Route::post('{shot}/keyframes/{keyframe}/render', [KeyframeRenderController::class, 'store'])->name('keyframes.render');
             Route::get('{shot}/keyframes/{keyframe}/image/{conversion?}', [KeyframeImageController::class, 'view'])
                 ->whereIn('conversion', [Keyframe::THUMBNAIL])

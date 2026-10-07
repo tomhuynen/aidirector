@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Projects\Elements;
 
+use App\Enums\ElementType;
 use App\Http\Requests\Public\ElementRequest;
 use App\Jobs\UpdateElementImage;
 use App\Models\Element;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use App\Models\Upload;
+use App\Support\Elements\ElementSettings;
 use App\Support\Media\ClaimUploads;
 use Illuminate\Support\Facades\Gate;
 
@@ -28,6 +30,7 @@ class StoreController
             'type' => $request->validated('type'),
             'name' => $request->validated('name'),
             'description' => $request->validated('description'),
+            'settings' => new ElementSettings(voice: $request->validated('type') === ElementType::PERSON->value ? $request->validated('voice') : null),
             'rendering' => true,
         ]);
 

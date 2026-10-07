@@ -51,6 +51,15 @@ class GenerateKeyframes implements ShouldQueue
 
         $shotId = $shot->id;
 
+        // A montage or a presenter has no shared place: every keyframe is drawn on its own, straight away.
+        if ($shot->drawsStandalone()) {
+            $shot->clearMediaCollection(Shot::PLATE_OPTIONS);
+            $shot->clearMediaCollection(Shot::PLATE);
+            GenerateRemainingKeyframes::startStandalone($shot);
+
+            return;
+        }
+
         // Start from empty places: the director chooses one, and every keyframe is drawn on it.
         if (Config::get('pipeline.keyframes.start_with_plate')) {
             if (! $this->more) {

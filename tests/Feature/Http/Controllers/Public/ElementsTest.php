@@ -66,9 +66,9 @@ function castShot(Project $project, array $attributes = []): Shot
         'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
         'chosen_storyline' => ['title' => 'Straightforward', 'storyline' => 'He posts the letter.'],
         'storyline' => ['keyframes' => [
-            ['title' => 'At the mailbox', 'description' => 'The man stands at the mailbox.', 'prompt' => 'A man stands at a red mailbox.', 'elements' => []],
-            ['title' => 'Posting', 'description' => 'The envelope slides into the slot.', 'prompt' => 'A man pushes an envelope into the slot.', 'elements' => ['mark, the visitor ']],
-            ['title' => 'Thumbs up', 'description' => 'The man gives a thumbs up.', 'prompt' => 'A man gives a thumbs up.', 'elements' => []],
+            ['title' => 'At the mailbox', 'description' => 'A man stands at a red mailbox.', 'elements' => []],
+            ['title' => 'Posting', 'description' => 'A man pushes an envelope into the slot.', 'elements' => ['mark, the visitor ']],
+            ['title' => 'Thumbs up', 'description' => 'A man gives a thumbs up.', 'elements' => []],
         ]],
         ...$attributes,
     ]);

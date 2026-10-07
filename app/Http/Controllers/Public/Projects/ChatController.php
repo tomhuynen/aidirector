@@ -193,7 +193,7 @@ class ChatController
                 $document->delete();
             }
 
-            return "The director shared the document \"{$document->name}\":\n<<<\n{$text}\n>>>";
+            return DocumentText::SHARED . " \"{$document->name}\":\n<<<\n{$text}\n>>>";
         })->join("\n\n");
     }
 

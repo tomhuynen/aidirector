@@ -41,7 +41,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Judge the sequence as a whole against what the shot teaches:
             - Can a viewer see the point of the shot, such as the danger and the safe behaviour, without reading any text?
-            - Is what each keyframe must show clearly visible, with distances and positions readable?
+            - Is what each keyframe's description says about positions and distances, such as where someone stands relative to a line or a hazard, clearly visible and readable?
             - Does every keyframe show a step a viewer can see? Two keyframes in a row that look almost the same, where only a small detail such as a hand angle changes, is an issue: name the step that cannot be seen.
             - Does the movement go the way the storyline says? Someone who enters a place moves into it, someone who leaves moves out of it, someone who walks towards something ends up nearer to it. Moving the opposite way, such as walking out towards the camera while the storyline says she walks into the hall, is an issue.
             - Is everything that matters large enough to read at a glance on a phone? The people should be big in the frame and the object the story turns on, such as a cigarette, a key or a buckle, clearly visible. People that are small in a wide view with a lot of empty space, or an object of a few pixels, is an issue; name the keyframes.
@@ -91,9 +91,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
                 return "{$keyframe->position}. A copy of another keyframe that the director has not described yet: judge it only as a step between the keyframes around it.";
             }
 
-            $mustShow = $plan['must_show'] ?? null;
-
-            return "{$keyframe->position}. {$keyframe->title}: {$keyframe->description}" . (filled($mustShow) ? " Must show: {$mustShow}" : '');
+            return "{$keyframe->position}. {$keyframe->title}: {$keyframe->description}";
         })->join("\n");
 
         $storyline = $this->shot->chosenStoryline()['storyline'] ?? '';
@@ -103,6 +101,11 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             ->map(fn(Keyframe $keyframe, int $index) => 'Image ' . ($index + 1) . " is keyframe {$keyframe->position}.")
             ->join(' ');
 
-        return "The shot teaches: {$this->shot->takeaway}\nStoryline: {$storyline}\n\nKeyframes:\n{$lines}\n\n{$images}";
+        // A montage is a row of separate stills: each has its own place, so the checks on one still place do not apply.
+        $montage = $this->shot->isMontage()
+            ? "\n\nThis shot is a montage: every keyframe is a separate still with its own place and camera, joined with crossfades. Ignore the checks on the place staying still and on one continuous moment. Judge instead whether each still shows its own part of the takeaway at a glance, without text, boards or pictograms, whether the stills in order say the takeaway, and whether the people stay recognisable as the same people."
+            : '';
+
+        return "The shot teaches: {$this->shot->takeaway}\nStoryline: {$storyline}{$montage}\n\nKeyframes:\n{$lines}\n\n{$images}";
     }
 }

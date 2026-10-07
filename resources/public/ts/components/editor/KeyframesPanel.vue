@@ -32,26 +32,28 @@
           </Button>
         </div>
 
-        <!-- Above the video, top right, so it never covers the picture. -->
-        <div v-if="!choosing.active && showVideo && video.url && !video.pending" class="flex shrink-0 justify-end">
-          <VideoActions
-            :video-url="video.url"
-            :download-url="video.downloadUrl"
-            :title="$t('Video')"
-            class="flex-nowrap justify-end"
-          >
-            <Button type="button" variant="outline" size="sm" :disabled="!canRenderVideo" @click="renderVideo">
-              <RefreshCw class="size-4" :class="videoForm.processing && 'animate-spin'" />
-              {{ $t('Render again') }}
-            </Button>
-            <Button type="button" variant="outline" size="sm" disabled>
-              <Pencil class="size-4" />
-              {{ $t('Edit') }}
-            </Button>
-          </VideoActions>
-        </div>
+        <!-- A presenter speaks in every language of the project: one video each. -->
+        <NativeSelect
+          v-if="showVideo && languages.length > 1 && !video.pending"
+          v-model="language"
+          class="absolute top-4 left-4 z-10 w-44 bg-background/90"
+          :aria-label="$t('Language')"
+        >
+          <option v-for="option in languages" :key="option.locale" :value="option.locale">{{ option.name }}</option>
+        </NativeSelect>
+        <!-- In the top right corner of the video area. -->
+        <VideoActions
+          v-if="!choosing.active && showVideo && currentVideo.url && !video.pending"
+          :download-url="currentVideo.downloadUrl"
+          class="absolute top-4 right-4 z-10"
+        >
+          <DropdownMenuItem :disabled="!canRenderVideo" @select="renderVideo">
+            <RefreshCw class="size-4" />
+            {{ $t('Render again') }}
+          </DropdownMenuItem>
+        </VideoActions>
         <FirstKeyframeChooser
-          v-if="choosing.active && (keyframes[0] || planning)"
+          v-if="choosing.active && (keyframes[0] || planning) && !checkingFirst"
           v-model:selected="selectedOption"
           :options="choosing.plates ?? keyframes[0]?.renders ?? []"
           :option-count="choosing.optionCount"
@@ -65,10 +67,10 @@
         />
         <div v-else class="flex min-h-0 flex-1 items-center justify-center">
           <video
-            v-if="showVideo && video.url"
-            :key="video.url"
+            v-if="showVideo && currentVideo.url"
+            :key="currentVideo.url"
             data-shot-video
-            :src="video.url"
+            :src="currentVideo.url"
             controls
             autoplay
             loop
@@ -88,6 +90,7 @@
                 cn('size-full rounded-xl border border-border bg-card object-cover', busy(selected) && 'opacity-50')
               "
             />
+            <KeyframeMover v-if="mover.state.active && !busy(selected)" :key="selected.id" :mover="mover" />
             <p
               v-if="busy(selected)"
               class="absolute bottom-4 mx-4 flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
@@ -132,12 +135,20 @@
             </div>
           </Placeholder>
         </div>
+        <FirstKeyframeActions
+          v-if="checkingFirst"
+          :selected="firstRender"
+          :choose-url="choosing.chooseUrl"
+          :more-url="choosing.moreUrl"
+          :reset-url="choosing.resetUrl"
+          :disabled="choosing.pending || Boolean(choosing.adjusting) || Boolean(keyframes[0]?.rendering)"
+        />
       </section>
 
       <FirstKeyframeInspector
-        v-if="choosing.active && (keyframes[0] || planning)"
+        v-if="choosing.active && (keyframes[0] || planning) && !checkingFirst"
         :keyframe="keyframes[0]"
-        :adjust-url="planning || choosing.plates ? undefined : choosing.adjustUrl"
+        :adjust-url="planning ? undefined : choosing.adjustUrl"
         :plates="Boolean(choosing.plates)"
         :on-plate="Boolean(choosing.resetUrl)"
         :steps="keyframes.map((keyframe) => keyframe.title)"
@@ -155,9 +166,11 @@
         :key="selected.id"
         :keyframe="selected"
         :index="selectedIndex"
-        :can-delete="canArrange"
-        :can-copy="keyframes.length < newKeyframe.max"
+        :can-delete="canArrange && !checkingFirst"
+        :can-copy="keyframes.length < newKeyframe.max && !checkingFirst"
         :issues="issuesFor(selected.id)"
+        :mover="mover"
+        @move="selected.moveSelectUrl && selected.moveUrl && mover.start(selected.moveSelectUrl, selected.moveUrl)"
       />
     </div>
 
@@ -182,6 +195,14 @@
               }}</template>
               <template v-else-if="choosing.active">{{
                 $t('Choose the first keyframe. The others are drawn to match it.')
+              }}</template>
+              <template v-else-if="presenter">{{
+                $t('A presenter: the keyframe is the still the person speaks from, lip-synced, in every language.')
+              }}</template>
+              <template v-else-if="montage">{{
+                $t(
+                  'A montage: every keyframe is its own still, animated a little and joined to the next with a crossfade.',
+                )
               }}</template>
               <template v-else>{{
                 $t('Review and edit the keyframes. These will be used to generate the final video.')
@@ -330,7 +351,8 @@
               <div class="mx-1 h-4 w-24 animate-pulse rounded bg-secondary" />
             </li>
           </template>
-          <li class="w-44 shrink-0">
+          <!-- A presenter speaks from one still. -->
+          <li v-if="!presenter" class="w-44 shrink-0">
             <button
               type="button"
               :disabled="!canAdd"
@@ -448,13 +470,14 @@ import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
+import { DropdownMenuItem } from '@shared:ui/dropdown-menu'
+import { NativeSelect } from '@shared:ui/native-select'
 import {
   ChevronLeft,
   ChevronRight,
   Clapperboard,
   Film,
   LoaderCircle,
-  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -463,9 +486,12 @@ import {
 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
+import FirstKeyframeActions from './FirstKeyframeActions.vue'
 import FirstKeyframeChooser from './FirstKeyframeChooser.vue'
 import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
 import KeyframeInspector from './KeyframeInspector.vue'
+import { createKeyframeMover } from './keyframeMover'
+import KeyframeMover from './KeyframeMover.vue'
 import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import VideoActions from './VideoActions.vue'
@@ -484,6 +510,9 @@ export type PanelKeyframe = {
   description: string
   /** A copy that still repeats another keyframe's description. */
   needsDescription?: boolean
+  /** Moving a person by hand: picking them, and putting them down. Only on a keyframe drawn on a place. */
+  moveSelectUrl?: string | null
+  moveUrl?: string | null
   imageUrl: string | null
   thumbnailUrl: string | null
   rendering: boolean
@@ -506,13 +535,14 @@ export type PanelKeyframe = {
     /** When the automatic check redrew this version: what was wrong with the one before. */
     checkProblems?: string[]
     /** What the keyframe must show that the check still could not see after a redraw. */
-    checkWarning?: string | null
     /** What the check found wrong with this version, kept as notes. */
     checkIssues?: string[]
     /** What the image model got for this version. */
     sent?: { model: string; prompt: string; images: string[] } | null
     /** The share of the background that stayed in place, measured in code. */
     stillness?: number | null
+    /** After a person was moved: why the image no longer fits the keyframe's point in the story. */
+    moveWarning?: string | null
   }[]
   elements: string[]
   updateUrl: string | null
@@ -549,6 +579,8 @@ export type PanelVideo = {
   resolution: string
   resolutions: string[]
   generateUrl: string
+  /** A presenter's video per language, each with its own sound. */
+  languages?: { locale: string; name: string; url: string | null; downloadUrl: string | null }[]
 }
 
 const props = defineProps<{
@@ -560,6 +592,10 @@ const props = defineProps<{
   imagesUrl: string
   video: PanelVideo
   choosing: PanelChoosing
+  /** Every keyframe is a separate still with its own place, joined with crossfades. */
+  montage?: boolean
+  /** One person speaks the voice-over to the camera, with a video per language. */
+  presenter?: boolean
   newKeyframe: PanelNewKeyframe
   reorderUrl: string
   /** The keyframes are still being planned: the panel shows the drawing state with nothing in it yet. */
@@ -580,7 +616,22 @@ const selectedIndex = ref(0)
 
 /** The keyframe 1 option the director selected, shared by the options and the column that adjusts them. */
 const selectedOption = ref<number | null>(null)
+/** Moving a person in the selected keyframe by hand; stops when another keyframe is selected. */
+const mover = createKeyframeMover()
+
 const showVideo = ref(Boolean(props.video.url || props.video.pending))
+
+const languages = computed(() => props.video.languages ?? [])
+const language = ref<string | null>(languages.value[0]?.locale ?? null)
+
+/** The video shown and downloaded: the chosen language of a presenter, otherwise the shot's video. */
+const currentVideo = computed(() => {
+  const chosen = languages.value.find((option) => option.locale === language.value) ?? languages.value[0]
+
+  return chosen
+    ? { url: chosen.url, downloadUrl: chosen.downloadUrl }
+    : { url: props.video.url, downloadUrl: props.video.downloadUrl }
+})
 
 const adding = ref(false)
 
@@ -638,12 +689,69 @@ watch(
 
 const selected = computed(() => props.keyframes[selectedIndex.value])
 
+/** Keyframe 1 is drawn on the chosen place and waits to be used: it gets every tool of a keyframe before the others are drawn. */
+const checkingFirst = computed(
+  () => props.choosing.active && !props.choosing.plates && Boolean(props.choosing.resetUrl),
+)
+
+// The other keyframes are only drawn once keyframe 1 is used, so the selection stays on keyframe 1 until then.
+watch([checkingFirst, selectedIndex], ([checking, index]) => {
+  if (checking && index !== 0) selectKeyframe(0)
+})
+
+/** The version of keyframe 1 that is used when the director confirms it. */
+const firstRender = computed(() => props.keyframes[0]?.renders.find((render) => render.chosen)?.id ?? null)
+
+watch(
+  () => selected.value?.id,
+  () => mover.cancel(),
+)
+
 watch(
   () => props.choosing.active,
   (active) => {
     if (active) selectKeyframe(0)
   },
   { immediate: true },
+)
+
+/*
+ * The selection lives in the URL (?keyframe=<id> or ?view=video), so a
+ * refresh or a shared link opens the same keyframe or the video.
+ */
+const urlSelection = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search)
+
+if (urlSelection && !props.choosing.active) {
+  const fromUrl = props.keyframes.findIndex((keyframe) => keyframe.id === urlSelection.get('keyframe'))
+
+  if (urlSelection.get('view') === 'video' && (props.video.url || props.video.pending)) {
+    showVideo.value = true
+  } else if (fromUrl >= 0) {
+    selectKeyframe(fromUrl)
+  }
+}
+
+watch(
+  () => [showVideo.value, selected.value?.id] as const,
+  ([video, id]) => {
+    if (typeof window === 'undefined') return
+
+    const url = new URL(window.location.href)
+    url.searchParams.delete('keyframe')
+    url.searchParams.delete('view')
+
+    if (video) {
+      url.searchParams.set('view', 'video')
+    } else if (id && !props.choosing.active) {
+      url.searchParams.set('keyframe', id)
+    }
+
+    const next = url.pathname + url.search
+
+    if (next !== window.location.pathname + window.location.search) {
+      router.replace({ url: next, preserveState: true, preserveScroll: true })
+    }
+  },
 )
 
 const isPortrait = computed(() => {

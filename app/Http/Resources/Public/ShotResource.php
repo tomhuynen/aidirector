@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Public;
 
+use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Http\Resources\Concerns\AuthorizesResource;
 use App\Jobs\GenerateKeyframes;
@@ -51,6 +52,8 @@ class ShotResource extends JsonResource
              */
             'preferredElements' => $this->preferredElementSqids(),
             'status' => $this->status,
+            /** A scene at one place, or a montage of separate stills; scene until planned. */
+            'kind' => $this->kind ?? ShotKind::SCENE,
             'statusLabel' => $this->status->description(),
             /** @var string|null */
             'purposeOverride' => $this->purpose_override,
@@ -142,6 +145,12 @@ class ShotResource extends JsonResource
             'videoUrl' => $this->mediaUrl($this->video()),
             /** @var string|null */
             'videoDownloadUrl' => $this->downloadUrl($this->video()),
+            /**
+             * The video of a presenter shot in each language, each with its own sound.
+             *
+             * @var array<int, array{locale: string, name: string, url: string|null, downloadUrl: string|null}>
+             */
+            'languageVideos' => $this->languageVideos(),
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,
             'links' => $this->when($this->resource->exists, fn() => [
@@ -160,8 +169,10 @@ class ShotResource extends JsonResource
                 'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
                 'plan' => route('public.shots.plan', [$this->project, $this->resource]),
+                'planKind' => route('public.shots.plan.kind', [$this->project, $this->resource]),
                 'plateChoose' => route('public.shots.plate.choose', [$this->project, $this->resource]),
                 'plateReset' => route('public.shots.plate.reset', [$this->project, $this->resource]),
+                'plateAdjust' => route('public.shots.plate.adjust', [$this->project, $this->resource]),
                 'planChanges' => route('public.shots.plan.changes', [$this->project, $this->resource]),
                 'planWrite' => route('public.shots.plan.write', [$this->project, $this->resource]),
                 'issuesFixAll' => route('public.shots.issues.fix-all', [$this->project, $this->resource]),
@@ -193,11 +204,32 @@ class ShotResource extends JsonResource
     }
 
     /**
+     * @return list<array{locale: string, name: string, url: string|null, downloadUrl: string|null}>
+     */
+    private function languageVideos(): array
+    {
+        if (! $this->resource->exists || ! $this->resource->isPresenter()) {
+            return [];
+        }
+
+        return $this->getMedia(Shot::PRESENTER_VIDEOS)
+            ->map(fn(Media $video) => [
+                'locale' => (string) $video->getCustomProperty('locale'),
+                'name' => Locale::getDisplayName((string) $video->getCustomProperty('locale'), 'en'),
+                'url' => $this->mediaUrl($video),
+                'downloadUrl' => $this->downloadUrl($video),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return list<array{locale: string, name: string, status: string, audioUrl: string|null, outdated: bool, error: string|null}>
      */
     private function voiceOverTracks(): array
     {
-        if (! $this->resource->exists) {
+        // A presenter's sound is in its video, one per language.
+        if (! $this->resource->exists || $this->resource->isPresenter()) {
             return [];
         }
 

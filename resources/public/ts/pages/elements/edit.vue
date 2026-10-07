@@ -117,6 +117,20 @@
             </p>
           </div>
 
+          <!-- The voice a person speaks with as a presenter; the same in every shot. -->
+          <div v-if="type.value === 'person'" class="space-y-1.5">
+            <Label for="element-voice">{{ $t('Voice') }}</Label>
+            <NativeSelect id="element-voice" v-model="form.voice" class="w-full" :disabled="generating">
+              <option value="">{{ $t('From the picture') }}</option>
+              <option value="male">{{ $t('Male') }}</option>
+              <option value="female">{{ $t('Female') }}</option>
+            </NativeSelect>
+            <InputError :message="form.errors.voice" />
+            <p class="text-sm text-muted-foreground">
+              {{ $t('How this person sounds as a presenter, in every shot and language.') }}
+            </p>
+          </div>
+
           <div v-if="element?.imageUrl" class="space-y-1.5">
             <Label for="element-change">{{ $t('What should change?') }}</Label>
             <Textarea
@@ -211,6 +225,7 @@ import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Input } from '@shared:ui/input'
 import { Label } from '@shared:ui/label'
+import { NativeSelect } from '@shared:ui/native-select'
 import { Textarea } from '@shared:ui/textarea'
 import { ArrowLeft, ImageUp, LoaderCircle, Trash2, Wand2, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
@@ -228,6 +243,7 @@ const form = useForm({
   type: props.type.value,
   name: props.element?.name ?? '',
   description: props.element?.description ?? '',
+  voice: props.element?.voice ?? '',
   change: '',
   photo: null as string | null,
   includes: [] as string[],

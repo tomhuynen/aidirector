@@ -15,6 +15,8 @@ class KeyframeRequest extends FormRequest
     {
         return [
             'description' => ['required', 'string', 'max:500'],
+            // Draw the keyframe again from its description instead of adjusting the current image to the change.
+            'redraw' => ['sometimes', 'boolean'],
         ];
     }
 }

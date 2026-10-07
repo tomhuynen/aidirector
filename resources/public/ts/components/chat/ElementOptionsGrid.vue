@@ -85,6 +85,16 @@
           selected.length === 0 ? $t('Tick the ones to keep') : $t('Keep :count', { count: String(selected.length) })
         }}
       </Button>
+      <Button
+        v-if="choosable.length > 1"
+        type="button"
+        size="sm"
+        variant="outline"
+        :disabled="disabled"
+        @click="toggleAll"
+      >
+        {{ allSelected ? $t('Deselect all') : $t('Select all') }}
+      </Button>
       <Button type="button" size="sm" variant="outline" :disabled="disabled" @click="emit('skip', message)">
         {{ $t('Skip :label', { label: message.label.toLowerCase() }) }}
       </Button>
@@ -127,6 +137,14 @@ const rendering = computed(() => props.message.options.filter((option) => option
 
 const selectable = (option: ElementOptionTile) =>
   !props.disabled && props.message.status === 'ready' && option.status === 'ready'
+
+const choosable = computed(() => props.message.options.filter(selectable).map((option) => option.id))
+
+const allSelected = computed(() => choosable.value.every((id) => selected.value.includes(id)))
+
+const toggleAll = () => {
+  selected.value = allSelected.value ? [] : [...choosable.value]
+}
 
 const keep = () => emit('pick', props.message, [...selected.value])
 </script>

@@ -39,12 +39,9 @@ class RecordCorrection
      */
     public static function keyframeContext(Keyframe $keyframe): string
     {
-        $plan = $keyframe->shot->storylineKeyframes()[$keyframe->position - 1] ?? [];
-
-        return implode(' ', array_filter([
+        return implode(' ', [
             "Takeaway of the shot: {$keyframe->shot->takeaway}.",
             "The keyframe should show: {$keyframe->description}",
-            filled($plan['must_show'] ?? null) ? "Must show: {$plan['must_show']}" : null,
-        ]));
+        ]);
     }
 }

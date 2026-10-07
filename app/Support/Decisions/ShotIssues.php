@@ -15,8 +15,8 @@ use Illuminate\Validation\ValidationException;
 /**
  * What the automatic checks found wrong with a shot before its video is
  * rendered, grouped by keyframe so the director can have each keyframe fixed
- * or its issues dismissed: the shot review's notes, the keyframe checks that
- * could not see what a keyframe must show, and a failed video. Issues that
+ * or its issues dismissed: the shot review's notes, what the keyframe checks
+ * found, and a failed video. Issues that
  * name no keyframe form a group for the whole shot.
  *
  * A review note can name several keyframes. Fixing or dismissing it for one
@@ -223,17 +223,6 @@ class ShotIssues
                     'keyframes' => [$keyframe->position],
                 ];
             }
-
-            $warning = $keyframe->render()?->getCustomProperty(Keyframe::CHECK_WARNING);
-
-            if (filled($warning)) {
-                $issues[] = [
-                    'id' => "check-{$keyframe->position}",
-                    'text' => __('The check could not see that :what', ['what' => lcfirst((string) $warning)]),
-                    'problem' => "It must clearly show this, and it does not yet: {$warning}",
-                    'keyframes' => [$keyframe->position],
-                ];
-            }
         }
 
         if (filled($shot->video_error)) {
@@ -261,8 +250,6 @@ class ShotIssues
 
             if ($issue['id'] === 'video') {
                 $shot->video_error = null;
-            } elseif (str_starts_with($issue['id'], 'check-')) {
-                $keyframes->firstWhere('position', $position)?->render()?->forgetCustomProperty(Keyframe::CHECK_WARNING)->save();
             } elseif (str_starts_with($issue['id'], 'found-')) {
                 $keyframes->firstWhere('position', $position)?->render()?->forgetCustomProperty(Keyframe::CHECK_ISSUES)->save();
             } elseif (str_starts_with($issue['id'], 'moved-')) {

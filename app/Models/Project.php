@@ -10,6 +10,7 @@ use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
 use App\Enums\ProjectRuleStatus;
 use App\Events\ProjectDeleting;
+use App\Support\Intake\DocumentText;
 use App\Support\Projects\ProjectSettings;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -19,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Models\Conversation;
+use Laravel\Ai\Models\ConversationMessage;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Image\Enums\Fit;
 use Spatie\MediaLibrary\HasMedia;
@@ -123,6 +125,27 @@ class Project extends Model implements HasMedia
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);
+    }
+
+    /**
+     * The documents the director shared in the intake conversation, such as
+     * the functional design, a brief or a script, as they were read into it.
+     * Documents shared before the project existed are included.
+     */
+    public function sharedDocuments(): string
+    {
+        if ($this->conversation_id === null) {
+            return '';
+        }
+
+        return ConversationMessage::query()
+            ->where('conversation_id', $this->conversation_id)
+            ->where('role', 'user')
+            ->where('content', 'like', '%' . DocumentText::SHARED . '%')
+            ->orderBy('created_at')
+            ->pluck('content')
+            ->map(fn(string $content) => trim(substr($content, (int) strpos($content, DocumentText::SHARED))))
+            ->join("\n\n");
     }
 
     /**

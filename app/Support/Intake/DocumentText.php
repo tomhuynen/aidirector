@@ -21,6 +21,9 @@ class DocumentText
     /** Enough for a long design document without flooding the conversation. */
     public const MAX_CHARACTERS = 60000;
 
+    /** How a shared document opens in the intake conversation, so it can be found there again. */
+    public const SHARED = 'The director shared the document';
+
     public function read(Upload $upload): string
     {
         $bytes = (string) Storage::disk($upload->disk->value)->get((string) $upload->path);

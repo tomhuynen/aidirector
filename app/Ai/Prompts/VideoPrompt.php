@@ -47,4 +47,18 @@ class VideoPrompt
             "Primary objective: faithfully animate the supplied storyboard rather than reinterpret it. Preserve what is shown in the keyframes; invent only the intermediate motion necessary to connect them naturally. Remember: the first frame is keyframe 1 exactly and the last frame is keyframe {$count} exactly.",
         ]);
     }
+
+    /**
+     * The prompt for the clip of one still of a montage: the still is the
+     * first frame, and only a small, calm movement brings it to life.
+     */
+    public static function still(string $description, int $duration): string
+    {
+        return implode("\n\n", [
+            "Bring the supplied image to life for {$duration} seconds. The first frame is the image exactly as it is.",
+            "What it shows: {$description}",
+            'Animate it with one small, calm movement that belongs to the moment, such as a hand that keeps drawing, sparks that fly, a crane hook that turns, water that ripples or a flag that moves in the wind, and gentle breathing and blinking of the people. The camera holds still or pushes in very slowly.',
+            'Keep everything exactly as in the image: the people, their look and pose, the objects, the place, the colours and the style. Nothing new appears and nothing disappears. No cuts, no scene changes, no morphing, no text, captions or logos. No sound.',
+        ]);
+    }
 }
