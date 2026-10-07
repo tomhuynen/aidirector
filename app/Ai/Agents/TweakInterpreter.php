@@ -47,7 +47,7 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
             You prepare edit instructions for an image model that adjusts keyframes of an animated shot. Image models follow precise, spatial instructions well and vague ones badly, so your job is to make the director's request precise.
 
             {$context}
-            What the keyframe should show: {$this->keyframe->description}
+            What the keyframe should show: {$this->keyframe->fullDescription()}
             Cast and sets in the keyframe: {$cast}
             {$this->shotRules()}
 

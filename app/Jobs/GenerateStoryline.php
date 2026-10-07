@@ -34,6 +34,8 @@ class GenerateStoryline implements ShouldQueue
         public readonly ?string $instruction = null,
         /** Off for shots created in bulk: they are planned, and drawn once the director asks for it. */
         public readonly bool $draw = true,
+        /** Keep the kind of shot on a fresh plan too, such as for the shots made by a split. */
+        public readonly bool $keepKind = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
@@ -43,7 +45,9 @@ class GenerateStoryline implements ShouldQueue
         $shot = $this->shot->load('project');
 
         // A fresh plan lets the planner choose the kind again; a revision keeps the current one.
-        if (blank($this->instruction) || $shot->storyline === null) {
+        $fresh = blank($this->instruction) || $shot->storyline === null;
+
+        if ($fresh && ! $this->keepKind) {
             $shot->kind = null;
         }
 
@@ -80,6 +84,8 @@ class GenerateStoryline implements ShouldQueue
             'kind' => $shot->kind ?? ShotKind::tryFrom((string) ($response['kind'] ?? '')) ?? ShotKind::SCENE,
             'storyline' => [
                 'mode' => 'auto',
+                // A fresh plan may propose a split into two shots; a revision keeps what was proposed or dismissed.
+                ...(($split = $fresh ? self::splitFrom($response['split'] ?? null) : ($shot->storyline['split'] ?? null)) !== null ? ['split' => $split] : []),
                 'framing' => $response['framing'],
                 'keyframes' => array_values($response['keyframes']),
             ],
@@ -93,6 +99,30 @@ class GenerateStoryline implements ShouldQueue
         }
 
         GenerateVoiceOver::dispatch($shot);
+    }
+
+    /**
+     * The two parts the planner proposes to split the shot into, when the
+     * takeaway holds two messages.
+     *
+     * @return array{parts: list<array{takeaway: string, kind: string}>}|null
+     */
+    public static function splitFrom(mixed $split): ?array
+    {
+        if (! is_array($split) || ! ($split['needed'] ?? false)) {
+            return null;
+        }
+
+        $parts = collect((array) ($split['parts'] ?? []))
+            ->filter(fn(mixed $part) => is_array($part) && trim((string) ($part['takeaway'] ?? '')) !== '')
+            ->map(fn(array $part) => [
+                'takeaway' => trim((string) $part['takeaway']),
+                'kind' => (ShotKind::tryFrom((string) ($part['kind'] ?? '')) ?? ShotKind::SCENE)->value,
+            ])
+            ->values()
+            ->all();
+
+        return count($parts) === 2 ? ['parts' => $parts] : null;
     }
 
     public function failed(?Throwable $exception): void

@@ -47,9 +47,12 @@ class PlanController
                 : $elements->filter(fn(Element $element) => Str::contains($keyframe['title'] . ' ' . $description, $element->name, ignoreCase: true))->pluck('name');
             $kept = ! array_key_exists('elements', $keyframe) && ($current[$index]['description'] ?? null) === $description ? (array) ($current[$index]['elements'] ?? []) : [];
 
+            $spatial = trim((string) ($keyframe['spatial'] ?? ''));
+
             return [
                 'title' => trim((string) $keyframe['title']),
                 'description' => $description,
+                ...($spatial !== '' ? ['spatial' => $spatial] : []),
                 'elements' => $named->merge($kept)->unique()->values()->all(),
             ];
         })->all();
@@ -64,11 +67,12 @@ class PlanController
             'chosen_storyline' => ['title' => (string) $shot->title, 'storyline' => $storyline],
             'storyline' => [
                 'mode' => $shot->storyline['mode'] ?? 'auto',
+                // A proposed or dismissed split stays with the plan.
+                ...(isset($shot->storyline['split']) ? ['split' => $shot->storyline['split']] : []),
+                // The spot and the length are the planner's; the director does not set them.
                 'framing' => [
-                    'size' => (string) $request->validated('framing.size'),
-                    'spot' => trim((string) $request->validated('framing.spot')),
-                    'light' => trim((string) $request->validated('framing.light')) ?: 'as the visual style',
-                    'seconds' => $request->validated('framing.seconds') !== null ? (int) $request->validated('framing.seconds') : null,
+                    'spot' => (string) ($shot->storyline['framing']['spot'] ?? ''),
+                    'seconds' => $shot->storyline['framing']['seconds'] ?? null,
                 ],
                 'keyframes' => $keyframes,
             ],

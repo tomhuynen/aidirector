@@ -32,8 +32,9 @@ class UpdateController
         $this->ensureKeyframeIdle($shot, $keyframe, 'description');
 
         $description = $request->validated('description');
-        $previous = $keyframe->description;
-        $changed = trim($previous) !== trim($description);
+        $spatial = trim((string) $request->validated('spatial'));
+        $previous = $keyframe->fullDescription();
+        $changed = trim($previous) !== Keyframe::joined($description, $spatial);
         $adjust = ! $request->boolean('redraw') && $keyframe->render() !== null;
 
         if ($adjust && ! $changed) {
@@ -42,20 +43,22 @@ class UpdateController
 
         $keyframe->forceFill([
             'description' => $description,
+            'spatial' => $spatial !== '' ? $spatial : null,
             'rendering' => true,
             'render_error' => null,
         ])->save();
 
         // Kept in step, so a full re-render keeps the director's wording. The old must show and the copy mark belong to the old wording.
-        $shot->updatePlannedKeyframe($keyframe->position, ['description' => $description], ['must_show', 'copied', 'prompt']);
+        $shot->updatePlannedKeyframe($keyframe->position, array_filter(['description' => $description, 'spatial' => $spatial]), $spatial === '' ? ['spatial', 'must_show', 'copied', 'prompt'] : ['must_show', 'copied', 'prompt']);
+        $current = $keyframe->fullDescription();
 
         $adjust
-            ? TweakKeyframeImage::dispatch($keyframe, "The description of this keyframe changed from \"{$previous}\" to \"{$description}\". Change the image so it shows what the new description says; keep everything the change does not touch.", rewrite: true, describedByDirector: true)
+            ? TweakKeyframeImage::dispatch($keyframe, "The description of this keyframe changed from \"{$previous}\" to \"{$current}\". Change the image so it shows what the new description says; keep everything the change does not touch.", rewrite: true, describedByDirector: true)
             : GenerateKeyframeImage::dispatch($keyframe);
 
         if ($changed) {
             $keyframe->setRelation('shot', $shot);
-            RecordCorrection::record($project, CorrectionSource::DESCRIPTION, "Changed the keyframe description from \"{$previous}\" to \"{$description}\".", $shot, $keyframe, "Takeaway of the shot: {$shot->takeaway}.");
+            RecordCorrection::record($project, CorrectionSource::DESCRIPTION, "Changed the keyframe description from \"{$previous}\" to \"{$current}\".", $shot, $keyframe, "Takeaway of the shot: {$shot->takeaway}.");
         }
 
         return redirect()->route('public.shots.view', [$project, $shot]);

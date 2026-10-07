@@ -28,6 +28,7 @@ class PlanChatRequest extends FormRequest
             'keyframes' => ['present', 'array', 'max:30'],
             'keyframes.*.title' => ['nullable', 'string', 'max:120'],
             'keyframes.*.description' => ['nullable', 'string', 'max:2000'],
+            'keyframes.*.spatial' => ['nullable', 'string', 'max:500'],
             /** The keyframes to write, by position in the new order, with what each should show. */
             'targets' => ['sometimes', 'array', 'max:30'],
             'targets.*.position' => ['required', 'integer', 'min:1'],
@@ -36,13 +37,14 @@ class PlanChatRequest extends FormRequest
     }
 
     /**
-     * @return list<array{title: string, description: string}>
+     * @return list<array{title: string, description: string, spatial: string}>
      */
     public function keyframes(): array
     {
         return array_values(array_map(fn(array $keyframe) => [
             'title' => (string) ($keyframe['title'] ?? ''),
             'description' => (string) ($keyframe['description'] ?? ''),
+            'spatial' => (string) ($keyframe['spatial'] ?? ''),
         ], (array) $this->validated('keyframes')));
     }
 }

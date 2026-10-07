@@ -83,6 +83,15 @@
           class="text-[15px] leading-relaxed"
         />
         <InputError :message="description.errors.description" />
+        <Label for="keyframe-spatial">{{ $t('Spatial fact') }}</Label>
+        <Input
+          id="keyframe-spatial"
+          v-model="description.spatial"
+          maxlength="500"
+          :disabled="!canEdit"
+          :placeholder="$t('The one thing a viewer must see at a glance')"
+        />
+        <InputError :message="description.errors.spatial" />
         <p
           v-if="keyframe.needsDescription"
           class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
@@ -246,6 +255,7 @@ import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
+import { Input } from '@shared:ui/input'
 import { Label } from '@shared:ui/label'
 import { Textarea } from '@shared:ui/textarea'
 import { Copy, LoaderCircle, Move, RefreshCw, Trash2, TriangleAlert, Wand2 } from 'lucide-vue-next'
@@ -309,23 +319,28 @@ const resolve = (url: string) => resolving.post(url, { preserveScroll: true })
 const copying = useForm({})
 const copy = () => props.keyframe.copyUrl && copying.post(props.keyframe.copyUrl, { preserveScroll: true })
 const pick = useForm({ render: 0 })
-const description = useForm({ description: props.keyframe.description })
+const description = useForm({ description: props.keyframe.description, spatial: props.keyframe.spatial ?? '' })
 
 /*
  * An adjustment can rewrite the description on the server. Follow it while the
  * director has not edited the text, so a stale description is never sent back.
  */
 watch(
-  () => props.keyframe.description,
-  (next, previous) => {
-    if (description.description.trim() !== previous.trim()) return
+  () => [props.keyframe.description, props.keyframe.spatial ?? ''] as const,
+  ([next, nextSpatial], [previous, previousSpatial]) => {
+    if (description.description.trim() !== previous.trim() || description.spatial.trim() !== previousSpatial.trim())
+      return
 
-    description.defaults({ description: next })
+    description.defaults({ description: next, spatial: nextSpatial })
     description.reset()
   },
 )
 
-const descriptionChanged = computed(() => description.description.trim() !== props.keyframe.description.trim())
+const descriptionChanged = computed(
+  () =>
+    description.description.trim() !== props.keyframe.description.trim() ||
+    description.spatial.trim() !== (props.keyframe.spatial ?? '').trim(),
+)
 
 const chooseRender = (id: number) => {
   if (!props.keyframe.chooseRenderUrl) return

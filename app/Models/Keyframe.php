@@ -128,6 +128,30 @@ class Keyframe extends Model implements HasMedia
     }
 
     /**
+     * What the keyframe shows as the models get it: the description with the
+     * spatial fact as its last sentence.
+     */
+    public function fullDescription(): string
+    {
+        return self::joined((string) $this->description, $this->spatial);
+    }
+
+    /**
+     * A description with its spatial fact added as the last sentence, for a keyframe or a planned one.
+     */
+    public static function joined(string $description, ?string $spatial): string
+    {
+        $description = trim($description);
+        $spatial = trim((string) $spatial);
+
+        if ($spatial === '') {
+            return $description;
+        }
+
+        return ($description === '' || preg_match('/[.!?]$/', $description) === 1 ? $description : $description . '.') . ' ' . $spatial;
+    }
+
+    /**
      * The chosen render of this keyframe: the one the director picked, or else the newest.
      */
     public function render(): ?Media

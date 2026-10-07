@@ -64,7 +64,7 @@ class UpdateController
             $shot->forgetKeyframes();
             $shot->status = ShotStatus::STORYLINE_READY;
             $shot->chosen_storyline = ['title' => $shot->title, 'storyline' => ''];
-            $shot->storyline = ['mode' => 'manual', 'framing' => ['size' => 'full', 'spot' => (string) $shot->notes, 'light' => 'as the visual style', 'seconds' => null], 'keyframes' => []];
+            $shot->storyline = ['mode' => 'manual', 'framing' => ['spot' => (string) $shot->notes, 'seconds' => null], 'keyframes' => []];
             $shot->save();
 
             return redirect()->route('public.shots.view', [$project, $shot]);

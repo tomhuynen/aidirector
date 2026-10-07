@@ -41,7 +41,7 @@ class RecordCorrection
     {
         return implode(' ', [
             "Takeaway of the shot: {$keyframe->shot->takeaway}.",
-            "The keyframe should show: {$keyframe->description}",
+            "The keyframe should show: {$keyframe->fullDescription()}",
         ]);
     }
 }

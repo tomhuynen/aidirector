@@ -73,7 +73,7 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
         $style = $shot->project->style;
 
         $frames = collect($keyframes)
-            ->map(fn(Keyframe $keyframe) => "{$keyframe->position}. {$keyframe->title}: {$keyframe->description}")
+            ->map(fn(Keyframe $keyframe) => "{$keyframe->position}. {$keyframe->title}: {$keyframe->fullDescription()}")
             ->join("\n");
 
         $storyline = $shot->chosenStoryline();

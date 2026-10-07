@@ -345,8 +345,8 @@ describe('generating shots', function () {
         ProjectIntake::fake([[
             'reply' => 'Creating your shots now.', 'ask' => null, 'done' => true, 'skip' => null, 'element_round' => null,
             'shots' => [
-                ['takeaway' => 'Never walk under a suspended load.', 'context' => 'On the quay a crane lifts a container.'],
-                ['takeaway' => 'Security keeps found items at reception.', 'context' => 'A visitor gets a lost phone back at the desk.'],
+                ['takeaway' => 'Never walk under a suspended load.', 'context' => 'On the quay a crane lifts a container.', 'kind' => 'scene'],
+                ['takeaway' => 'Security keeps found items at reception.', 'context' => 'A visitor gets a lost phone back at the desk.', 'kind' => 'close-up'],
                 ['takeaway' => '', 'context' => 'Empty ones are skipped.'],
             ],
         ]]);
@@ -362,9 +362,11 @@ describe('generating shots', function () {
             ->takeaway->toBe('Never walk under a suspended load.')
             ->notes->toBe('On the quay a crane lifts a container.')
             ->status->toBe(App\Enums\ShotStatus::STORYLINE_PENDING)
-            ->and($shots->pluck('position')->all())->toBe([1, 2]);
+            ->and($shots->pluck('position')->all())->toBe([1, 2])
+            ->and($shots->pluck('kind')->map->value->all())->toBe(['scene', 'close-up']);
 
-        Queue::assertPushed(GenerateStoryline::class, fn(GenerateStoryline $job) => $job->draw === false);
+        // Each is planned by the kind chosen for it.
+        Queue::assertPushed(GenerateStoryline::class, fn(GenerateStoryline $job) => $job->draw === false && $job->keepKind);
         Queue::assertPushed(GenerateStoryline::class, 2);
     });
 
@@ -388,7 +390,9 @@ describe('generating shots', function () {
         expect((string) (new ProjectIntake())->instructions())
             ->toContain('Last step, the shots.')
             ->toContain('Ask in one short question whether you should generate the shots for them')
-            ->toContain('as many as the material needs to cover every point once');
+            ->toContain('as many as the material needs to cover every point once')
+            ->toContain('One message per shot')
+            ->toContain('close-up: when the point is what hands do with one small object');
     });
 
     it('creates at most thirty shots in one go', function () {

@@ -53,7 +53,7 @@ class PlanFrameWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         return <<<INSTRUCTIONS
             {$rules}
 
-            Your task now is different: the plan exists, and you write only the keyframes you are given, following the director's instruction for each. Fit them into the plan: the same place, spot, camera, wording for recurring objects, and the state of things before and after them. A keyframe to rewrite keeps what it has now except what the instruction changes. For each keyframe give title, description and elements as the rules above describe.
+            Your task now is different: the plan exists, and you write only the keyframes you are given, following the director's instruction for each. Fit them into the plan: the same place, spot, camera, wording for recurring objects, and the state of things before and after them. A keyframe to rewrite keeps what it has now except what the instruction changes. For each keyframe give title, description, spatial fact and elements as the rules above describe.
             INSTRUCTIONS;
     }
 
@@ -67,13 +67,14 @@ class PlanFrameWriter implements Agent, HasReasoningEffort, HasStructuredOutput
                 'position' => $schema->integer()->required(),
                 'title' => $schema->string()->required(),
                 'description' => $schema->string()->required(),
+                'spatial' => $schema->string()->required(),
                 'elements' => $schema->array()->items($schema->string())->required(),
             ]))->required(),
         ];
     }
 
     /**
-     * @param  list<array{title: string, description: string}>  $keyframes  the plan in its new order; new frames to write are empty
+     * @param  list<array{title: string, description: string, spatial?: string}>  $keyframes  the plan in its new order; new frames to write are empty
      * @param  array<int, string>  $targets  per position to write, the director's instruction
      */
     public function promptFor(string $storyline, array $keyframes, array $targets): string
@@ -81,9 +82,9 @@ class PlanFrameWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         // A frame being rewritten keeps what it had, so only the asked change differs.
         $plan = collect($keyframes)
             ->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . match (true) {
-                ! isset($targets[$index + 1]) => "{$keyframe['title']}: {$keyframe['description']}",
+                ! isset($targets[$index + 1]) => "{$keyframe['title']}: {$keyframe['description']}" . (filled($keyframe['spatial'] ?? null) ? " Spatial fact: {$keyframe['spatial']}" : ''),
                 blank($keyframe['description']) => '(new, to write)',
-                default => "(to rewrite) now: {$keyframe['title']}: {$keyframe['description']}",
+                default => "(to rewrite) now: {$keyframe['title']}: {$keyframe['description']}" . (filled($keyframe['spatial'] ?? null) ? " Spatial fact: {$keyframe['spatial']}" : ''),
             })
             ->join("\n");
 

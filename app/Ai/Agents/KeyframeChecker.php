@@ -6,6 +6,7 @@ namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Contracts\HasReasoningEffort;
+use App\Enums\ShotKind;
 use App\Models\Keyframe;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Contracts\Agent;
@@ -65,7 +66,7 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
 
     public function promptFor(): string
     {
-        return "What the keyframe to check should show: {$this->keyframe->description}";
+        return "What the keyframe to check should show: {$this->keyframe->fullDescription()}";
     }
 
     /**
@@ -86,6 +87,7 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
         return match (true) {
             $this->keyframe->shot->isMontage() => 'This keyframe is one still of a montage: it has its own place and camera, so the place is never an issue; the people and objects must match their pictures and the image must show its description.',
             $this->keyframe->shot->isPresenter() => 'This keyframe is the still of a presenter who speaks to the camera: one person, from the chest up, facing the camera straight on with the face large and clear, in front of a softly blurred place. The place is never an issue; the person must match their picture, and a face that is small, turned away or covered is a high issue.',
+            $this->keyframe->shot->kindOrScene() === ShotKind::CLOSE_UP => 'This keyframe is a close-up: the hands and one object fill the frame and faces are out of it. People are known by their sleeves, gloves and cuffs. The camera stands still: the surface does not move between keyframes.',
             default => 'The camera stands still: the place does not move between keyframes.',
         };
     }

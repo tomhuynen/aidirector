@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Requests\Public;
 
 use App\Enums\ShotKind;
-use App\Enums\ShotSize;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Validation\Rule;
@@ -24,6 +23,8 @@ class ShotPlanRequest extends FormRequest
             'keyframes.*.title' => ['required', 'string', 'max:120'],
             /** Exactly what the keyframe shows; it goes to the image model as written. */
             'keyframes.*.description' => ['required', 'string', 'max:2000'],
+            /** The one fact a viewer must be able to check at a glance; it is sent as the last sentence of the description. */
+            'keyframes.*.spatial' => ['nullable', 'string', 'max:500'],
             /** The ids of the cast and sets in the keyframe; their pictures go to the image model. */
             'keyframes.*.elements' => ['sometimes', 'array'],
             'keyframes.*.elements.*' => ['string'],
@@ -32,12 +33,6 @@ class ShotPlanRequest extends FormRequest
             'rules.*' => ['nullable', 'string', 'max:300'],
             /** A scene at one place, or a montage of separate stills joined with crossfades. */
             'kind' => ['sometimes', Rule::enum(ShotKind::class)],
-            'framing' => ['required', 'array'],
-            'framing.size' => ['required', Rule::enum(ShotSize::class)],
-            /** Where in the place the shot plays, the same in every keyframe. */
-            'framing.spot' => ['nullable', 'string', 'max:500'],
-            'framing.light' => ['nullable', 'string', 'max:300'],
-            'framing.seconds' => ['nullable', 'integer', 'min:2', 'max:30'],
         ];
     }
 }

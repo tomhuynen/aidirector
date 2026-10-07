@@ -8,7 +8,6 @@ use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Briefs\PurposeBrief;
 use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ShotKind;
-use App\Enums\ShotSize;
 use App\Models\Shot;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Config;
@@ -58,6 +57,8 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             {$this->kindRules()}
 
+            One message per shot: when the takeaway holds two messages that each need their own act, such as "wear your badge visibly and report a damaged one straight away", still plan this shot for the whole takeaway, and propose a split: set split.needed, give each part as a short takeaway with one message, and the kind that fits each part. Otherwise leave split.needed false and the parts empty.
+
             The silent story, the most important rule: the shot plays without words, voice-over, sound or text, so the pictures alone must carry the takeaway.
             - Talking, explaining, welcoming, smiling, nodding, listening, agreeing, signalling or acknowledging never carry the takeaway; they may only go with the act.
             - Test every keyframe: someone who sees only this image, with the sound off, can say what happens in it. Test the row: someone who sees only the images in order can say the takeaway. When they cannot, change the act or add a keyframe for the missing step.
@@ -68,13 +69,11 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Produce between {$min} and {$max} keyframes, except for a presenter shot. Use as many as the silent story above needs and no more: every step a viewer must see to understand it without words gets its own keyframe.
             - Title: two to four words naming the moment.
             - Description: exactly what is visible in this keyframe, two to four sentences, 30 to 70 words, in present tense. It goes to the image model as written and the check judges the image by it. Call the cast and sets by their exact names and never describe their appearance, such as age, build, hair, clothing or colours; their pictures decide that. Describe the spot with the context objects on it and where they are, and any object that is not in the cast and sets (use the same wording for these in every keyframe), then each person's pose, gaze and expression, which hand holds what, and the state of the key objects. Say which way each person faces from the camera's point of view: face to the camera, back to the camera, or side-on facing left or right in the frame, and whether they move towards or away from the camera or to the left or right of the frame. Never write "forward", "looking forward", "ahead" or "angled into": the image model then draws them facing the viewer. Concrete nouns, no style words: the visual style is added separately.
+            - Spatial fact: for a scene, as its rule below says; leave it empty for a montage or a presenter shot.
             - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
             - Props: use as few hand-held objects as the story needs, ideally one per character. Leave out anything that does not change what the viewer learns, such as a lighter when the point is putting the cigarette away.
             - Readable props, because the video model can only animate what it can read and turns an unclear object into a copy of the main one: every object the story needs is large enough to recognise at a glance and has a colour that stands out from the clothing and the surface behind it. Hold it away from the body, clear of other objects. When a character holds two objects, keep the hands apart and make the objects clearly different in shape and colour. Say in the description which hand holds which object, and keep it in that hand in every keyframe unless the story moves it.
-            - Light: the time of day and light the storyline calls for, such as "dusk, low warm evening light, deep blue sky, the torch switched on". Use "as the visual style" when the storyline names no time of day or weather. The light is the same in every keyframe and overrides the lighting of the visual style.
-            - Framing: choose one shot size for the whole shot by what it has to communicate; every keyframe shares it.
-            {$this->shotSizes()}
-            {$this->sceneRules()}{$this->montageRules()}{$this->presenterRules()}
+            {$this->sceneRules()}{$this->closeUpRules()}{$this->montageRules()}{$this->presenterRules()}
             - No camera language, no text or captions in frame, no sound.
             - Write in English.
             INSTRUCTIONS;
@@ -88,17 +87,23 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         return [
             'title' => $schema->string()->required(),
             'kind' => $schema->string()->enum(array_column(ShotKind::cases(), 'value'))->required(),
+            'split' => $schema->object([
+                'needed' => $schema->boolean()->required(),
+                'parts' => $schema->array()->items($schema->object([
+                    'takeaway' => $schema->string()->required(),
+                    'kind' => $schema->string()->enum(array_column(ShotKind::cases(), 'value'))->required(),
+                ]))->max(2)->required(),
+            ])->required(),
             'storyline' => $schema->string()->required(),
             'framing' => $schema->object([
-                'size' => $schema->string()->enum(array_column(ShotSize::cases(), 'value'))->required(),
                 'spot' => $schema->string()->required(),
-                'light' => $schema->string()->required(),
                 'seconds' => $schema->integer()->required(),
             ])->required(),
             'keyframes' => $schema->array()
                 ->items($schema->object([
                     'title' => $schema->string()->required(),
                     'description' => $schema->string()->required(),
+                    'spatial' => $schema->string()->required(),
                     'elements' => $schema->array()->items($schema->string())->required(),
                 ]))
                 // A presenter shot has one keyframe; the rules set the count for the other kinds.
@@ -126,7 +131,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         }
 
         $current = collect($shot->storylineKeyframes())
-            ->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . $keyframe['title'] . ': ' . $keyframe['description'])
+            ->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . $keyframe['title'] . ': ' . $keyframe['description'] . (filled($keyframe['spatial'] ?? null) ? " Spatial fact: {$keyframe['spatial']}" : ''))
             ->join("\n");
 
         return <<<PROMPT
@@ -169,6 +174,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             ShotKind::SCENE => 'A scene plays at one place with a camera that does not move: every keyframe is drawn on the same empty place and the video moves through the keyframes.',
             ShotKind::MONTAGE => 'A montage is a row of separate stills, each its own place and moment: every still is drawn on its own, animated with a small movement and joined to the next with a crossfade.',
             ShotKind::PRESENTER => 'A presenter shot is one person from the cast who speaks the voice-over straight to the camera, lip-synced, from the chest up in front of a softly blurred place.',
+            ShotKind::CLOSE_UP => 'A close-up is one small hand action at one surface, with the camera close and still: the hands and one object fill the frame, every keyframe is drawn on the same empty surface and the video moves through the keyframes.',
         };
     }
 
@@ -186,7 +192,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         return $heading . <<<'RULES'
             - Before writing, turn the takeaway into one concrete act a viewer can see: a person does something to an object, a place or another person that changes its state, such as putting on a helmet, closing a gate, stopping behind a line or handing over safety glasses. An abstract takeaway still becomes such an act; "safety is our first priority" becomes, for example, the host checking the visitor's helmet strap and handing over safety glasses before the barrier opens.
             - The keyframes go from before, through the act, to after: the first shows the state before, the last shows the result, and the two differ at a glance, such as an object in other hands, a gate open, a person on the other side of a line. Two keyframes that differ only by a gesture or an expression tell nothing new.
-            - End every description with the one spatial fact the story depends on in this keyframe, in one concrete sentence a viewer could check at a glance: where the person is relative to the hazard, the line, the door or the object, with a sense of distance, such as "Both feet are clearly behind the yellow line, the container hanging just beyond it, about an arm's length from her."
+            - Spatial fact: the one spatial fact the story depends on in this keyframe, in one concrete sentence a viewer could check at a glance, kept apart from the description and never repeated in it: where the person is relative to the hazard, the line, the door or the object, with a sense of distance, such as "Both feet are clearly behind the yellow line, the container hanging just beyond it, about an arm's length from her."
             - When the story is about a danger, stage the person and the danger close together in the same frame, seen from the side, with the line, gap or route between them clearly visible, so the distance can be read. Never leave the danger small and far behind the person.
             - Keep the same subject, environment and objects across all keyframes. Do not introduce new characters or props that the storyline does not imply.
             - Framing in a scene: the camera does not move. Frame the action: the people and the object they act on, such as a door, a bin or a sign, sit together in the centre of the frame and take most of it. Choose the spot so that object is right beside the person, and keep the rest of the place a simple, subdued background.
@@ -220,6 +226,28 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     }
 
     /**
+     * The rules for a close-up, when the shot is one or the planner chooses.
+     */
+    private function closeUpRules(): string
+    {
+        if ($this->shot->kind !== null && $this->shot->kind !== ShotKind::CLOSE_UP) {
+            return '';
+        }
+
+        $heading = $this->shot->kind === null ? "\nFor a close-up:\n" : "\n";
+
+        return $heading . <<<'RULES'
+            - Two or three keyframes of one hand action with one small object, before and after: a badge not yet clipped and then clipped high on the chest, an open padlock and then closed, a cracked badge laid on the counter and then a new one handed over.
+            - The object is large, clear and in a colour that stands out; when it is damaged, show it unmistakably, such as snapped in two, never a hairline crack.
+            - Description: start with the surface, such as the top of the reception counter or the chest of a hi-vis vest, then the object and its state, then whose hands do what and which hand holds what. Name the person whose hands they are; only the hands, forearms and sleeves are in the frame, never a face.
+            - Spatial fact: where the object is relative to the hand, the surface or the body, such as "The badge clip is fastened on the vest pocket, high and centred on the chest."
+            - Spot: the surface in the place where the hands act, such as "the top of the reception counter, beside the badge tray"; the same in every keyframe.
+            - Elements: the object, the person or people whose hands show, and the place the surface belongs to.
+            - Seconds: about 2 seconds per step, between the shortest and the longest length allowed.
+            RULES;
+    }
+
+    /**
      * The rules for a presenter shot, when the shot is one or the planner chooses.
      */
     private function presenterRules(): string
@@ -237,16 +265,6 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Storyline: one sentence saying who tells the viewer what, and where.
             - Seconds: the time the voice-over takes to say, between the shortest and the longest length allowed.
             RULES;
-    }
-
-    /**
-     * The shot sizes the planner chooses from, each with when it fits.
-     */
-    private function shotSizes(): string
-    {
-        return collect(ShotSize::cases())
-            ->map(fn(ShotSize $size) => "  - {$size->value}: when {$size->useWhen()}.")
-            ->join("\n");
     }
 
     /**

@@ -9,6 +9,7 @@ use App\Enums\AspectRatio;
 use App\Enums\CoverStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
+use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\ProjectChatRequest;
 use App\Jobs\AnalyzePhoto;
@@ -165,12 +166,13 @@ class ChatController
                 'position' => ++$position,
                 'title' => Str::limit($takeaway, 80),
                 'takeaway' => $takeaway,
+                'kind' => ShotKind::tryFrom((string) ($brief['kind'] ?? '')) ?? ShotKind::SCENE,
                 'notes' => trim((string) ($brief['context'] ?? '')) ?: null,
                 'status' => ShotStatus::STORYLINE_PENDING,
             ]);
 
-            // Planned straight away, drawn once the director starts it from the decisions.
-            GenerateStoryline::dispatch($shot, draw: false);
+            // Planned straight away by the kind chosen for it, drawn once the director starts it from the decisions.
+            GenerateStoryline::dispatch($shot, draw: false, keepKind: true);
         }
     }
 

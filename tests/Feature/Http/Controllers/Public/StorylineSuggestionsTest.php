@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Ai\Agents\StorylineOptionsWriter;
 use App\Ai\Agents\StorylineWriter;
 use App\Enums\ProjectPurpose;
-use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateStoryline;
@@ -261,7 +260,7 @@ describe('jobs', function () {
 
         expect($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($shot->storylineKeyframes()[0]['prompt'])->toBe('A man in a navy suit stands at a red mailbox.')
-            ->and($shot->storylineFraming())->toBe(['size' => ShotSize::MEDIUM, 'spot' => 'Against the red mailbox on the pavement, a shop window behind it.', 'light' => 'dusk, low warm evening light', 'seconds' => 7])
+            ->and($shot->storylineFraming())->toBe(['spot' => 'Against the red mailbox on the pavement, a shop window behind it.', 'seconds' => 7])
             ->and($shot->durationInSeconds())->toBe(7)
             ->and(Keyframe::query()->whereKey($stale->id)->exists())->toBeFalse();
 
@@ -348,20 +347,18 @@ describe('jobs', function () {
             ->and(Shot::factory()->for($this->project)->create()->durationInSeconds())->toBe($this->project->default_duration);
     });
 
-    it('lets the keyframe writer choose the framing by what the shot has to communicate', function () {
+    it('lets the keyframe writer place the shot without choosing a shot size or light', function () {
         $shot = Shot::factory()->for($this->project)->create();
 
         expect((string) (new StorylineWriter($shot->load('project')))->instructions())
-            ->toContain('choose one shot size for the whole shot by what it has to communicate')
-            ->toContain('- close-up: when the point is what the hands do with an object')
-            ->toContain('- wide: when the surroundings are the point')
             ->toContain('the shot plays at one spot inside the place')
+            ->not->toContain('shot size')
+            ->not->toContain('Light: the time of day')
             ->toContain('Frame the action: the people and the object they act on')
             ->toContain('never describe their appearance, such as age, build, hair, clothing or colours')
             ->toContain('never introduce a new person')
-            ->toContain('Light: the time of day and light the storyline calls for')
             ->toContain('Do not list background extras such as vehicles, containers, cranes or people')
-            ->toContain('End every description with the one spatial fact the story depends on in this keyframe')
+            ->toContain('Spatial fact: the one spatial fact the story depends on in this keyframe')
             ->toContain('The kind of shot, choose one by the takeaway and give it as the kind:')
             ->toContain('For a montage:')
             ->toContain('the shot plays without words, voice-over, sound or text, so the pictures alone must carry the takeaway')

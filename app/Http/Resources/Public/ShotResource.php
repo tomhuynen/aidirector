@@ -151,6 +151,12 @@ class ShotResource extends JsonResource
              * @var array<int, array{locale: string, name: string, url: string|null, downloadUrl: string|null}>
              */
             'languageVideos' => $this->languageVideos(),
+            /**
+             * The planner's proposal to split this shot into two, each with one message; null when there is none or it was dismissed.
+             *
+             * @var array{parts: array<int, array{takeaway: string, kind: string}>}|null
+             */
+            'split' => isset($this->storyline['split']['parts']) && $this->status === ShotStatus::STORYLINE_READY ? ['parts' => $this->storyline['split']['parts']] : null,
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,
             'links' => $this->when($this->resource->exists, fn() => [
@@ -170,6 +176,7 @@ class ShotResource extends JsonResource
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
                 'plan' => route('public.shots.plan', [$this->project, $this->resource]),
                 'planKind' => route('public.shots.plan.kind', [$this->project, $this->resource]),
+                'planSplit' => route('public.shots.plan.split', [$this->project, $this->resource]),
                 'plateChoose' => route('public.shots.plate.choose', [$this->project, $this->resource]),
                 'plateReset' => route('public.shots.plate.reset', [$this->project, $this->resource]),
                 'plateAdjust' => route('public.shots.plate.adjust', [$this->project, $this->resource]),

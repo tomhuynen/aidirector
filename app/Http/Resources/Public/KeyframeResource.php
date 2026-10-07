@@ -26,6 +26,8 @@ class KeyframeResource extends JsonResource
             'position' => $this->position,
             'title' => $this->title,
             'description' => $this->description,
+            /** The one fact a viewer must be able to check at a glance; sent as the last sentence of the description. */
+            'spatial' => $this->spatial,
             /**
              * A copy the director has not described yet: it repeats another keyframe's text, so the check and review skip it.
              *

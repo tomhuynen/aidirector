@@ -154,6 +154,7 @@
         :steps="keyframes.map((keyframe) => keyframe.title)"
         :selected="selectedOption"
         :busy="choosing.pending || Boolean(choosing.adjusting)"
+        :surface="closeUp"
       />
       <NewKeyframeInspector
         v-else-if="adding"
@@ -188,7 +189,9 @@
                 $t('The images are being generated. This takes a minute or two.')
               }}</template>
               <template v-else-if="choosing.active && choosing.plates">{{
-                $t('Choose the place. Every keyframe is drawn on it.')
+                closeUp
+                  ? $t('Choose the surface. Every keyframe is drawn on it.')
+                  : $t('Choose the place. Every keyframe is drawn on it.')
               }}</template>
               <template v-else-if="choosing.active && choosing.resetUrl">{{
                 $t('Keyframe 1 on the chosen place. The others are drawn once you use it.')
@@ -508,6 +511,8 @@ export type PanelKeyframe = {
   id: string
   title: string
   description: string
+  /** The one fact a viewer must see at a glance; sent as the last sentence of the description. */
+  spatial?: string
   /** A copy that still repeats another keyframe's description. */
   needsDescription?: boolean
   /** Moving a person by hand: picking them, and putting them down. Only on a keyframe drawn on a place. */
@@ -596,6 +601,8 @@ const props = defineProps<{
   montage?: boolean
   /** One person speaks the voice-over to the camera, with a video per language. */
   presenter?: boolean
+  /** Hands and one object at one surface, drawn on a chosen empty surface. */
+  closeUp?: boolean
   newKeyframe: PanelNewKeyframe
   reorderUrl: string
   /** The keyframes are still being planned: the panel shows the drawing state with nothing in it yet. */

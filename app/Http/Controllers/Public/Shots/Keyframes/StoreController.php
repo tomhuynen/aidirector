@@ -33,10 +33,11 @@ class StoreController
             ]);
         }
 
-        $plan = [
+        $plan = array_filter([
             'title' => $request->validated('title'),
             'description' => $request->validated('description'),
-        ];
+            'spatial' => trim((string) $request->validated('spatial')),
+        ]);
 
         $position = (int) $keyframes->max('position') + 1;
 
@@ -44,6 +45,7 @@ class StoreController
             'position' => $position,
             'title' => $plan['title'],
             'description' => $plan['description'],
+            'spatial' => $plan['spatial'] ?? null,
             'rendering' => true,
         ]);
 

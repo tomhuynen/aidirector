@@ -89,6 +89,7 @@ class ChatController
                 'position' => (int) $keyframe['position'],
                 'title' => trim((string) ($keyframe['title'] ?? '')),
                 'description' => trim((string) ($keyframe['description'] ?? '')),
+                'spatial' => trim((string) ($keyframe['spatial'] ?? '')),
                 'elements' => $elements
                     ->filter(fn(Element $element) => in_array($element->name, (array) ($keyframe['elements'] ?? []), true))
                     ->pluck('sqid')

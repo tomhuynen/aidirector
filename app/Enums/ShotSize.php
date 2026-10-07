@@ -7,8 +7,8 @@ namespace App\Enums;
 use App\Enums\Traits\EnumHelpers;
 
 /**
- * How close the camera is, chosen per shot by what it has to communicate.
- * The camera does not move, so every keyframe of a shot shares it.
+ * How close the camera is. Scenes and montage stills are framed as a full
+ * shot; a presenter has its own framing.
  */
 enum ShotSize: string
 {
@@ -21,34 +21,6 @@ enum ShotSize: string
     case FULL = 'full';
 
     case WIDE = 'wide';
-
-    /**
-     * When the planner picks this size.
-     */
-    /**
-     * The shot sizes for a picker, with a short name.
-     *
-     * @return list<array{value: string, label: string}>
-     */
-    public static function catalogue(): array
-    {
-        return [
-            ['value' => self::CLOSE_UP->value, 'label' => __('Close-up')],
-            ['value' => self::MEDIUM->value, 'label' => __('Medium shot')],
-            ['value' => self::FULL->value, 'label' => __('Full shot, head to feet')],
-            ['value' => self::WIDE->value, 'label' => __('Wide shot')],
-        ];
-    }
-
-    public function useWhen(): string
-    {
-        return match ($this) {
-            self::CLOSE_UP => 'the point is what the hands do with an object, such as a cigarette going into a bin or a key being handed over',
-            self::MEDIUM => 'the point is a gesture, an expression or two people dealing with each other',
-            self::FULL => 'the whole body matters, or where in the place the person stands',
-            self::WIDE => 'the surroundings are the point, such as a route, a distance or where something is on the site',
-        };
-    }
 
     /**
      * How the image model frames the keyframe.

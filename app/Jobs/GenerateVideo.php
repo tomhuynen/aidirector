@@ -137,7 +137,7 @@ class GenerateVideo implements ShouldQueue
 
             return [
                 'position' => $keyframe->position,
-                'job_id' => $videos->submit($model, VideoPrompt::still($keyframe->description, $duration), [], $duration, $shot->aspectRatio()->value, $shot->videoResolution(), ['first_frame' => $still]),
+                'job_id' => $videos->submit($model, VideoPrompt::still($keyframe->fullDescription(), $duration), [], $duration, $shot->aspectRatio()->value, $shot->videoResolution(), ['first_frame' => $still]),
                 'status' => 'pending',
             ];
         })->all();

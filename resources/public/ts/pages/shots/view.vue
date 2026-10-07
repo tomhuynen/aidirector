@@ -63,10 +63,10 @@
             :key="`plan-${shot.id}`"
             :storyline="shot.chosenStoryline?.storyline ?? ''"
             :keyframes="shot.storyline?.keyframes ?? []"
-            :framing="planFraming"
-            :sizes="shotSizes"
             :kind="shot.kind"
             :kind-url="shot.links?.planKind ?? '#'"
+            :split="shot.split"
+            :split-url="shot.links?.planSplit"
             :kinds="shotKinds"
             :elements="elements"
             :types="elementTypes"
@@ -97,7 +97,7 @@
             :choosing="{
               // A montage draws every still straight away: no place or keyframe 1 to choose first.
               active:
-                shot.kind === 'scene' &&
+                (shot.kind === 'scene' || shot.kind === 'close-up') &&
                 (shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready'),
               pending: shot.status === 'first-keyframe-pending',
               optionCount: usesPlates ? shot.plateOptionCount : shot.firstKeyframeOptions,
@@ -110,6 +110,7 @@
             }"
             :montage="shot.kind === 'montage'"
             :presenter="shot.kind === 'presenter'"
+            :close-up="shot.kind === 'close-up'"
             :reorder-url="shot.links?.keyframesReorder ?? '#'"
             :new-keyframe="{
               storeUrl: shot.links?.keyframesStore ?? '#',
@@ -189,15 +190,6 @@ const state = computed<State>(() => {
  * While images are being generated the rendered keyframes are shown as they
  * arrive; before that the panel shows the plan with empty frames.
  */
-/** The framing of the plan; older plans have none. */
-const planFraming = computed(
-  () =>
-    (
-      props.shot.storyline as {
-        framing?: { size?: string; spot?: string; light?: string; seconds?: number | null }
-      } | null
-    )?.framing ?? null,
-)
 
 /** Whether the plan was drafted by the planner or is written by the director. */
 const planMode = computed(() =>
@@ -207,7 +199,7 @@ const planMode = computed(() =>
 /** The shot starts from empty places to choose from, instead of options for keyframe 1. */
 const usesPlates = computed(
   () =>
-    props.shot.kind === 'scene' &&
+    (props.shot.kind === 'scene' || props.shot.kind === 'close-up') &&
     !props.shot.plateChosen &&
     (props.shot.plateOptions.length > 0 || (props.shot.startsWithPlate && !(props.keyframes[0]?.renders.length ?? 0))),
 )
@@ -221,6 +213,7 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         id: keyframe.id,
         title: keyframe.title,
         description: keyframe.description,
+        spatial: keyframe.spatial ?? '',
         needsDescription: keyframe.needsDescription,
         imageUrl: keyframe.imageUrl,
         thumbnailUrl: keyframe.thumbnailUrl,

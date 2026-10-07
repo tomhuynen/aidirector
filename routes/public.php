@@ -46,6 +46,7 @@ use App\Http\Controllers\Public\Shots\MergeController as ShotMergeController;
 use App\Http\Controllers\Public\Shots\Plan\ChatController as ShotPlanChatController;
 use App\Http\Controllers\Public\Shots\Plan\PlanController as ShotPlanController;
 use App\Http\Controllers\Public\Shots\Plan\PlateController as ShotPlateController;
+use App\Http\Controllers\Public\Shots\Plan\SplitController as ShotPlanSplitController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
 use App\Http\Controllers\Public\Shots\RetryController as ShotRetryController;
 use App\Http\Controllers\Public\Shots\Storyline\ChooseController as StorylineChooseController;
@@ -142,6 +143,8 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
             Route::post('{shot}/plan', [ShotPlanController::class, 'store'])->name('plan');
             Route::post('{shot}/plan/kind', [ShotPlanController::class, 'kind'])->name('plan.kind');
+            Route::post('{shot}/plan/split', [ShotPlanSplitController::class, 'store'])->name('plan.split');
+            Route::delete('{shot}/plan/split', [ShotPlanSplitController::class, 'destroy'])->name('plan.split.dismiss');
             Route::post('{shot}/plate/choose', [ShotPlateController::class, 'choose'])->name('plate.choose');
             Route::post('{shot}/plate/reset', [ShotPlateController::class, 'reset'])->name('plate.reset');
             Route::post('{shot}/plate/adjust', [ShotPlateController::class, 'adjust'])->name('plate.adjust');

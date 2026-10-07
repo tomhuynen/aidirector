@@ -2,23 +2,37 @@
   <aside class="flex w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto border-l border-border p-6">
     <div class="space-y-1">
       <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {{ plates ? $t('The place') : $t('Keyframe 1') }}
+        {{ plates ? (surface ? $t('The surface') : $t('The place')) : $t('Keyframe 1') }}
       </p>
-      <h2 v-if="plates" class="text-xl font-semibold">{{ $t('Where the shot plays') }}</h2>
+      <h2 v-if="plates" class="text-xl font-semibold">
+        {{ surface ? $t('Where the hands act') : $t('Where the shot plays') }}
+      </h2>
       <h2 v-else-if="keyframe" class="text-xl font-semibold">{{ keyframe.title }}</h2>
       <div v-else class="h-7 w-40 animate-pulse rounded bg-secondary" />
     </div>
 
     <div class="space-y-3 rounded-xl border border-signal/40 bg-signal-soft/30 px-4 py-4 text-sm leading-relaxed">
       <p class="font-semibold">
-        {{ plates ? $t('Choose the place') : onPlate ? $t('Check keyframe 1') : $t('Choose the first keyframe') }}
+        {{
+          plates
+            ? surface
+              ? $t('Choose the surface')
+              : $t('Choose the place')
+            : onPlate
+              ? $t('Check keyframe 1')
+              : $t('Choose the first keyframe')
+        }}
       </p>
       <p class="text-muted-foreground">
         {{
           plates
-            ? $t(
-                'These are empty places drawn from the whole plan. Every keyframe is drawn on the one you choose, so the place and the camera stay exactly the same.',
-              )
+            ? surface
+              ? $t(
+                  'These are close views of the empty surface, drawn from the whole plan. Every keyframe is drawn on the one you choose, with the hands and the object added.',
+                )
+              : $t(
+                  'These are empty places drawn from the whole plan. Every keyframe is drawn on the one you choose, so the place and the camera stay exactly the same.',
+                )
             : onPlate
               ? $t(
                   'Keyframe 1 is drawn on the place you chose. Adjust it until it is right; the other keyframes are only drawn once you use it.',
@@ -114,6 +128,8 @@ import { LoaderCircle, Wand2 } from 'lucide-vue-next'
  * with placeholders, so the layout does not jump when the plan arrives.
  */
 const props = defineProps<{
+  /** A close-up: the place to choose is the surface the hands act on. */
+  surface?: boolean
   /** The options are empty places, not versions of keyframe 1. */
   plates?: boolean
   /** Keyframe 1 is drawn on a chosen place and waits for confirmation. */

@@ -178,10 +178,11 @@ class PoseMovedPerson implements ShouldQueue
         $warning = trim((string) ($response['warning'] ?? ''));
         $title = trim((string) ($response['title'] ?? ''));
         $storyline = trim((string) ($response['storyline'] ?? ''));
+        $spatial = trim((string) ($response['spatial'] ?? ''));
 
         if ($description !== '') {
-            $keyframe->forceFill(array_filter(['description' => $description, 'title' => $title]))->save();
-            $shot->updatePlannedKeyframe($keyframe->position, array_filter(['title' => $title, 'description' => $description]), ['must_show', 'prompt']);
+            $keyframe->forceFill([...array_filter(['description' => $description, 'title' => $title]), 'spatial' => $spatial !== '' ? $spatial : null])->save();
+            $shot->updatePlannedKeyframe($keyframe->position, array_filter(['title' => $title, 'description' => $description, 'spatial' => $spatial]), $spatial === '' ? ['spatial', 'must_show', 'prompt'] : ['must_show', 'prompt']);
         }
 
         // The storyline follows small moves too, so the review and the video prompt see one story.

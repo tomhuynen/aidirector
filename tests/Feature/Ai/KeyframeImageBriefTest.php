@@ -24,14 +24,14 @@ function framedShot(?array $framing): Shot
     ])->load('project');
 }
 
-it('frames the keyframe as the planner chose and places it at the spot', function () {
+it('frames a full shot, whatever an older plan chose, and places it at the spot', function () {
     $shot = framedShot(['size' => 'close-up', 'spot' => 'The reception counter, the key cabinet softly behind.']);
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences()))
-        ->toContain('Framing: Close-up at eye level')
+        ->toContain('Framing: Full shot at eye level')
         ->toContain('Spot: The reception counter, the key cabinet softly behind.')
         ->toContain('never put a separate wall, panel or backdrop in front of the place')
-        ->not->toContain('from head to feet');
+        ->not->toContain('Close-up');
 });
 
 it('uses a full shot without a spot for plans made before framing existed', function () {
@@ -42,8 +42,8 @@ it('uses a full shot without a spot for plans made before framing existed', func
         ->not->toContain('Spot:');
 });
 
-it('uses the place reference for its look and not its viewpoint, unless the shot is wide', function (string $size, string $expected) {
-    $shot = framedShot(['size' => $size, 'spot' => 'Against a hall facade.']);
+it('uses the place reference for its look and not its viewpoint', function () {
+    $shot = framedShot(['spot' => 'Against a hall facade.']);
     $halls = Element::factory()->for($shot->project)->place()->create(['name' => 'Blue Damen Halls']);
 
     $brief = KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(
@@ -54,11 +54,8 @@ it('uses the place reference for its look and not its viewpoint, unless the shot
     expect($brief)
         ->toContain('The first attached image shows what Blue Damen Halls looks like')
         ->toContain('Use it for the look of the place, not for the viewpoint')
-        ->toContain($expected);
-})->with([
-    'medium' => ['medium', 'the camera stands inside the place at the spot described, at eye level'],
-    'wide' => ['wide', 'a similar overview fits this wide shot'],
-]);
+        ->toContain('the camera stands inside the place at the spot described, at eye level');
+});
 
 it('keeps the framing when the planned keyframes change', function () {
     $shot = framedShot(['size' => 'medium', 'spot' => 'Against a hall facade.']);
@@ -100,20 +97,14 @@ it('describes elements without a picture in words', function () {
         ->toContain('- Spare parts crate (object): A blue wooden crate.');
 });
 
-it('lets the light of the story override the style', function () {
-    $shot = framedShot(['size' => 'full', 'spot' => 'At the side door.', 'light' => 'dusk, low warm evening light, torch on']);
-
-    expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences()))
-        ->toContain('Light: dusk, low warm evening light, torch on. This overrides the lighting in the visual style.');
-});
-
-it('keeps the style\'s light when the story names none', function (?string $light) {
+it('always keeps the style\'s light, also when an older plan named one', function (?string $light) {
     $shot = framedShot(array_filter(['size' => 'full', 'spot' => 'At the side door.', 'light' => $light]));
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences()))
         ->not->toContain('Light:');
 })->with([
     'as the style' => ['as the visual style'],
+    'named by an older plan' => ['dusk, low warm evening light, torch on'],
     'missing' => [null],
 ]);
 

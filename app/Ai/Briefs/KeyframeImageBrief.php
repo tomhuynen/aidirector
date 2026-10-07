@@ -6,7 +6,9 @@ namespace App\Ai\Briefs;
 
 use App\Ai\KeyframeReferences;
 use App\Enums\ElementType;
+use App\Enums\ShotKind;
 use App\Enums\ShotSize;
+use App\Models\Keyframe;
 use App\Models\Shot;
 
 /**
@@ -19,7 +21,7 @@ use App\Models\Shot;
 class KeyframeImageBrief
 {
     /**
-     * @param  array{title: string, description: string}  $keyframe
+     * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
      */
     public static function for(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
@@ -38,7 +40,7 @@ class KeyframeImageBrief
             '',
         ];
 
-        array_push($lines, $keyframe['description'], '');
+        array_push($lines, Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null), '');
 
         if ($references->elements !== []) {
             $pictured = collect($references->elementImages)->map(fn(array $entry) => $entry['element']->getKey())->all();
@@ -55,16 +57,10 @@ class KeyframeImageBrief
         }
 
         $framing = $shot->storylineFraming();
-        $size = $framing['size'] ?? ShotSize::FULL;
-
-        $lines[] = 'Framing: ' . $size->framing();
+        $lines[] = 'Framing: ' . $shot->kindOrScene()->size()->framing();
 
         if (filled($framing['spot'] ?? null)) {
             $lines[] = "Spot: {$framing['spot']}";
-        }
-
-        if (filled($framing['light'] ?? null)) {
-            $lines[] = "Light: {$framing['light']}. This overrides the lighting in the visual style.";
         }
 
         if (($rules = $shot->project->rulesBrief()) !== '') {
@@ -89,7 +85,7 @@ class KeyframeImageBrief
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
             if ($element->type === ElementType::PLACE) {
-                $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows what {$element->name} looks like: its buildings, shapes, colours and materials. Use it for the look of the place, not for the viewpoint" . ($size === ShotSize::WIDE ? '; a similar overview fits this wide shot.' : ': the camera stands inside the place at the spot described, at eye level, so only part of it shows.');
+                $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows what {$element->name} looks like: its buildings, shapes, colours and materials. Use it for the look of the place, not for the viewpoint: the camera stands inside the place at the spot described, at eye level, so only part of it shows.";
 
                 continue;
             }
@@ -105,14 +101,14 @@ class KeyframeImageBrief
      * like their picture, frontal from the chest up with a large face, in
      * front of the place softly out of focus, so lip sync can read the face.
      *
-     * @param  array{title: string, description: string}  $keyframe
+     * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
      */
     private static function presenter(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
         $style = $shot->project->style;
         $lines = [
             "A presenter shot for an e-learning film. Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
-            $keyframe['description'],
+            Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null),
             'Framing: a medium close-up from the chest up. The person is centred, faces the camera straight on and looks into the lens, shoulders square, with a friendly, calm expression and the mouth closed. The head and face fill about a third of the frame height, the eyes in the upper third.',
             'Background: the place, softly out of focus, calm and muted, with no readable details and nothing behind the head that draws attention.',
             'Soft, even light on the face. Only this one person. Do not add text, captions or watermarks; logos on clothing and helmets stay as in the picture.',
@@ -140,7 +136,7 @@ class KeyframeImageBrief
      * is attached first, so the place, the camera and the style cannot shift.
      * Only the people, their poses and the objects they handle change.
      *
-     * @param  array{title: string, description: string}  $keyframe
+     * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
      */
     private static function onFirstKeyframe(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
@@ -151,14 +147,17 @@ class KeyframeImageBrief
                 ? 'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move.'
                 : 'Edit the first attached image. It is keyframe 1 of this shot: the place, seen from a camera that does not move.',
             'Change only what this keyframe needs: the people, their poses and positions, and the objects they handle. Everything else stays exactly as it is in the first image: the walls, doors and door frames, signs, bins, windows, machines, vehicles, the floor and every marking or painted line on it, and the background, all at exactly the same place, size and angle. The framing, the camera, the light and the style stay the same.',
-            $references->firstShowsCast
-                ? 'The people already in the first image move and change pose as described; never add a second copy of anyone.'
-                : "{$castNames} " . (count($references->castNames) > 1 ? 'are' : 'is') . ' not in the first image yet: add them into it, standing on the floor of the place at a natural size for where they stand.'
+            match (true) {
+                $references->firstShowsCast => 'The people already in the first image move and change pose as described; never add a second copy of anyone.',
+                // A close-up shows the hands at work on the surface; the people's sleeves and gloves show who they are.
+                $shot->kindOrScene() === ShotKind::CLOSE_UP => "Add the hands and forearms of {$castNames} into it, reaching in from the edge of the frame at the size this close framing gives, with their sleeves, gloves and cuffs exactly as in their pictures; their faces stay out of the frame.",
+                default => "{$castNames} " . (count($references->castNames) > 1 ? 'are' : 'is') . ' not in the first image yet: add them into it, standing on the floor of the place at a natural size for where they stand.',
+            }
                     . ($references->firstIsPlate && $references->previous !== null ? ' The keyframe before shows how they look in this shot.' : ''),
             '',
         ];
 
-        $lines[] = 'This keyframe shows: ' . $keyframe['description'];
+        $lines[] = 'This keyframe shows: ' . Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null);
         $lines[] = '';
 
         // The place comes from the first image; the people and objects are named, described in words when they have no picture.
@@ -211,24 +210,19 @@ class KeyframeImageBrief
     {
         $style = $shot->project->style;
         $framing = $shot->storylineFraming();
-        $size = $framing['size'] ?? ShotSize::FULL;
-        $steps = collect($shot->storylineKeyframes())->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . $keyframe['description'])->join("\n");
+        $steps = collect($shot->storylineKeyframes())->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null))->join("\n");
 
         $lines = [
             "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
             '',
             'Draw the place where this shot plays, empty: no people at all. Every keyframe of the shot is drawn on top of this picture later, so the camera, the framing and the place must suit all of them.',
-            'Framing: ' . $size->framing() . ' Frame it for the people who will stand at the spot: an adult standing there fills about two thirds of the frame height.',
+            $shot->kindOrScene() === ShotKind::CLOSE_UP
+                ? 'Framing: ' . ShotSize::CLOSE_UP->framing() . ' Frame it close on the surface where the hands will act, empty of hands and of what they will hold: the surface fills most of the frame, seen from slightly above, at the distance where hands and a small object will fill most of the frame.'
+                : 'Framing: ' . ShotSize::FULL->framing() . ' Frame it for the people who will stand at the spot: an adult standing there fills about two thirds of the frame height.',
         ];
 
         if (filled($framing['spot'] ?? null)) {
             $lines[] = "Spot: {$framing['spot']}";
-        }
-
-        $light = $framing['light'] ?? null;
-
-        if (filled($light) && $light !== 'as the visual style') {
-            $lines[] = "Light: {$light}. This overrides the lighting in the visual style.";
         }
 
         array_push($lines, '', "What happens at this spot during the shot; place the fixed objects and zones so all of it can happen in this picture, for example a hanging load right above the path someone must not walk. Do not draw the people or what they hold:\n{$steps}", '');

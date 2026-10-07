@@ -24,7 +24,7 @@ class PlanChangeInterpreter implements Agent, HasReasoningEffort, HasStructuredO
     use SetsReasoningEffort;
 
     /**
-     * @param  list<array{title: string, description: string}>  $keyframes  the plan as it is in the editor, in order
+     * @param  list<array{title: string, description: string, spatial?: string|null}>  $keyframes  the plan as it is in the editor, in order
      * @param  list<string>  $rules  the rules already set for this shot
      */
     public function __construct(
@@ -78,7 +78,7 @@ class PlanChangeInterpreter implements Agent, HasReasoningEffort, HasStructuredO
     public function promptFor(string $message): string
     {
         $lines = collect($this->keyframes)
-            ->map(fn(array $keyframe, int $index) => ($index + 1) . ". {$keyframe['title']}: {$keyframe['description']}")
+            ->map(fn(array $keyframe, int $index) => ($index + 1) . ". {$keyframe['title']}: {$keyframe['description']}" . (filled($keyframe['spatial'] ?? null) ? " Spatial fact: {$keyframe['spatial']}" : ''))
             ->join("\n");
 
         $rules = collect($this->rules)->map(fn(string $rule) => "- {$rule}")->join("\n");

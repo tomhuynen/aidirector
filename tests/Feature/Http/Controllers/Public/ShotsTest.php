@@ -106,7 +106,7 @@ describe('create', function () {
         actingAs($this->director, 'director')
             ->postJson(route('public.shots.plan.write', [$this->project, $drafted]), $body)
             ->assertOk()
-            ->assertJsonPath('keyframes.0', ['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'elements' => [$engineer->sqid]]);
+            ->assertJsonPath('keyframes.0', ['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'spatial' => '', 'elements' => [$engineer->sqid]]);
 
         actingAs($this->director, 'director')
             ->postJson(route('public.shots.plan.write', [$this->project, $own]), $body)
@@ -154,14 +154,13 @@ describe('create', function () {
         expect(array_column($shot->fresh()->storylineKeyframes(), 'elements'))->toBe([['Female engineer', 'Indoor Assembly Hall'], ['Indoor Assembly Hall']]);
     });
 
-    it('saves the plan as the director wrote it, linking the cast it names, until the keyframes are drawn', function () {
+    it('saves the plan as the director wrote it, keeping the spot and length the planner chose, linking the cast it names, until the keyframes are drawn', function () {
         $engineer = \App\Models\Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
         $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['framing' => ['size' => 'full', 'spot' => 'At the gate.', 'light' => 'as the visual style', 'seconds' => 6], 'keyframes' => []]]);
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.plan', [$this->project, $shot]), [
                 'storyline' => 'She drops the cigarette in the bin and walks in.',
-                'framing' => ['size' => 'medium', 'spot' => 'At the yard gate, the bin by the post.', 'light' => '', 'seconds' => 8],
                 'rules' => ['She never drops the cigarette on the ground.', ' '],
                 'keyframes' => [
                     ['title' => 'At the bin', 'description' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.'],
@@ -179,7 +178,7 @@ describe('create', function () {
                 ['title' => 'At the bin', 'description' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.', 'elements' => ['Female engineer']],
                 ['title' => 'Empty gate', 'description' => 'The gate without anyone.', 'elements' => []],
             ])
-            ->and($shot->storyline['framing'])->toEqual(['size' => 'medium', 'spot' => 'At the yard gate, the bin by the post.', 'light' => 'as the visual style', 'seconds' => 8]);
+            ->and($shot->storyline['framing'])->toEqual(['spot' => 'At the gate.', 'seconds' => 6]);
 
         \App\Models\Keyframe::factory()->for($shot)->create();
 

@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Public\Shots;
 
 use App\Enums\ElementType;
 use App\Enums\ShotKind;
-use App\Enums\ShotSize;
 use App\Enums\ShotTransition;
 use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\KeyframeResource;
@@ -34,8 +33,6 @@ class ViewController
             /** @var int How many decisions wait for the director in this project. */
             'decisionsCount' => fn() => app(DecisionQueue::class)->count($project),
             'shot' => fn() => ShotResource::make($shot),
-            /** @var array<int, array{value: string, label: string}> */
-            'shotSizes' => fn() => ShotSize::catalogue(),
             /** @var array<int, array{value: string, label: string, description: string}> */
             'shotKinds' => fn() => ShotKind::catalogue(),
             'keyframes' => fn() => KeyframeResource::collection(

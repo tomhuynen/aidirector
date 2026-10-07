@@ -16,6 +16,41 @@
           </p>
         </header>
 
+        <!-- The planner found two messages in the takeaway: one shot each reads better. -->
+        <section
+          v-if="split"
+          class="space-y-3 rounded-xl border border-signal/40 bg-signal-soft/30 px-4 py-4 text-sm leading-relaxed"
+          aria-labelledby="plan-split-heading"
+        >
+          <p id="plan-split-heading" class="font-semibold">
+            {{ $t('This shot tells two things. Split it into two shots?') }}
+          </p>
+          <ol class="space-y-1.5">
+            <li v-for="(part, i) in split.parts" :key="i" class="flex gap-2">
+              <span class="text-muted-foreground tabular-nums">{{ i + 1 }}.</span>
+              <span>
+                {{ part.takeaway }}
+                <span class="text-muted-foreground"> · {{ kindLabel(part.kind) }}</span>
+              </span>
+            </li>
+          </ol>
+          <p class="text-muted-foreground">
+            {{
+              $t('This shot keeps the first, a new shot right after it gets the second, and both are planned again.')
+            }}
+          </p>
+          <InputError :message="splitting.errors.split" />
+          <div class="flex gap-2">
+            <Button type="button" size="sm" :disabled="splitting.processing" @click="splitShot">
+              <LoaderCircle v-if="splitting.processing" class="size-4 animate-spin" />
+              {{ $t('Split') }}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" :disabled="splitting.processing" @click="keepAsOne">
+              {{ $t('Keep as one') }}
+            </Button>
+          </div>
+        </section>
+
         <div class="space-y-1.5">
           <Label for="plan-storyline">{{ $t('Storyline') }}</Label>
           <Textarea
@@ -61,59 +96,17 @@
           </p>
         </div>
 
-        <!-- The camera for the whole shot: one size, one spot, one light. -->
-        <fieldset class="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2">
-          <legend class="px-1 text-[15px] font-medium">{{ $t('Framing') }}</legend>
-          <div class="space-y-1.5 sm:col-span-2">
-            <Label for="plan-kind">{{ $t('Kind of shot') }}</Label>
-            <!-- Another kind needs another plan: switching asks first, then the director rewrites it. -->
-            <NativeSelect id="plan-kind" v-model="kindChoice" class="w-full" :disabled="switching.processing">
-              <option v-for="option in kinds" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </NativeSelect>
-            <p class="text-sm text-muted-foreground">
-              {{ kinds.find((option) => option.value === form.kind)?.description }}
-            </p>
-          </div>
-          <div class="space-y-1.5">
-            <Label for="plan-size">{{ $t('Shot size') }}</Label>
-            <NativeSelect id="plan-size" v-model="form.framing.size" class="w-full">
-              <option v-for="size in sizes" :key="size.value" :value="size.value">{{ size.label }}</option>
-            </NativeSelect>
-          </div>
-          <div class="space-y-1.5">
-            <Label for="plan-seconds">{{ $t('Length in seconds') }}</Label>
-            <Input
-              id="plan-seconds"
-              v-model.number="form.framing.seconds"
-              type="number"
-              min="2"
-              max="30"
-              :placeholder="$t('Automatic')"
-            />
-          </div>
-          <!-- A montage and a presenter name their own setting in the description. -->
-          <div v-if="form.kind === 'scene'" class="space-y-1.5 sm:col-span-2">
-            <Label for="plan-spot">{{ $t('Spot') }}</Label>
-            <Input
-              id="plan-spot"
-              v-model="form.framing.spot"
-              maxlength="500"
-              :placeholder="
-                $t('Where in the place it plays, such as: outside the hall entrance, the bin below the sign')
-              "
-            />
-          </div>
-          <div class="space-y-1.5 sm:col-span-2">
-            <Label for="plan-light">{{ $t('Light') }}</Label>
-            <Input
-              id="plan-light"
-              v-model="form.framing.light"
-              maxlength="300"
-              :placeholder="$t('As the visual style, or such as: dusk, low warm light')"
-            />
-          </div>
-          <InputError class="sm:col-span-2" :message="form.errors['framing.size'] ?? form.errors['framing.seconds']" />
-        </fieldset>
+        <!-- The kind decides the framing; the spot, the light and the length follow from the plan and the voice-over. -->
+        <div class="space-y-1.5">
+          <Label for="plan-kind">{{ $t('Kind of shot') }}</Label>
+          <!-- Another kind needs another plan: switching asks first, then the director rewrites it. -->
+          <NativeSelect id="plan-kind" v-model="kindChoice" class="w-full" :disabled="switching.processing">
+            <option v-for="option in kinds" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </NativeSelect>
+          <p class="text-sm text-muted-foreground">
+            {{ kinds.find((option) => option.value === form.kind)?.description }}
+          </p>
+        </div>
 
         <ol class="space-y-4">
           <li
@@ -179,9 +172,7 @@
                 </div>
               </div>
               <Label :for="`plan-description-${i}`" class="text-xs text-muted-foreground">
-                {{
-                  $t('Description: what is drawn, sent to the image model as written; the check judges the image by it')
-                }}
+                {{ $t('Description') }}
               </Label>
               <Textarea
                 :id="`plan-description-${i}`"
@@ -196,6 +187,16 @@
                   )
                 "
                 class="text-[15px] leading-relaxed"
+              />
+              <!-- Sent as the last sentence of the description; the check judges the image by both. -->
+              <Label :for="`plan-spatial-${i}`" class="text-xs text-muted-foreground">{{ $t('Spatial fact') }}</Label>
+              <Input
+                :id="`plan-spatial-${i}`"
+                v-model="keyframe.spatial"
+                maxlength="500"
+                :placeholder="
+                  $t('The one thing a viewer must see at a glance, such as: both feet are behind the yellow line')
+                "
               />
               <!-- Who and what is in the keyframe: their pictures go to the image model. -->
               <KeyframeCastPicker
@@ -321,18 +322,18 @@ type PlanKeyframe = {
   uid: number
   title: string
   description: string
+  spatial: string
   elements: string[]
   /** Being written from the chat. */
   pending?: boolean
 }
-
-type Framing = { size: string; spot: string; light: string; seconds: number | '' }
 
 const props = defineProps<{
   storyline: string
   keyframes: {
     title: string
     description: string
+    spatial?: string | null
     elements?: string[]
   }[]
   /** The project's cast and sets to pick from. */
@@ -341,13 +342,15 @@ const props = defineProps<{
   types: { value: string; label: string; plural: string }[]
   /** The cast and sets chosen in the brief, ticked by default where a keyframe has none. */
   preferred: string[]
-  framing: { size?: string; spot?: string; light?: string; seconds?: number | null } | null
-  sizes: { value: string; label: string }[]
   /** A scene at one place, or a montage of separate stills. */
   kind: string
   kinds: { value: string; label: string; description: string }[]
   /** Switches the kind and has the director rewrite the plan for it. */
   kindUrl: string
+  /** The planner's proposal to split the shot in two, each with one message. */
+  split?: { parts: { takeaway: string; kind: string }[] } | null
+  /** Splits the shot as proposed; a DELETE keeps it as one. */
+  splitUrl?: string
   /** The most keyframes the director may have in one shot. */
   max: number
   saveUrl: string
@@ -375,25 +378,23 @@ const form = useForm<{
   storyline: string
   kind: string
   rules: string[]
-  framing: Framing
   keyframes: PlanKeyframe[]
 }>({
   storyline: props.storyline,
   kind: props.kind,
   rules: [...props.rules],
-  framing: {
-    size: props.framing?.size ?? 'full',
-    spot: props.framing?.spot ?? '',
-    light: props.framing?.light ?? '',
-    seconds: props.framing?.seconds ?? '',
-  },
   keyframes: props.keyframes.map((keyframe) => ({
     uid: nextUid++,
     title: keyframe.title,
     description: keyframe.description,
+    spatial: keyframe.spatial ?? '',
     elements: idsFor(keyframe.elements ?? []),
   })),
 })
+
+const splitting = useForm<{ split?: string }>({})
+const splitShot = () => props.splitUrl && splitting.post(props.splitUrl, { preserveScroll: true })
+const keepAsOne = () => props.splitUrl && splitting.delete(props.splitUrl, { preserveScroll: true })
 
 const switchOpen = ref(false)
 const switchTo = ref('')
@@ -426,6 +427,7 @@ const add = () =>
     uid: nextUid++,
     title: '',
     description: '',
+    spatial: '',
     elements: [...props.preferred],
   })
 
@@ -441,9 +443,10 @@ const save = (draw: boolean) =>
   form
     .transform((data) => ({
       ...data,
-      keyframes: data.keyframes.map(({ title, description, elements }) => ({
+      keyframes: data.keyframes.map(({ title, description, spatial, elements }) => ({
         title,
         description,
+        spatial,
         elements,
       })),
     }))
@@ -464,7 +467,7 @@ const chat = reactive<{ message: string; busy: boolean; reply: string | null; er
   error: null,
 })
 
-const outline = () => form.keyframes.map(({ title, description }) => ({ title, description }))
+const outline = () => form.keyframes.map(({ title, description, spatial }) => ({ title, description, spatial }))
 
 /**
  * Two steps: first the changes, applied straight away so the order is
@@ -506,6 +509,7 @@ const sendChat = async () => {
           uid: nextUid++,
           title: '',
           description: '',
+          spatial: '',
           elements: [...props.preferred],
           pending: true,
         }
@@ -544,6 +548,7 @@ const sendChat = async () => {
         Object.assign(keyframe, {
           title: written.title,
           description: written.description,
+          spatial: written.spatial,
           elements: written.elements.length > 0 ? written.elements : keyframe.elements,
         })
       }

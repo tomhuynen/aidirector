@@ -173,6 +173,7 @@ class KeyframePainter
         $plan = $shot->storylineKeyframes()[$keyframe->position - 1] ?? [
             'title' => $keyframe->title,
             'description' => $keyframe->description,
+            'spatial' => $keyframe->spatial,
         ];
 
         $references = $this->referencesFor($keyframe, $siblings);

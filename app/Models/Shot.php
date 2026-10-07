@@ -7,7 +7,6 @@ namespace App\Models;
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Enums\ShotKind;
-use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
 use App\Events\ShotDeleting;
@@ -288,7 +287,7 @@ class Shot extends Model implements HasMedia
      *
      * Older plans also carry a `prompt`: an image instruction no longer written or used; the description goes to the image model.
      *
-     * @return list<array{title: string, description: string, prompt?: string, must_show?: string, elements?: list<string>, copied?: bool}>
+     * @return list<array{title: string, description: string, spatial?: string, prompt?: string, must_show?: string, elements?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
@@ -336,6 +335,14 @@ class Shot extends Model implements HasMedia
     }
 
     /**
+     * The kind of shot; a shot planned before kinds existed is a scene.
+     */
+    public function kindOrScene(): ShotKind
+    {
+        return $this->kind ?? ShotKind::SCENE;
+    }
+
+    /**
      * Whether one person speaks the voice-over to the camera, with a video per language.
      */
     public function isPresenter(): bool
@@ -360,26 +367,22 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * How the shot is framed and where in the place it plays, as the planner
-     * chose it. Older plans have none.
+     * Where in the place the shot plays and how long it lasts, as the planner
+     * chose it. The camera always frames a full shot and the light is always
+     * the visual style's. Older plans have none.
      *
-     * @return array{size: ShotSize, spot: string, light: string|null, seconds: int|null}|null
+     * @return array{spot: string, seconds: int|null}|null
      */
     public function storylineFraming(): ?array
     {
         $framing = $this->storyline['framing'] ?? null;
-        $size = is_array($framing) ? ShotSize::tryFrom((string) ($framing['size'] ?? '')) : null;
 
-        if ($size === null) {
+        if (! is_array($framing)) {
             return null;
         }
 
-        $light = trim((string) ($framing['light'] ?? ''));
-
         return [
-            'size' => $size,
             'spot' => (string) ($framing['spot'] ?? ''),
-            'light' => $light === '' || str_starts_with(strtolower($light), 'as the visual style') ? null : $light,
             'seconds' => is_numeric($framing['seconds'] ?? null) ? self::clampSeconds((int) $framing['seconds']) : null,
         ];
     }
@@ -468,10 +471,11 @@ class Shot extends Model implements HasMedia
     {
         $plans = $this->storylineKeyframes();
 
-        $arranged = array_map(fn(Keyframe $keyframe) => $plans[$keyframe->position - 1] ?? [
+        $arranged = array_map(fn(Keyframe $keyframe) => $plans[$keyframe->position - 1] ?? array_filter([
             'title' => $keyframe->title,
             'description' => $keyframe->description,
-        ], $keyframes);
+            'spatial' => $keyframe->spatial,
+        ]), $keyframes);
 
         // Old position => new one. A copy still has its original's position and comes after it, so the original keeps the mapping.
         $moved = [];

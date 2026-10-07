@@ -91,7 +91,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
                 return "{$keyframe->position}. A copy of another keyframe that the director has not described yet: judge it only as a step between the keyframes around it.";
             }
 
-            return "{$keyframe->position}. {$keyframe->title}: {$keyframe->description}";
+            return "{$keyframe->position}. {$keyframe->title}: {$keyframe->fullDescription()}";
         })->join("\n");
 
         $storyline = $this->shot->chosenStoryline()['storyline'] ?? '';

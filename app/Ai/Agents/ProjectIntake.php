@@ -9,6 +9,7 @@ use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ElementRoundStatus;
 use App\Enums\ElementType;
 use App\Enums\ProjectPurpose;
+use App\Enums\ShotKind;
 use App\Models\ElementRound;
 use App\Models\Project;
 use App\Support\Elements\PhotoInventory;
@@ -113,7 +114,8 @@ class ProjectIntake implements Agent, Conversational, HasReasoningEffort, HasStr
             When the user has nothing to add, go to the last step.
 
             Last step, the shots.
-            Ask in one short question whether you should generate the shots for them. If yes, set "shots" to the shots of the project in story order, as many as the material needs to cover every point once: a short brief may need three, a full design document twenty or more, up to 30. Each shot has a "takeaway": the one point a viewer must learn from that shot, in one plain sentence, and a "context": one or two sentences on where it happens and what goes on. Base them on the description, the shared document and the conversation, and give each shot its own point. Say in one sentence that the shots are being created and set "done" to true. If no, say in one sentence that the project is ready and set "done" to true. Keep "done" false until this question is answered, and leave "shots" null on every other turn.
+            Ask in one short question whether you should generate the shots for them. If yes, set "shots" to the shots of the project in story order, as many as the material needs to cover every point once: a short brief may need three, a full design document twenty or more, up to 30. Each shot has a "takeaway": the one point a viewer must learn from that shot, in one plain sentence, a "context": one or two sentences on where it happens and what goes on, and a "kind". Base them on the description, the shared document and the conversation, and give each shot its own point. One message per shot: a point with two messages, such as "wear your badge visibly and report a damaged one straight away", becomes two shots in a row, each with its own takeaway and kind. Choose the kind that shows the takeaway best:
+            {$this->shotKinds()} Say in one sentence that the shots are being created and set "done" to true. If no, say in one sentence that the project is ready and set "done" to true. Keep "done" false until this question is answered, and leave "shots" null on every other turn.
 
             Rules:
             - Ask one short question at a time. Be warm and to the point: two sentences at most.
@@ -216,8 +218,19 @@ class ProjectIntake implements Agent, Conversational, HasReasoningEffort, HasStr
             'shots' => $schema->array()->items($schema->object([
                 'takeaway' => $schema->string()->required(),
                 'context' => $schema->string()->required(),
+                'kind' => $schema->string()->enum(array_column(ShotKind::cases(), 'value'))->required(),
             ]))->nullable()->required(),
             'done' => $schema->boolean()->required(),
         ];
+    }
+
+    /**
+     * The kinds of shot to choose from, each with when it fits.
+     */
+    private function shotKinds(): string
+    {
+        return collect(ShotKind::cases())
+            ->map(fn(ShotKind $kind) => "  - {$kind->value}: when {$kind->useWhen()}.")
+            ->join("\n");
     }
 }

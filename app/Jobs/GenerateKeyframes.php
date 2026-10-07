@@ -200,6 +200,7 @@ class GenerateKeyframes implements ShouldQueue
                 'position' => $index + 1,
                 'title' => $plan['title'],
                 'description' => $plan['description'],
+                'spatial' => filled($plan['spatial'] ?? null) ? $plan['spatial'] : null,
                 'rendering' => $index === 0,
             ]);
 

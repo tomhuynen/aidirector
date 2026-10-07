@@ -90,7 +90,7 @@ class MoveController
         $instruction = trim((string) $request->validated('instruction'));
         PoseMovedPerson::dispatch($keyframe, implode(' ', [
             'Keep the person exactly where they stand in the second image, at the same size, with their feet on the same spot.',
-            $instruction !== '' ? $instruction : "Give them the pose, gaze and gesture this describes, from where they stand now: {$keyframe->description}",
+            $instruction !== '' ? $instruction : "Give them the pose, gaze and gesture this describes, from where they stand now: {$keyframe->fullDescription()}",
         ]), $box);
 
         return redirect()->route('public.shots.view', [$project, $shot]);

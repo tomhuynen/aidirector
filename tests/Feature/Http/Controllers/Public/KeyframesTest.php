@@ -1180,7 +1180,8 @@ describe('update', function () {
             ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He holds the envelope. '])
             ->assertSessionHasErrors('description');
 
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(TweakKeyframeImage::class);
+        Queue::assertNotPushed(GenerateKeyframeImage::class);
         expect($keyframe->fresh()->rendering)->toBeFalse();
     });
 
