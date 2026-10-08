@@ -388,8 +388,14 @@ class KeyframePainter
             return null;
         }
 
-        $checker = new KeyframeChecker($keyframe, ['keyframe 1 of the shot, the reference for the place', 'the keyframe to check'], scope: KeyframeChecker::PLACE);
-        $result = $this->runChecker($keyframe, $checker, [$references->first, $this->referenceFor($render)], (string) Config::get('pipeline.models.place_check'));
+        // The keyframe before shows whether a change jumps between the two, or was already there.
+        $before = $keyframe->position > ($references->firstIsPlate ? 1 : 2) ? $references->previous : null;
+        $checker = new KeyframeChecker($keyframe, array_values(array_filter([
+            'keyframe 1 of the shot, the reference for the place',
+            $before !== null ? 'the keyframe directly before the one to check' : null,
+            'the keyframe to check',
+        ])), scope: KeyframeChecker::PLACE);
+        $result = $this->runChecker($keyframe, $checker, array_values(array_filter([$references->first, $before, $this->referenceFor($render)])), (string) Config::get('pipeline.models.place_check'));
 
         if ($result === null) {
             return null;
@@ -538,6 +544,9 @@ class KeyframePainter
             ->values()
             ->all();
 
+        // Drawn from scratch, keyframe 1 can play in the setting of another shot, such as a close-up on the moment the shot before ends with.
+        $setting = $first === null && ! $standalone ? $this->settingFor($keyframe->shot) : null;
+
         return new KeyframeReferences(
             style: $first === null ? $this->styleReferenceFor($keyframe->shot->project) : null,
             elements: $elements->all(),
@@ -547,7 +556,43 @@ class KeyframePainter
             firstShowsCast: $missing->isEmpty(),
             castNames: $missing->pluck('name')->all(),
             firstIsPlate: $plate !== null,
+            setting: $setting['image'] ?? null,
+            settingLabel: $setting['label'] ?? '',
         );
+    }
+
+    /**
+     * The image of the setting the shot takes from another shot, with what it is.
+     *
+     * @return array{image: StoredImage, label: string}|null
+     */
+    public function settingFor(Shot $shot): ?array
+    {
+        $from = $shot->settingFrom();
+
+        if ($from === null) {
+            return null;
+        }
+
+        $source = $from['shot'];
+        $position = $from['keyframe'] === Shot::LAST_KEYFRAME ? (int) $source->keyframes()->max('position') : $from['keyframe'];
+        $keyframe = $position > 0 ? $source->keyframes()->with('media')->where('position', $position)->first() : null;
+        $image = $position > 0
+            ? $keyframe?->render()
+            : ($this->chosenPlate($source) ?? $source->keyframes()->with('media')->where('position', 1)->first()?->render());
+
+        if ($image === null) {
+            return null;
+        }
+
+        $label = match (true) {
+            ! $from['chosen'] => "the last keyframe of {$source->code()}, the shot before",
+            $from['keyframe'] === Shot::LAST_KEYFRAME => "the last keyframe of {$source->code()}",
+            $from['keyframe'] === 0 => "the place of {$source->code()}",
+            default => "keyframe {$from['keyframe']} of {$source->code()}",
+        };
+
+        return ['image' => $this->referenceFor($image), 'label' => $label];
     }
 
     /**
@@ -574,7 +619,8 @@ class KeyframePainter
             ->map(fn(Element $element) => ['element' => $element, 'image' => $this->referenceFor($element->reference())])
             ->values()
             ->all();
-        $references = new KeyframeReferences(style: $this->styleReferenceFor($shot->project), elementImages: $elementImages);
+        $setting = $this->settingFor($shot);
+        $references = new KeyframeReferences(style: $this->styleReferenceFor($shot->project), elementImages: $elementImages, setting: $setting['image'] ?? null, settingLabel: $setting['label'] ?? '');
 
         return $this->drawPlateOption($shot, KeyframeImageBrief::plate($shot, $references, $variation), $references->images(), $references->labels(), (string) Config::get('pipeline.models.keyframe'));
     }
@@ -587,7 +633,7 @@ class KeyframePainter
     {
         $plate = $this->drawPlateOption(
             $shot,
-            KeyframeImageBrief::tweakPlate($instruction, $shot->rulesBrief()),
+            KeyframeImageBrief::tweakPlate($instruction),
             [$this->referenceFor($option)],
             ['This place, the image that is edited'],
             (string) Config::get('pipeline.models.keyframe_edit'),

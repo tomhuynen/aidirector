@@ -72,6 +72,9 @@ return [
         'bench_judge' => 'low',
         'moved_person_describer' => 'low',
         'voice_judge' => 'low',
+        'storyline_follower' => 'low',
+        'shot_timer' => 'low',
+        'plan_director' => 'low',
     ],
 
     /*
@@ -223,7 +226,8 @@ return [
         'resolution' => env('AI_VIDEO_RESOLUTION', '480p'),
         // What Wan 3.0 renders; a model without 4K refuses it.
         'resolutions' => ['480p', '720p', '1080p'],
-        'min_duration' => 4,
+        // The shortest clip the video model renders (Wan 3.0 takes 2 to 30 seconds); a short action is a short shot.
+        'min_duration' => 2,
         'max_duration' => 15,
         // A render takes about a minute: the first check waits, later ones follow quicker.
         'first_poll_seconds' => 45,

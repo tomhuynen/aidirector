@@ -20,18 +20,6 @@
           </Button>
         </div>
 
-        <div
-          v-if="drawable"
-          class="flex items-center justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3 text-sm"
-        >
-          <p>{{ $t('The keyframes are planned. Draw them when you are ready.') }}</p>
-          <Button type="button" size="sm" :disabled="retry.processing" @click="retryImages">
-            <LoaderCircle v-if="retry.processing" class="size-4 animate-spin" />
-            <Wand v-else class="size-4" />
-            {{ $t('Draw keyframes') }}
-          </Button>
-        </div>
-
         <!-- A presenter speaks in every language of the project: one video each. -->
         <NativeSelect
           v-if="showVideo && languages.length > 1 && !video.pending"
@@ -53,7 +41,7 @@
           </DropdownMenuItem>
         </VideoActions>
         <FirstKeyframeChooser
-          v-if="choosing.active && (keyframes[0] || planning) && !checkingFirst"
+          v-if="choosing.active && keyframes[0] && !checkingFirst"
           v-model:selected="selectedOption"
           :options="choosing.plates ?? keyframes[0]?.renders ?? []"
           :option-count="choosing.optionCount"
@@ -126,8 +114,7 @@
               <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {{ $t('Keyframe :n of :total', { n: String(selectedIndex + 1), total: String(keyframes.length) }) }}
               </p>
-              <h3 class="font-semibold">{{ selected.title }}</h3>
-              <p class="text-sm leading-relaxed text-muted-foreground">{{ selected.description }}</p>
+              <!-- The title and description are in the column on the right. -->
               <p v-if="busy(selected)" class="flex items-center justify-center gap-2 pt-1 text-xs text-signal">
                 <LoaderCircle class="size-3.5 animate-spin" />
                 {{ renderLabel(selected) }}
@@ -146,15 +133,14 @@
       </section>
 
       <FirstKeyframeInspector
-        v-if="choosing.active && (keyframes[0] || planning) && !checkingFirst"
+        v-if="choosing.active && keyframes[0] && !checkingFirst"
         :keyframe="keyframes[0]"
-        :adjust-url="planning ? undefined : choosing.adjustUrl"
+        :adjust-url="choosing.adjustUrl"
         :plates="Boolean(choosing.plates)"
         :on-plate="Boolean(choosing.resetUrl)"
         :steps="keyframes.map((keyframe) => keyframe.title)"
         :selected="selectedOption"
         :busy="choosing.pending || Boolean(choosing.adjusting)"
-        :surface="closeUp"
       />
       <NewKeyframeInspector
         v-else-if="adding"
@@ -184,14 +170,11 @@
               <span class="font-normal text-muted-foreground tabular-nums">({{ keyframes.length }})</span>
             </h2>
             <p class="text-sm text-muted-foreground">
-              <template v-if="planning">{{ $t('The director is planning the keyframes.') }}</template>
-              <template v-else-if="generating">{{
+              <template v-if="generating">{{
                 $t('The images are being generated. This takes a minute or two.')
               }}</template>
               <template v-else-if="choosing.active && choosing.plates">{{
-                closeUp
-                  ? $t('Choose the surface. Every keyframe is drawn on it.')
-                  : $t('Choose the place. Every keyframe is drawn on it.')
+                $t('Choose the place. Every keyframe is drawn on it.')
               }}</template>
               <template v-else-if="choosing.active && choosing.resetUrl">{{
                 $t('Keyframe 1 on the chosen place. The others are drawn once you use it.')
@@ -344,16 +327,6 @@
               </div>
             </div>
           </li>
-          <template v-if="planning && keyframes.length === 0">
-            <li v-for="n in 3" :key="`planning-${n}`" class="w-44 shrink-0 space-y-2">
-              <Placeholder
-                :class="cn('h-28 w-full rounded-lg bg-card', n === 1 && 'border-signal ring-2 ring-signal/40')"
-              >
-                <LoaderCircle class="size-5 animate-spin text-signal" />
-              </Placeholder>
-              <div class="mx-1 h-4 w-24 animate-pulse rounded bg-secondary" />
-            </li>
-          </template>
           <!-- A presenter speaks from one still. -->
           <li v-if="!presenter" class="w-44 shrink-0">
             <button
@@ -377,7 +350,8 @@
         <InputError :message="arrangeError" />
       </section>
 
-      <section v-if="!planning" class="flex w-[22rem] shrink-0 flex-col gap-4 border-l border-border p-6">
+      <!-- Shown once there is a video, or once one can be rendered; until then the keyframes take the width. -->
+      <section v-if="showVideoColumn" class="flex w-[22rem] shrink-0 flex-col gap-4 border-l border-border p-6">
         <header class="flex items-start justify-between gap-4">
           <div class="space-y-1">
             <h2 class="text-xl font-semibold">{{ $t('Video') }}</h2>
@@ -522,9 +496,7 @@ export type PanelKeyframe = {
   thumbnailUrl: string | null
   rendering: boolean
   /** After drawing: the image is being checked, or redrawn to fix what the check found. */
-  renderStage?: 'checking' | 'fixing' | null
-  /** While fixing: what the check found, in plain words. */
-  renderNote?: string | null
+  renderStage?: 'checking' | null
   renderError: string | null
   renders: {
     id: number
@@ -538,7 +510,6 @@ export type PanelKeyframe = {
     /** The rewritten instruction the image model received. */
     instruction?: string | null
     /** When the automatic check redrew this version: what was wrong with the one before. */
-    checkProblems?: string[]
     /** What the keyframe must show that the check still could not see after a redraw. */
     /** What the check found wrong with this version, kept as notes. */
     checkIssues?: string[]
@@ -601,20 +572,14 @@ const props = defineProps<{
   montage?: boolean
   /** One person speaks the voice-over to the camera, with a video per language. */
   presenter?: boolean
-  /** Hands and one object at one surface, drawn on a chosen empty surface. */
-  closeUp?: boolean
   newKeyframe: PanelNewKeyframe
   reorderUrl: string
-  /** The keyframes are still being planned: the panel shows the drawing state with nothing in it yet. */
-  planning?: boolean
   /** What the checks found, per keyframe position or for the whole shot (position null). */
   issueGroups?: PanelIssueGroup[]
   /** The keyframes are being reviewed together right now. */
   reviewing?: boolean
   /** Redraws every keyframe the notes are about, when there is one to redraw. */
   fixAllUrl?: string | null
-  /** The keyframes are planned but not drawn yet, as for shots created in bulk. */
-  drawable?: boolean
   /** Takes every note off the list without changing anything. */
   dismissAllUrl?: string | null
 }>()
@@ -820,10 +785,6 @@ const busy = (keyframe: PanelKeyframe) => keyframe.rendering || keyframe.renderS
  */
 const renderLabel = (keyframe: PanelKeyframe) => {
   if (keyframe.renderStage === 'checking') return $t('Checking image…')
-  if (keyframe.renderStage === 'fixing')
-    return keyframe.renderNote
-      ? $t('Fixing: :note', { note: keyframe.renderNote })
-      : $t('Fixing a mistake the check found…')
 
   return $t('Generating image…')
 }
@@ -932,6 +893,10 @@ const canRenderVideo = computed(
 )
 
 const renderVideo = () => videoForm.post(props.video.generateUrl, { preserveScroll: true })
+
+const showVideoColumn = computed(
+  () => Boolean(props.video.url) || props.video.pending || Boolean(props.video.error) || canRenderVideo.value,
+)
 
 const retryImages = () => retry.post(props.imagesUrl, { preserveScroll: true })
 </script>

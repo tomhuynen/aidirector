@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Shot;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -20,6 +21,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class AdjustPlateOption implements ShouldQueue
 {
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -32,6 +34,7 @@ class AdjustPlateOption implements ShouldQueue
         public readonly string $instruction,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->shot);
     }
 
     public function handle(KeyframePainter $painter): void
@@ -47,6 +50,10 @@ class AdjustPlateOption implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
+        if ($this->planReplaced()) {
+            return;
+        }
+
         $this->shot->keyframes()->where('position', 1)->update(['rendering' => false]);
         $this->shot->forceFill(['storyline_error' => __('The place could not be adjusted. Please try again.')])->save();
     }

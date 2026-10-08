@@ -10,6 +10,7 @@ use App\Ai\KeyframePainter;
 use App\Ai\Prompts\VideoPrompt;
 use App\Enums\ElementType;
 use App\Enums\ShotStatus;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
@@ -33,6 +34,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class GenerateVideo implements ShouldQueue
 {
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -43,6 +45,7 @@ class GenerateVideo implements ShouldQueue
         public readonly Shot $shot,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->shot);
     }
 
     public function handle(OpenRouterVideoClient $videos, KeyframePainter $painter): void
@@ -78,6 +81,10 @@ class GenerateVideo implements ShouldQueue
             ->values()
             ->all();
 
+        if ($this->planReplaced()) {
+            return;
+        }
+
         // No first frame: with one, Wan 3.0 animates from that image alone and leaves the references out, so the cast changes.
         $jobId = $videos->submit(
             Config::get('pipeline.models.video'),
@@ -103,6 +110,10 @@ class GenerateVideo implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
+        if ($this->planReplaced()) {
+            return;
+        }
+
         $this->shot->generations()->create([
             'director_id' => $this->shot->project->director_id,
             'kind' => 'video',
@@ -129,7 +140,8 @@ class GenerateVideo implements ShouldQueue
      */
     private function submitStills(Shot $shot, Collection $keyframes, OpenRouterVideoClient $videos): void
     {
-        $duration = (int) Config::get('pipeline.video.min_duration');
+        // Each clip lasts its share of the shot, rounded up to the whole seconds the model renders; the join cuts it to its share.
+        $duration = Shot::clampSeconds((int) ceil(PollShotClips::clipLength($shot->durationInSeconds(), $keyframes->count())));
         $model = (string) Config::get('pipeline.models.video');
 
         $clips = $keyframes->values()->map(function (Keyframe $keyframe) use ($shot, $videos, $duration, $model): array {
@@ -246,10 +258,7 @@ class GenerateVideo implements ShouldQueue
      */
     public static function duration(Shot $shot): int
     {
-        return max(
-            (int) Config::get('pipeline.video.min_duration'),
-            min((int) Config::get('pipeline.video.max_duration'), $shot->durationInSeconds()),
-        );
+        return Shot::clampSeconds($shot->durationInSeconds());
     }
 
     /**

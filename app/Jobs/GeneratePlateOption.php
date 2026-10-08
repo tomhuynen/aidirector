@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Shot;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,6 +21,7 @@ use Illuminate\Support\Facades\Config;
 class GeneratePlateOption implements ShouldQueue
 {
     use Batchable;
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -31,6 +33,7 @@ class GeneratePlateOption implements ShouldQueue
         public readonly int $variation,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->shot);
     }
 
     public function handle(KeyframePainter $painter): void

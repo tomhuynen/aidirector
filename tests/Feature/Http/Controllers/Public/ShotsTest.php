@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\PlanDirector;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateStoryline;
 use App\Models\Director;
@@ -20,243 +21,302 @@ beforeEach(function () {
     $this->project = Project::factory()->ownedBy($this->director)->create();
 });
 
-function validShot(array $overrides = []): array
+/**
+ * A shot whose plan is talked about in the plan chat.
+ *
+ * @param  array<string, mixed>  $attributes
+ */
+function planShot(Project $project, array $attributes = []): Shot
+{
+    return Shot::factory()->for($project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => []], ...$attributes]);
+}
+
+/**
+ * A reply of the plan director: by default it only talks.
+ *
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function directorReply(array $overrides = []): array
+{
+    return ['reply' => 'Fine.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [], 'proposal' => null, ...$overrides];
+}
+
+/**
+ * A plan the director agreed on in the chat.
+ *
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function agreedPlan(array $overrides = []): array
 {
     return [
-        'takeaway' => 'Sending is quick and final',
-        'notes' => null,
-        'preferredElements' => [],
-        'purposeOverride' => null,
-        'aspectRatioOverride' => null,
-        'duration' => null,
+        'takeaway' => 'Wear your badge on your chest',
+        'kind' => 'scene',
+        'storyline' => 'He walks up and holds out the badge.',
+        'keyframes' => [['title' => 'Arrives', 'description' => 'He walks up to the counter.', 'spatial' => '', 'elements' => []]],
+        'seconds' => 3,
+        'setting_from' => null,
         ...$overrides,
     ];
 }
 
+function talkTo(mixed $test, Shot $shot, string $message): Illuminate\Testing\TestResponse
+{
+    return actingAs($test->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$shot->project_id === $test->project->id ? $test->project : $shot->project, $shot]), ['message' => $message])
+        ->assertOk();
+}
+
 describe('create', function () {
-    it('gives an empty plan to fill in when the director writes the keyframes themselves', function () {
-        actingAs($this->director, 'director')->post(route('public.shots.store', $this->project), validShot(['manual' => true]));
+    it('adds a new shot at the end of the sequence, empty, to work out in the plan chat', function () {
+        Shot::factory()->for($this->project)->create(['position' => 1]);
 
-        $shot = Shot::query()->where('takeaway', 'Sending is quick and final')->firstOrFail();
+        $response = actingAs($this->director, 'director')->post(route('public.shots.store', $this->project))->assertSessionHasNoErrors();
 
-        expect($shot->status)->toBe(ShotStatus::STORYLINE_READY)
-            ->and($shot->storylineKeyframes())->toBe([])
-            ->and($shot->storyline['mode'])->toBe('manual');
+        $shot = Shot::query()->latest('id')->firstOrFail();
+
+        $response->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+        expect($shot->position)->toBe(2)
+            ->and($shot->takeaway)->toBe('')
+            ->and($shot->status)->toBe(ShotStatus::STORYLINE_READY)
+            ->and($shot->storylineKeyframes())->toBe([]);
         Queue::assertNotPushed(GenerateStoryline::class);
     });
 
-    it('works out which keyframes a chat message touches before writing them', function () {
-        \App\Ai\Agents\PlanChangeInterpreter::fake([['changes' => [['op' => 'insert', 'at' => 1, 'from' => 0, 'instruction' => 'she walks up to the door'], ['op' => 'update', 'at' => 3, 'from' => 0, 'instruction' => 'she looks up']], 'reply' => 'Adding a first keyframe and changing keyframe 2.']]);
-        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY]);
-
+    it('opens the page that makes the new shot', function () {
         actingAs($this->director, 'director')
-            ->postJson(route('public.shots.plan.changes', [$this->project, $shot]), [
-                'message' => 'put a frame before 1 where she walks up to the door, and in frame 2 she looks up',
-                'keyframes' => [['title' => 'At the sign', 'description' => 'She reads the sign.'], ['title' => 'At the bin', 'description' => 'She drops it.']],
-            ])
-            ->assertOk()
-            ->assertJsonPath('changes.0', ['op' => 'insert', 'at' => 1, 'from' => 0, 'instruction' => 'she walks up to the door'])
-            ->assertJsonPath('changes.1.op', 'update')
-            ->assertJsonPath('reply', 'Adding a first keyframe and changing keyframe 2.');
-
-        \App\Ai\Agents\PlanChangeInterpreter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "1. At the sign: She reads the sign.\n2. At the bin: She drops it."));
+            ->get(route('public.shots.create', $this->project))
+            ->assertSuccessful()
+            ->assertInertia(fn($page) => $page->component('shots/create')->has('siblings', 0));
     });
-
-    it('keeps a rule for the whole shot, rewrites the keyframes and the storyline that break it', function () {
-        \App\Ai\Agents\PlanChangeInterpreter::fake([[
-            'changes' => [['op' => 'update', 'at' => 2, 'from' => 0, 'instruction' => 'She puts only one foot over the red line, the other stays in the blue lane.']],
-            'rule' => 'The visitor never crosses the red line with more than one foot.',
-            'storyline' => 'She puts one foot over the red line, sees the load and steps back.',
-            'reply' => 'Keeping this rule and changing keyframe 2.',
-        ]]);
-        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'rules' => ['The crate always hangs above the zone.', 'Removed in the editor.']]);
-
-        actingAs($this->director, 'director')
-            ->postJson(route('public.shots.plan.changes', [$this->project, $shot]), [
-                'message' => 'never let her cross the red line with more than one foot',
-                'storyline' => 'She steps into the red zone, sees the load and steps back.',
-                'rules' => ['The crate always hangs above the zone.'],
-                'keyframes' => [
-                    ['title' => 'In the lane', 'description' => 'She walks in the blue lane.'],
-                    ['title' => 'Wrong zone', 'description' => 'She stands in the red zone.'],
-                ],
-            ])
-            ->assertOk()
-            ->assertJsonPath('changes.0.at', 2)
-            ->assertJsonPath('rule', 'The visitor never crosses the red line with more than one foot.')
-            ->assertJsonPath('rules', ['The crate always hangs above the zone.', 'The visitor never crosses the red line with more than one foot.'])
-            ->assertJsonPath('storyline', 'She puts one foot over the red line, sees the load and steps back.');
-
-        expect($shot->fresh()->shotRules())->toBe(['The crate always hangs above the zone.', 'The visitor never crosses the red line with more than one foot.']);
-        \App\Ai\Agents\PlanChangeInterpreter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Storyline: She steps into the red zone')
-            && str_contains($prompt->prompt, '- The crate always hangs above the zone.')
-            && ! str_contains($prompt->prompt, 'Must show:'));
-    });
-
-    it('writes the asked keyframes in full in a drafted plan and only the director\'s words in their own plan', function () {
-        $engineer = \App\Models\Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
-        \App\Ai\Agents\PlanFrameWriter::fake([
-            ['keyframes' => [['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'elements' => ['Female engineer']]]],
-            ['keyframes' => [['position' => 1, 'title' => 'Walks up', 'description' => 'She walks up to the door.', 'elements' => []]]],
-        ]);
-        $drafted = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['mode' => 'auto', 'keyframes' => []]]);
-        $own = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['mode' => 'manual', 'keyframes' => []]]);
-        $body = ['message' => 'put a frame before 1', 'storyline' => 'She goes in.', 'keyframes' => [['title' => '', 'description' => ''], ['title' => 'At the sign', 'description' => 'She reads the sign.']], 'targets' => [['position' => 1, 'instruction' => 'she walks up to the door']]];
-
-        actingAs($this->director, 'director')
-            ->postJson(route('public.shots.plan.write', [$this->project, $drafted]), $body)
-            ->assertOk()
-            ->assertJsonPath('keyframes.0', ['position' => 1, 'title' => 'Walks Up', 'description' => 'The Female engineer walks up to the door.', 'spatial' => '', 'elements' => [$engineer->sqid]]);
-
-        actingAs($this->director, 'director')
-            ->postJson(route('public.shots.plan.write', [$this->project, $own]), $body)
-            ->assertOk()
-            ->assertJsonPath('keyframes.0.description', 'She walks up to the door.');
-
-        \App\Ai\Agents\PlanFrameWriter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'you write only the keyframes you are given')
-            && str_contains($prompt->prompt, "1. (new, to write)\n2. At the sign: She reads the sign."));
-        \App\Ai\Agents\PlanFrameWriter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Never add people, objects, poses, directions or details that the director did not give'));
-    });
-
-    it('rewrites a keyframe from what it has now, following the shot\'s rules', function () {
-        \App\Ai\Agents\PlanFrameWriter::fake([['keyframes' => []]]);
-        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['mode' => 'auto', 'keyframes' => []], 'rules' => ['The visitor never crosses the red line with more than one foot.']]);
-
-        actingAs($this->director, 'director')
-            ->postJson(route('public.shots.plan.write', [$this->project, $shot]), [
-                'message' => 'never more than one foot over the line',
-                'storyline' => 'She puts one foot over the line and steps back.',
-                'keyframes' => [['title' => 'Wrong zone', 'description' => 'She stands in the red zone.']],
-                'targets' => [['position' => 1, 'instruction' => 'Only one foot over the red line.']],
-            ])
-            ->assertOk();
-
-        \App\Ai\Agents\PlanFrameWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '1. (to rewrite) now: Wrong zone: She stands in the red zone.')
-            && str_contains((string) $prompt->agent->instructions(), "Rules the director set for this shot; the storyline and every keyframe follow them, never break one:\n- The visitor never crosses the red line with more than one foot."));
-    });
-
-    it('links the cast and sets the director ticks per keyframe, whatever the text calls them', function () {
-        $engineer = \App\Models\Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
-        $hall = \App\Models\Element::factory()->for($this->project)->place()->create(['name' => 'Indoor Assembly Hall']);
-        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => []]]);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plan', [$this->project, $shot]), [
-                'storyline' => 'She drops the cigarette and goes in.',
-                'framing' => ['size' => 'full'],
-                'keyframes' => [
-                    ['title' => 'At the sign', 'description' => 'The person looks at the sign.', 'elements' => [$engineer->sqid, $hall->sqid]],
-                    ['title' => 'Empty', 'description' => 'Only the building, the female engineer has gone in.', 'elements' => [$hall->sqid]],
-                ],
-            ])
-            ->assertSessionHasNoErrors();
-
-        expect(array_column($shot->fresh()->storylineKeyframes(), 'elements'))->toBe([['Female engineer', 'Indoor Assembly Hall'], ['Indoor Assembly Hall']]);
-    });
-
-    it('saves the plan as the director wrote it, keeping the spot and length the planner chose, linking the cast it names, until the keyframes are drawn', function () {
-        $engineer = \App\Models\Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
-        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['framing' => ['size' => 'full', 'spot' => 'At the gate.', 'light' => 'as the visual style', 'seconds' => 6], 'keyframes' => []]]);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plan', [$this->project, $shot]), [
-                'storyline' => 'She drops the cigarette in the bin and walks in.',
-                'rules' => ['She never drops the cigarette on the ground.', ' '],
-                'keyframes' => [
-                    ['title' => 'At the bin', 'description' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.'],
-                    ['title' => 'Empty gate', 'description' => 'The gate without anyone.'],
-                ],
-            ])
-            ->assertSessionHasNoErrors()
-            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
-
-        $shot->refresh();
-
-        expect($shot->chosenStoryline()['storyline'])->toBe('She drops the cigarette in the bin and walks in.')
-            ->and($shot->shotRules())->toBe(['She never drops the cigarette on the ground.'])
-            ->and($shot->storylineKeyframes())->toEqual([
-                ['title' => 'At the bin', 'description' => 'The female engineer stands left of the bin, the cigarette in her right hand held away from her body.', 'elements' => ['Female engineer']],
-                ['title' => 'Empty gate', 'description' => 'The gate without anyone.', 'elements' => []],
-            ])
-            ->and($shot->storyline['framing'])->toEqual(['spot' => 'At the gate.', 'seconds' => 6]);
-
-        \App\Models\Keyframe::factory()->for($shot)->create();
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plan', [$this->project, $shot]), ['storyline' => 'x', 'framing' => ['size' => 'full'], 'keyframes' => [['title' => 'A', 'description' => 'B']]])
-            ->assertSessionHasErrors('keyframes');
-    });
-
-    it('appends a new shot at the end of the sequence', function () {
-        Shot::factory()->for($this->project)->create(['position' => 1]);
-
-        $response = actingAs($this->director, 'director')->post(route('public.shots.store', $this->project), validShot());
-
-        $shot = Shot::query()->where('takeaway', 'Sending is quick and final')->firstOrFail();
-
-        $response->assertRedirect(route('public.shots.view', [$this->project, $shot]));
-
-        expect($shot->position)->toBe(2)
-            ->and($shot->status)->toBe(ShotStatus::STORYLINE_PENDING)
-            ->and($shot->title)->toBe('Sending is quick and final')
-            ->and($shot->subject)->toBeNull()
-            ->and($shot->action)->toBeNull();
-
-        // The planner drafts the plan; nothing is drawn until the director has checked it.
-        Queue::assertPushed(GenerateStoryline::class, fn(GenerateStoryline $job) => $job->shot->is($shot) && ! $job->draw);
-    });
-
-    it('keeps the cast and sets the director wants in the storylines', function () {
-        $visitor = Element::factory()->for($this->project)->create();
-        $quay = Element::factory()->for($this->project)->place()->create();
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.store', $this->project), validShot([
-                'notes' => 'It happens during the morning shift.',
-                'preferredElements' => [$quay->sqid, $visitor->sqid],
-            ]))
-            ->assertSessionHasNoErrors();
-
-        $shot = Shot::query()->firstOrFail();
-
-        expect($shot->preferredElements()->modelKeys())->toEqualCanonicalizing([$visitor->id, $quay->id])
-            ->and($shot->brief())
-            ->toContain('Takeaway: Sending is quick and final')
-            ->toContain('Context from the director: It happens during the morning shift.')
-            ->toContain("The director wants these in the shot:\n- ")
-            ->toContain($visitor->promptLine())
-            ->not->toContain('Subject:');
-    });
-
-    it('rejects cast and sets from another project', function () {
-        $foreign = Element::factory()->for(Project::factory())->create();
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.store', $this->project), validShot(['preferredElements' => [$foreign->sqid]]))
-            ->assertSessionHasErrors('preferredElements');
-
-        expect(Shot::query()->count())->toBe(0);
-    });
-
-    it('validates the brief', function (array $overrides, string $field) {
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.store', $this->project), validShot($overrides))
-            ->assertSessionHasErrors($field);
-    })->with([
-        'missing takeaway' => [['takeaway' => ''], 'takeaway'],
-        'unknown purpose override' => [['purposeOverride' => 'poetry'], 'purposeOverride'],
-    ]);
 
     it('forbids adding shots to another director\'s project', function () {
         $other = Project::factory()->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.store', $other), validShot())
+            ->post(route('public.shots.store', $other))
             ->assertForbidden();
+    });
+
+    it('puts the takeaway agreed in the chat into the shot, and keeps it when a later plan has none', function () {
+        Queue::fake();
+        PlanDirector::fake([
+            directorReply(['proposal' => agreedPlan(['takeaway' => 'Wear your badge visibly on site'])]),
+            directorReply(['proposal' => agreedPlan(['takeaway' => ''])]),
+        ]);
+        $shot = planShot($this->project, ['takeaway' => '', 'title' => '']);
+
+        talkTo($this, $shot, 'yes, write it');
+
+        expect($shot->fresh())->takeaway->toBe('Wear your badge visibly on site')->title->toBe('Wear your badge visibly on site');
+
+        $shot->fresh()->forceFill(['status' => ShotStatus::STORYLINE_READY])->save();
+        talkTo($this, $shot, 'make it shorter');
+
+        expect($shot->fresh()->takeaway)->toBe('Wear your badge visibly on site');
+    });
+
+    it('talks first, then puts the agreed plan into the shot and draws it', function () {
+        Queue::fake();
+        $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
+        PlanDirector::fake([
+            directorReply(['reply' => 'Should the camera stay in front of her?', 'cast' => ['Female engineer']]),
+            directorReply(['reply' => 'The plan is written.', 'proposal' => agreedPlan([
+                'kind' => 'close-up',
+                'storyline' => 'She pulls the cord and the badge comes round to her chest.',
+                'keyframes' => [['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['female engineer']]],
+            ])]),
+        ]);
+        $shot = planShot($this->project, [
+            'chosen_storyline' => ['title' => 'Badge', 'storyline' => 'She wears her badge.'],
+            'storyline' => ['keyframes' => [['title' => 'Badge', 'description' => 'She wears her badge.', 'elements' => ['Female engineer']]]],
+        ]);
+
+        talkTo($this, $shot, 'the badge starts on her back')
+            ->assertJsonPath('messages.0', ['role' => 'director', 'text' => 'the badge starts on her back'])
+            ->assertJsonPath('messages.1.cast', [$engineer->sqid])
+            ->assertJsonMissingPath('messages.1.proposal')
+            ->assertJsonPath('reload', false);
+
+        talkTo($this, $shot, 'yes, in front of her')
+            ->assertJsonPath('messages.3.proposal', ['kind' => 'close-up', 'settingFrom' => null])
+            ->assertJsonPath('reload', true);
+
+        $shot->refresh();
+
+        expect($shot->kind)->toBe(App\Enums\ShotKind::CLOSE_UP)
+            ->and($shot->chosenStoryline()['storyline'])->toBe('She pulls the cord and the badge comes round to her chest.')
+            ->and($shot->storylineKeyframes())->toEqual([['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['Female engineer']]])
+            ->and($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
+            ->and($shot->plan_chat)->toHaveCount(4);
+        Queue::assertPushed(App\Jobs\GenerateKeyframes::class);
+        // The conversation and the plan as saved are sent along every turn; nothing becomes a rule.
+        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Director: the badge starts on her back')
+            && str_contains($prompt->prompt, 'You: Should the camera stay in front of her?')
+            && str_contains($prompt->prompt, '1. Badge: She wears her badge. (cast and sets: Female engineer)')
+            && str_contains((string) $prompt->agent->instructions(), 'There are no separate rules for a shot'));
+    });
+
+    it('builds the shot up step by step and offers to make what the cast and sets miss', function () {
+        PlanDirector::fake([
+            directorReply(['reply' => 'There is no badge clip yet; shall I make one?', 'stage' => 'cast', 'new_elements' => [['name' => 'Badge clip', 'type' => 'object', 'description' => 'A small metal clip on a short red cord.']]]),
+        ]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'yes, those keyframes work')
+            ->assertJsonPath('messages.1.stage', 'cast')
+            ->assertJsonPath('reload', true);
+
+        expect($shot->fresh()->storyline['new_elements'])->toBe([['name' => 'Badge clip', 'type' => 'object', 'description' => 'A small metal clip on a short red cord.']]);
+        PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), '- close-up: when'));
+    });
+
+    it('tells the story in several shots right after this one, grouped together', function () {
+        PlanDirector::fake([
+            directorReply(['reply' => 'Then this shot is the arrival; the others wait right after it.', 'stage' => 'kind', 'shots' => [
+                ['takeaway' => 'Report a damaged badge at reception', 'kind' => 'scene', 'idea' => 'A visitor walks up to the counter.', 'setting' => 'new_place', 'same_place_as' => 0],
+                ['takeaway' => 'Hand the damaged badge over', 'kind' => 'close-up', 'idea' => 'Hands slide the cracked badge across the counter.', 'setting' => 'continues', 'same_place_as' => 0],
+                ['takeaway' => 'Get a working badge back', 'kind' => 'close-up', 'idea' => 'The receptionist hands over a new badge.', 'setting' => 'continues', 'same_place_as' => 0],
+            ]]),
+            directorReply(['reply' => 'Shall the receptionist slide it over?', 'stage' => 'idea']),
+        ]);
+        $before = Shot::factory()->for($this->project)->create(['position' => 1]);
+        $shot = planShot($this->project, ['position' => 2]);
+        $after = Shot::factory()->for($this->project)->create(['position' => 3]);
+
+        talkTo($this, $shot, 'yes, those three shots')->assertJsonPath('reload', true);
+
+        $shots = $this->project->shots()->get();
+        $group = $shot->fresh()->group_key;
+
+        expect($shots->pluck('position')->all())->toBe([1, 2, 3, 4, 5])
+            ->and($shots->pluck('id')->all())->toBe([$before->id, $shot->id, $shots[2]->id, $shots[3]->id, $after->id])
+            ->and($group)->not->toBeNull()
+            ->and($shots->slice(1, 3)->pluck('group_key')->unique()->all())->toBe([$group])
+            ->and($shot->fresh()->takeaway)->toBe('Report a damaged badge at reception')
+            ->and($shot->fresh()->notes)->toBe('A visitor walks up to the counter.')
+            ->and($shots[2]->takeaway)->toBe('Hand the damaged badge over')
+            ->and($shots[2]->kind)->toBe(App\Enums\ShotKind::CLOSE_UP)
+            ->and($shots[2]->status)->toBe(ShotStatus::STORYLINE_READY)
+            ->and($shots[2]->plan_chat[0]['text'])->toContain('Hands slide the cracked badge across the counter.');
+
+        // The next shot's chat knows the whole sequence and where each shot plays.
+        talkTo($this, $shots[2], 'yes');
+
+        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '1. SH020: A visitor walks up to the counter. (scene)')
+            && str_contains($prompt->prompt, '2. SH030: Hands slide the cracked badge across the counter. (close-up, continuing from SH020) <- this shot')
+            && str_contains((string) $prompt->agent->instructions(), 'what another shot of the sequence shows never happens in this one'));
+    });
+
+    it('offers to make a new person when the director asks for one', function () {
+        PlanDirector::fake([
+            directorReply(['reply' => 'Shall I make him?', 'stage' => 'cast', 'new_elements' => [['name' => 'Male visitor', 'type' => 'person', 'description' => 'A man in his forties in a grey jacket, with no lanyard or badge.']]]),
+        ]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'make another male visitor without a badge');
+
+        expect($shot->fresh()->storyline['new_elements'][0]['type'])->toBe('person');
+    });
+
+    it('drops an offer to make cast and sets once the conversation moves on', function () {
+        PlanDirector::fake([directorReply(['reply' => 'What did not work?'])]);
+        $shot = planShot($this->project, ['storyline' => ['keyframes' => [], 'new_elements' => [['name' => 'Permit holder', 'type' => 'object', 'description' => 'A clear sleeve.']]]]);
+
+        talkTo($this, $shot, 'lets start over')->assertJsonPath('reload', true);
+
+        expect($shot->fresh()->storyline)->not->toHaveKey('new_elements');
+    });
+
+    it('keeps the cast and sets made from the chat with the message', function () {
+        $badge = Element::factory()->for($this->project)->create(['name' => 'Broken badge holder']);
+        PlanDirector::fake([directorReply(['reply' => 'I will use it.'])]);
+        $shot = planShot($this->project);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'I added Broken badge holder to the cast and sets.', 'made' => [$badge->sqid, 'gone']])
+            ->assertOk()
+            ->assertJsonPath('messages.0.made', [$badge->sqid]);
+    });
+
+    it('has the picture of an item in the cast and sets redrawn when asked in the chat', function () {
+        Queue::fake();
+        $tray = Element::factory()->for($this->project)->create(['name' => 'Red report tray']);
+        PlanDirector::fake([
+            directorReply(['reply' => 'I am redrawing the tray empty.', 'adjust_elements' => [['name' => 'red report tray', 'change' => 'Make the tray empty.'], ['name' => 'Unknown thing', 'change' => 'Make it blue.']]]),
+            directorReply(['reply' => 'It is being redrawn.', 'adjust_elements' => [['name' => 'Red report tray', 'change' => 'Empty it.']]]),
+        ]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'the tray should be empty')
+            ->assertJsonPath('messages.1.adjusted', [$tray->sqid])
+            ->assertJsonPath('reload', true);
+
+        expect($tray->fresh()->rendering)->toBeTrue();
+        Queue::assertPushed(App\Jobs\UpdateElementImage::class, fn($job) => $job->element->is($tray) && $job->instruction === 'Make the tray empty.');
+
+        // Asked again while it is still drawn: shown with its loader, not drawn twice.
+        talkTo($this, $shot, 'it still has an item in it')->assertJsonPath('messages.3.adjusted', [$tray->sqid]);
+
+        Queue::assertPushed(App\Jobs\UpdateElementImage::class, 1);
+    });
+
+    it('times the shot for the agreed plan and writes the voice-over again', function () {
+        Queue::fake();
+        PlanDirector::fake([directorReply(['proposal' => agreedPlan(['seconds' => 5])])]);
+        $shot = planShot($this->project, [
+            'duration' => 8,
+            'voice_over' => 'An old text for nine seconds.',
+            'chosen_storyline' => ['title' => 'Old', 'storyline' => 'A long plan.'],
+            'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 9], 'keyframes' => [['title' => 'Old', 'description' => 'A long plan.']]],
+        ]);
+
+        talkTo($this, $shot, 'yes');
+
+        expect($shot->fresh())
+            ->durationInSeconds()->toBe(5)
+            ->voice_over->toBeNull()
+            ->and($shot->fresh()->storylineFraming())->toBe(['spot' => 'The counter.', 'seconds' => 5]);
+        Queue::assertPushed(App\Jobs\GenerateVoiceOver::class);
+    });
+
+    it('links the cast and sets a plan names by their exact names, leaving out what the project does not have', function () {
+        Queue::fake();
+        Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
+        Element::factory()->for($this->project)->place()->create(['name' => 'Indoor Assembly Hall']);
+        PlanDirector::fake([directorReply(['proposal' => agreedPlan(['keyframes' => [
+            ['title' => 'At the sign', 'description' => 'She looks at the sign.', 'spatial' => '', 'elements' => ['female engineer', 'INDOOR ASSEMBLY HALL', 'A crane']],
+            ['title' => 'Empty', 'description' => 'Only the hall.', 'spatial' => '', 'elements' => ['Indoor Assembly Hall']],
+        ]])])]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'yes');
+
+        expect(array_column($shot->fresh()->storylineKeyframes(), 'elements'))->toBe([['Female engineer', 'Indoor Assembly Hall'], ['Indoor Assembly Hall']]);
+    });
+
+    it('waits to draw until new cast pictures are ready, then draws by itself', function () {
+        Queue::fake();
+        $clip = Element::factory()->for($this->project)->create(['name' => 'Badge clip', 'rendering' => true]);
+        PlanDirector::fake([directorReply(['proposal' => agreedPlan(['keyframes' => [['title' => 'Clip', 'description' => 'The Badge clip on the vest.', 'spatial' => '', 'elements' => ['Badge clip']]]])])]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'yes');
+
+        expect($shot->fresh())->status->toBe(ShotStatus::STORYLINE_READY)
+            ->and($shot->fresh()->waitsFor())->toBe('the pictures of the new cast and sets');
+        Queue::assertNotPushed(App\Jobs\GenerateKeyframes::class);
+
+        $clip->forceFill(['rendering' => false])->save();
+        Shot::drawWaitingShots($this->project->id);
+
+        expect($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING);
+        Queue::assertPushed(App\Jobs\GenerateKeyframes::class);
     });
 });
 
-describe('view and update', function () {
+describe('view', function () {
     it('shows the shot workspace with its siblings', function () {
         $shots = Shot::factory()->for($this->project)->count(3)->sequence(
             ['position' => 1],
@@ -282,16 +342,6 @@ describe('view and update', function () {
                 ->where('siblings.0.busy', false)
                 ->where('siblings.1.busy', true)
                 ->where('siblings.2.busy', true));
-    });
-
-    it('updates an owned shot', function () {
-        $shot = Shot::factory()->for($this->project)->create();
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.update', [$this->project, $shot]), validShot(['takeaway' => 'Posting is easy', 'duration' => 8]))
-            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
-
-        expect($shot->fresh())->takeaway->toBe('Posting is easy')->title->toBe('Posting is easy')->duration->toBe(8);
     });
 
     it('does not resolve a shot through a project it does not belong to', function () {

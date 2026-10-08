@@ -3,42 +3,57 @@
     <!-- One row: as many options fit as the first batch, further ones scroll sideways. -->
     <!-- One row at full height; options beyond the width scroll sideways. -->
     <div ref="row" class="flex min-h-0 flex-1 gap-2 overflow-x-auto pb-2">
-      <button
-        v-for="(option, i) in options"
-        :key="option.id"
-        type="button"
-        class="group flex h-full min-h-0 shrink-0 items-center justify-center"
-        :aria-pressed="option.id === selectedId"
-        :disabled="pending || adjusting"
-        @click="selectedId = option.id"
-      >
-        <!-- Sized like the placeholders: one side fills the cell and the ratio sets the other, so the frame hugs the image. -->
-        <span class="relative inline-flex max-h-full max-w-full" :style="tileSize">
-          <img
-            :src="option.imageUrl"
-            :alt="field === 'plate' ? $t('Place :n', { n: String(i + 1) }) : $t('Option :n', { n: String(i + 1) })"
-            :class="
-              cn(
-                'size-full rounded-xl border border-border bg-card object-cover transition',
-                option.id === selectedId
-                  ? 'border-signal ring-4 ring-signal/40'
-                  : 'group-hover:border-muted-foreground/60',
-              )
-            "
-          />
-          <span
-            :class="
-              cn(
-                'absolute top-3 left-3 flex size-8 items-center justify-center rounded-full bg-background/80 text-sm font-semibold tabular-nums backdrop-blur-sm',
-                option.id === selectedId && 'bg-signal text-primary-foreground',
-              )
-            "
-          >
-            <Check v-if="option.id === selectedId" class="size-4" />
-            <template v-else>{{ i + 1 }}</template>
+      <div v-for="(option, i) in options" :key="option.id" class="relative flex h-full min-h-0 shrink-0">
+        <button
+          type="button"
+          class="group flex h-full min-h-0 shrink-0 items-center justify-center"
+          :aria-pressed="option.id === selectedId"
+          :disabled="pending || adjusting"
+          @click="selectedId = option.id"
+        >
+          <!-- Sized like the placeholders: one side fills the cell and the ratio sets the other, so the frame hugs the image. -->
+          <span class="relative inline-flex max-h-full max-w-full" :style="tileSize">
+            <img
+              :src="option.imageUrl"
+              :alt="field === 'plate' ? $t('Place :n', { n: String(i + 1) }) : $t('Option :n', { n: String(i + 1) })"
+              :class="
+                cn(
+                  'size-full rounded-xl border border-border bg-card object-cover transition',
+                  option.id === selectedId
+                    ? 'border-signal ring-4 ring-signal/40'
+                    : 'group-hover:border-muted-foreground/60',
+                )
+              "
+            />
+            <span
+              :class="
+                cn(
+                  'absolute top-3 left-3 flex size-8 items-center justify-center rounded-full bg-background/80 text-sm font-semibold tabular-nums backdrop-blur-sm',
+                  option.id === selectedId && 'bg-signal text-primary-foreground',
+                )
+              "
+            >
+              <Check v-if="option.id === selectedId" class="size-4" />
+              <template v-else>{{ i + 1 }}</template>
+            </span>
           </span>
-        </span>
-      </button>
+        </button>
+        <!-- Only the selected option can be used, from its own card. -->
+        <div
+          v-if="option.id === selectedId && !pending && !adjusting"
+          class="absolute inset-x-0 bottom-5 flex flex-col items-center gap-2 px-4"
+        >
+          <Button type="button" class="shadow-lg" :disabled="choice.processing" @click="choose">
+            <LoaderCircle v-if="choice.processing" class="size-4 animate-spin" />
+            {{ field === 'plate' ? $t('Use this place') : $t('Use this keyframe') }}
+            <ArrowRight v-if="!choice.processing" class="size-4" />
+          </Button>
+          <InputError
+            class="rounded bg-background/90 px-2 py-1"
+            :message="choice.errors.render ?? choice.errors.plate"
+          />
+        </div>
+      </div>
 
       <div
         v-for="n in placeholders"
@@ -58,13 +73,17 @@
       :field="field"
       :reset-url="resetUrl"
       :disabled="pending || adjusting"
+      hide-choose
     />
   </div>
 </template>
 <script setup lang="ts">
+import { useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
+import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
-import { Check, LoaderCircle } from 'lucide-vue-next'
+import { Button } from '@shared:ui/button'
+import { ArrowRight, Check, LoaderCircle } from 'lucide-vue-next'
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
 
 import FirstKeyframeActions from './FirstKeyframeActions.vue'
@@ -105,6 +124,16 @@ const tileSize = computed(() => ({
   aspectRatio: props.aspectRatio.replace(':', ' / '),
   height: '100%',
 }))
+
+const choice = useForm<{ render?: number | null; plate?: number | null }>({})
+
+const choose = () => {
+  if (selectedId.value === null) return
+
+  choice
+    .transform(() => ({ [props.field ?? 'render']: selectedId.value }))
+    .post(props.chooseUrl, { preserveScroll: true })
+}
 
 const row = useTemplateRef<HTMLElement>('row')
 

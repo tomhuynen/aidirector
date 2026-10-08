@@ -17,8 +17,9 @@ use Laravel\Ai\Responses\StructuredAgentResponse;
 use Throwable;
 
 /**
- * Plans the keyframes for a shot from its chosen storyline, then hands the
- * plan to the job that renders them.
+ * Drafts the plan of a shot from its takeaway, such as for the shots the
+ * project setup makes: the storyline and the keyframes. The director goes on
+ * from the draft in the plan chat; nothing is drawn yet.
  */
 #[DeleteWhenMissingModels]
 class GenerateStoryline implements ShouldQueue
@@ -31,10 +32,7 @@ class GenerateStoryline implements ShouldQueue
 
     public function __construct(
         public readonly Shot $shot,
-        public readonly ?string $instruction = null,
-        /** Off for shots created in bulk: they are planned, and drawn once the director asks for it. */
-        public readonly bool $draw = true,
-        /** Keep the kind of shot on a fresh plan too, such as for the shots made by a split. */
+        /** Keep the kind the shot already has, such as the one the project setup chose; otherwise the planner chooses. */
         public readonly bool $keepKind = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
@@ -44,10 +42,7 @@ class GenerateStoryline implements ShouldQueue
     {
         $shot = $this->shot->load('project');
 
-        // A fresh plan lets the planner choose the kind again; a revision keeps the current one.
-        $fresh = blank($this->instruction) || $shot->storyline === null;
-
-        if ($fresh && ! $this->keepKind) {
+        if (! $this->keepKind) {
             $shot->kind = null;
         }
 
@@ -56,7 +51,7 @@ class GenerateStoryline implements ShouldQueue
 
         /** @var StructuredAgentResponse $response */
         $response = $writer->prompt(
-            $writer->promptFor($this->instruction),
+            $writer->promptFor(),
             provider: 'openrouter',
             model: Config::get('pipeline.models.text'),
         );
@@ -83,46 +78,49 @@ class GenerateStoryline implements ShouldQueue
             ],
             'kind' => $shot->kind ?? ShotKind::tryFrom((string) ($response['kind'] ?? '')) ?? ShotKind::SCENE,
             'storyline' => [
-                'mode' => 'auto',
-                // A fresh plan may propose a split into two shots; a revision keeps what was proposed or dismissed.
-                ...(($split = $fresh ? self::splitFrom($response['split'] ?? null) : ($shot->storyline['split'] ?? null)) !== null ? ['split' => $split] : []),
+                // Places and objects the plan needs that the cast and sets do not have yet, for the director to add.
+                ...(($new = self::newElementsFrom($shot, $response['new_elements'] ?? null)) !== [] ? ['new_elements' => $new] : []),
                 'framing' => $response['framing'],
                 'keyframes' => array_values($response['keyframes']),
             ],
             'storyline_error' => null,
+            // The plan chat starts from the draft.
+            'plan_chat' => [[
+                'role' => 'assistant',
+                'stage' => 'plan',
+                'text' => __('I drafted this plan as a :kind: :storyline What would you like to change?', [
+                    'kind' => mb_strtolower(($shot->kind ?? ShotKind::tryFrom((string) ($response['kind'] ?? '')) ?? ShotKind::SCENE)->label()),
+                    'storyline' => trim((string) ($response['storyline'] ?? '')),
+                ]),
+            ]],
             'voice_over' => null,
-            'status' => $this->draw ? ShotStatus::FIRST_KEYFRAME_PENDING : ShotStatus::STORYLINE_READY,
+            'status' => ShotStatus::STORYLINE_READY,
         ])->save();
-
-        if ($this->draw) {
-            GenerateKeyframes::dispatch($shot);
-        }
 
         GenerateVoiceOver::dispatch($shot);
     }
 
     /**
-     * The two parts the planner proposes to split the shot into, when the
-     * takeaway holds two messages.
+     * The places and objects the planner proposes to add to the cast and
+     * sets, without the ones the project already has under that name.
      *
-     * @return array{parts: list<array{takeaway: string, kind: string}>}|null
+     * @return list<array{name: string, type: string, description: string}>
      */
-    public static function splitFrom(mixed $split): ?array
+    public static function newElementsFrom(Shot $shot, mixed $proposed): array
     {
-        if (! is_array($split) || ! ($split['needed'] ?? false)) {
-            return null;
-        }
+        $existing = $shot->project->elements()->pluck('name')->map(fn(string $name) => mb_strtolower(trim($name)))->all();
 
-        $parts = collect((array) ($split['parts'] ?? []))
-            ->filter(fn(mixed $part) => is_array($part) && trim((string) ($part['takeaway'] ?? '')) !== '')
-            ->map(fn(array $part) => [
-                'takeaway' => trim((string) $part['takeaway']),
-                'kind' => (ShotKind::tryFrom((string) ($part['kind'] ?? '')) ?? ShotKind::SCENE)->value,
+        return collect(is_array($proposed) ? $proposed : [])
+            ->filter(fn(mixed $element) => is_array($element) && trim((string) ($element['name'] ?? '')) !== '' && trim((string) ($element['description'] ?? '')) !== '')
+            ->map(fn(array $element) => [
+                'name' => trim((string) $element['name']),
+                'type' => in_array($element['type'] ?? '', ['person', 'place'], true) ? $element['type'] : 'object',
+                'description' => trim((string) $element['description']),
             ])
+            ->reject(fn(array $element) => in_array(mb_strtolower($element['name']), $existing, true))
+            ->unique(fn(array $element) => mb_strtolower($element['name']))
             ->values()
             ->all();
-
-        return count($parts) === 2 ? ['parts' => $parts] : null;
     }
 
     public function failed(?Throwable $exception): void

@@ -67,19 +67,26 @@ class KeyframeImageBrief
             $lines[] = "Project rules, always follow them:\n{$rules}";
         }
 
-        if (($shotRules = $shot->rulesBrief()) !== '') {
-            $lines[] = "Rules for this shot, never break them:\n{$shotRules}";
-        }
+        $closeUp = $shot->kindOrScene() === ShotKind::CLOSE_UP;
 
-        $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';
-        $lines[] = 'Staging: the people are inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches a figure: no railings, pillars, poles, barriers or machines directly behind or in front of the people. Any sign or context object sits on that surface beside the people, clearly readable, not touching them. The ground near the feet is plain.';
-        $lines[] = 'Do not add text, captions or watermarks. Logos, signs and markings that belong to the place stay exactly as they are.';
+        // A close-up is about the hands and the object; the scene's composition and staging would pull back to whole figures.
+        if ($closeUp) {
+            $lines[] = 'Composition: the object and the hands are the subject, large, sharp and in the middle of the frame. Draw only the part of the people the frame shows: their clothing exactly as in their pictures, one layer, never a second jacket or shirt.';
+        } else {
+            $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';
+            $lines[] = 'Staging: the people are inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches a figure: no railings, pillars, poles, barriers or machines directly behind or in front of the people. Any sign or context object sits on that surface beside the people, clearly readable, not touching them. The ground near the feet is plain.';
+        }
+        $lines[] = 'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that belong to the place stay exactly as they are.';
 
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
         $attached = 0;
 
         if ($references->style !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly: the same medium, shading, line work, colours and lighting. Do not copy its subjects, panels or layout.';
+        }
+
+        if ($references->setting !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. This keyframe plays in exactly that place, at that moment or right after it: keep its furniture, surfaces, objects, colours and light, and the people's clothing. Keep the screen direction: whoever is on the left there is on the left here, and comes in from the same side. Move the camera as the framing says; never copy that image's framing.";
         }
 
         foreach ($references->elementImages as $entry) {
@@ -90,7 +97,9 @@ class KeyframeImageBrief
                 continue;
             }
 
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says. Do not copy its background or pose.";
+            $lines[] = $closeUp && $element->type === ElementType::PERSON
+                ? 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} (person). Use it only for their clothing, skin and hands, exactly as in the picture; draw only the part of {$element->name} this close frame shows. Do not copy its background, pose or framing."
+                : 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says. Do not copy its background or pose.";
         }
 
         return implode("\n", $lines);
@@ -119,6 +128,10 @@ class KeyframeImageBrief
 
         if ($references->style !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly. Do not copy its subjects or layout.';
+        }
+
+        if ($references->setting !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. Draw this same place: the same walls, floor, furniture, objects, colours and light, without its people. The camera for this option decides where it stands.";
         }
 
         foreach ($references->elementImages as $entry) {
@@ -180,10 +193,6 @@ class KeyframeImageBrief
             $lines[] = "Project rules, always follow them:\n{$rules}";
         }
 
-        if (($shotRules = $shot->rulesBrief()) !== '') {
-            $lines[] = "Rules for this shot, never break them:\n{$shotRules}";
-        }
-
         $ordinals = ['second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
         $attached = 0;
 
@@ -196,7 +205,7 @@ class KeyframeImageBrief
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the people hold, what is in their pockets and what lies in a bin or box, unless this keyframe changes it, and keep the people looking the same as there. Do not copy its pose.';
         }
 
-        $lines[] = 'Do not add text, captions or watermarks. Signs and markings already in the first image stay exactly as they are.';
+        $lines[] = 'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are.';
 
         return implode("\n", $lines);
     }
@@ -216,9 +225,7 @@ class KeyframeImageBrief
             "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
             '',
             'Draw the place where this shot plays, empty: no people at all. Every keyframe of the shot is drawn on top of this picture later, so the camera, the framing and the place must suit all of them.',
-            $shot->kindOrScene() === ShotKind::CLOSE_UP
-                ? 'Framing: ' . ShotSize::CLOSE_UP->framing() . ' Frame it close on the surface where the hands will act, empty of hands and of what they will hold: the surface fills most of the frame, seen from slightly above, at the distance where hands and a small object will fill most of the frame.'
-                : 'Framing: ' . ShotSize::FULL->framing() . ' Frame it for the people who will stand at the spot: an adult standing there fills about two thirds of the frame height.',
+            'Framing: ' . ShotSize::FULL->framing() . ' Frame it for the people who will stand at the spot: an adult standing there fills about two thirds of the frame height.',
         ];
 
         if (filled($framing['spot'] ?? null)) {
@@ -230,7 +237,7 @@ class KeyframeImageBrief
         array_push(
             $lines,
             'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later.',
-            'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions or watermarks.',
+            'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours.',
             self::plateVariation($variation),
         );
 
@@ -243,7 +250,7 @@ class KeyframeImageBrief
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it for the look of the place, not for the viewpoint.' : ': draw it exactly like it, at its place in the scene.');
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it, at its place in the scene.');
         }
 
         return implode("\n", $lines);
@@ -287,28 +294,27 @@ class KeyframeImageBrief
     public static function plateVariation(int $index): string
     {
         $directions = [
-            'Stage it as described, with the camera straight on.',
-            'Look at the spot from the opposite side of the place: the background behind the spot is different, and objects that stood left now stand right.',
-            'Put the camera at a clear angle of about 45 degrees to the side and a little lower, with another part of the place in the background.',
+            'The camera faces the spot straight on, at eye level, as described.',
+            'The camera is turned around: it stands at the other end of the place and looks back at the spot, so the background behind the spot is another part of the place, and what stood left now stands right.',
+            'The camera stands side-on across the place, close and a little lower: the spot and the object the story turns on are large in the foreground, and the far side of the place fills the back.',
         ];
 
-        return 'Variation for this place: ' . $directions[$index % count($directions)] . ' Keep the framing for the people as above.';
+        return 'Camera for this option, it must look clearly different from the other options in where the camera stands and what is behind the spot: ' . $directions[$index % count($directions)] . ' Keep the framing for the people as above.';
     }
 
     /**
      * The prompt for a change to an empty place before it is chosen: only the
      * asked change is made, and the place stays without people.
      */
-    public static function tweakPlate(string $instruction, string $shotRules = ''): string
+    public static function tweakPlate(string $instruction): string
     {
-        return implode("\n", array_filter([
+        return implode("\n", [
             'Edit the attached image. It is the empty place of this shot, without any people, seen from a camera that does not move.',
             "Change only this: {$instruction}",
             'Keep everything else exactly as it is: the walls, doors, machines, objects, the floor and every marking or painted line on it, the background, the framing, the camera, the light and the style.',
             'Do not add people.',
-            $shotRules !== '' ? "Rules for this shot, the change never breaks them:\n{$shotRules}" : null,
-            'Do not add text, captions or watermarks. Signs and markings already in the image stay exactly as they are.',
-        ]));
+            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the image stay exactly as they are.',
+        ]);
     }
 
     /**
@@ -317,7 +323,7 @@ class KeyframeImageBrief
      * everything that differs from the empty place, so only the asked change
      * is new and the background stays the place's own.
      */
-    public static function tweakOnPlate(string $instruction, bool $withPreviousKeyframe = false, string $shotRules = ''): string
+    public static function tweakOnPlate(string $instruction, bool $withPreviousKeyframe = false): string
     {
         return implode("\n", array_filter([
             'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move. Everything in it stays exactly as it is: the walls, doors, machines, the floor and every marking or painted line on it, and the background, all at exactly the same place, size and angle. The framing, the camera, the light and the style stay the same.',
@@ -326,8 +332,7 @@ class KeyframeImageBrief
             $withPreviousKeyframe
                 ? 'The third attached image is the keyframe directly before this one in the same shot, for how the people and objects look. Do not copy its pose.'
                 : null,
-            $shotRules !== '' ? "Rules for this shot, the change never breaks them:\n{$shotRules}" : null,
-            'Do not add text, captions or watermarks. Signs and markings already in the first image stay exactly as they are.',
+            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are.',
         ]));
     }
 
@@ -335,7 +340,7 @@ class KeyframeImageBrief
      * The prompt for correcting the current render of a keyframe with a small change.
      * With `$withPreviousKeyframe` the keyframe before it is attached second, as context.
      */
-    public static function tweak(string $instruction, bool $withPreviousKeyframe = false, string $shotRules = ''): string
+    public static function tweak(string $instruction, bool $withPreviousKeyframe = false): string
     {
         return implode("\n", array_filter([
             $withPreviousKeyframe ? 'Edit the first attached image.' : 'Edit the attached image.',
@@ -344,8 +349,7 @@ class KeyframeImageBrief
             $withPreviousKeyframe
                 ? 'The second attached image is the keyframe directly before this one in the same shot. Use it to see how the character and the objects look and where they are, and copy them from it when the change asks for something that is missing. Do not copy its pose or framing.'
                 : null,
-            $shotRules !== '' ? "Rules for this shot, the change never breaks them:\n{$shotRules}" : null,
-            'Do not add text, captions or watermarks. Logos, signs and markings that are already in the image stay exactly as they are.',
+            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that are already in the image stay exactly as they are.',
         ]));
     }
 }

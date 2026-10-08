@@ -11,8 +11,8 @@ use App\Models\Shot;
 use Illuminate\Support\Collection;
 
 /**
- * Planning the keyframes of a shot, once for every storyline suggested for
- * it, as if the director had chosen that one.
+ * Planning a shot from its takeaway: the storyline, the keyframes and their
+ * descriptions, as the planner drafts it for a shot made in the project setup.
  */
 class KeyframePlanBenchmark extends Benchmark
 {
@@ -23,28 +23,27 @@ class KeyframePlanBenchmark extends Benchmark
 
     public function description(): string
     {
-        return 'Break a chosen storyline into keyframes with image prompts.';
+        return 'Plan a shot from its takeaway: storyline and keyframe descriptions.';
     }
 
     public function cases(): Collection
     {
-        return Shot::query()->with('project')->whereNotNull('storyline_options')->orderBy('id')->get()
-            ->flatMap(fn(Shot $shot) => collect($shot->storylineOptions())->map(fn(array $option, int $index) => new BenchCase(
-                key: "shot-{$shot->getKey()}-option-" . ($index + 1),
-                label: "{$shot->project->title} · {$shot->title} · {$option['title']}",
-                data: ['shot' => $shot->getKey(), 'option' => $index],
-            )))
+        return Shot::query()->with('project')->where('takeaway', '!=', '')->orderBy('id')->get()
+            ->map(fn(Shot $shot) => new BenchCase(
+                key: "shot-{$shot->getKey()}",
+                label: "{$shot->project->title} · {$shot->title}",
+                data: ['shot' => $shot->getKey()],
+            ))
             ->values();
     }
 
     /**
-     * With the storyline of this case chosen and no plan yet, as right after
-     * the director picks it.
+     * The shot with only its takeaway, before anything is planned.
      */
     public function agent(BenchCase $case): StorylineWriter
     {
         $shot = Shot::query()->with('project')->findOrFail($case->data['shot']);
-        $shot->chosen_storyline = $shot->storylineOptions()[$case->data['option']];
+        $shot->chosen_storyline = null;
         $shot->storyline = null;
 
         return new StorylineWriter($shot);
@@ -63,11 +62,11 @@ class KeyframePlanBenchmark extends Benchmark
     public function criteria(): array
     {
         return [
-            'storyline' => 'The keyframes tell the chosen storyline from start to end and land the takeaway, with the fewest keyframes that do so.',
+            'storyline' => 'The storyline lands the takeaway with one clear, visible action, and the keyframes tell it from start to end with the fewest keyframes that do so.',
             'readable' => 'Every keyframe is one clearly readable state (pose, position, object state), not motion.',
-            'consistent' => 'The subject, the spot in the place and the objects are described with the same wording in every image prompt.',
-            'staging' => 'Every prompt plays at one spot that belongs to the place, with no invented wall in front of it, nothing crossing a figure, at most two context objects and plain ground; the shot size suits what the shot communicates.',
-            'rules' => 'Prompts are 50 to 90 words, present tense, no style words, the elements list only names cast and sets that are visible, no camera language, no text, English.',
+            'consistent' => 'The subject, the spot in the place and the objects are described with the same wording in every description.',
+            'staging' => 'Every keyframe plays at one spot that belongs to the place, with no invented wall in front of it, nothing crossing a figure, at most two context objects and plain ground.',
+            'rules' => 'Descriptions are 30 to 70 words, present tense, no style words, the elements list only names cast and sets that are visible, no camera language, no text, English.',
         ];
     }
 }

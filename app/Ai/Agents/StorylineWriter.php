@@ -6,6 +6,7 @@ namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Briefs\PurposeBrief;
+use App\Ai\Briefs\VideoLimitsBrief;
 use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ShotKind;
 use App\Models\Shot;
@@ -17,8 +18,9 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 /**
- * Turns the chosen storyline of a shot into keyframes: an ordered list of
- * clearly readable moments the image and video models can work from.
+ * Plans a shot from its takeaway: the storyline and the keyframes, an ordered
+ * list of clearly readable moments the image and video models can work from.
+ * The plan director writes its plans by these same rules.
  */
 class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
@@ -35,6 +37,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         $style = $project->style;
         $min = Config::get('pipeline.keyframes.min');
         $max = Config::get('pipeline.keyframes.max');
+        $limits = VideoLimitsBrief::brief();
 
         return <<<INSTRUCTIONS
             You are an experienced film director planning a single shot for an animated production.
@@ -53,11 +56,12 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             Cast and sets of this project, recurring people, places and objects:
             {$project->elementsBrief()}
             {$this->projectRules()}
-            Reuse one of these when this shot is about that person, place or object, and then call it by its exact name. Never describe how one of these looks: the image model draws each from its picture. The people in the shot always come from this list; never introduce a new person. Introduce a new place or object only when the story needs it; never force an existing one into a story where it does not belong.
+            Reuse one of these when this shot is about that person, place or object, and then call it by its exact name. Never describe how one of these looks: the image model draws each from its picture. The people in the shot always come from this list; never introduce a new person. Introduce a new place or object only when the story needs it; never force an existing one into a story where it does not belong. Give every new place or object the story turns on, such as a design office, a parking permit or a damaged badge, in new_elements with a short name, its type and one or two sentences on how it looks, concrete enough to draw it the same way every time, without text: no words, labels, numbers or slogans on it, only plain shapes and colours, except the company's own logo or name when it carries the branding; then call it by that exact name in the descriptions and list it in the elements of the keyframes that show it. Never present such an object as part of another item in the cast and sets, such as "the parking permit from the Access credentials set": the image model then draws what that item's picture shows instead. When the cast and sets have no picture of the object itself, it is a new element of its own. Leave new_elements empty when the cast and sets have everything.
 
             {$this->kindRules()}
 
-            One message per shot: when the takeaway holds two messages that each need their own act, such as "wear your badge visibly and report a damaged one straight away", still plan this shot for the whole takeaway, and propose a split: set split.needed, give each part as a short takeaway with one message, and the kind that fits each part. Otherwise leave split.needed false and the parts empty.
+            What the video model cannot do in one shot, each with why it fails and what to do instead. Plan every shot around these:
+            {$limits}
 
             The silent story, the most important rule: the shot plays without words, voice-over, sound or text, so the pictures alone must carry the takeaway.
             - Talking, explaining, welcoming, smiling, nodding, listening, agreeing, signalling or acknowledging never carry the takeaway; they may only go with the act.
@@ -65,10 +69,10 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Rules for every shot:
             - Shot title: two to four words naming the scene, such as the place, the person or the moment.
-            - Storyline: two to four sentences, in present tense, from beginning to end, that land the takeaway with one clear, visible action a viewer can follow in the shot length, not a still moment; a montage has its own rule below. Refer to the cast and sets by their names, used as a noun with "the". When the director names people, places or objects they want in the shot, use all of them. When a chosen storyline is given, keep it as it is.
+            - Storyline: two to four sentences, in present tense, from beginning to end, that land the takeaway with one clear, visible action a viewer can follow in the shot length, not a still moment; a montage has its own rule below. Refer to the cast and sets by their names, used as a noun with "the". When the director names people, places or objects they want in the shot, use all of them.
             - Produce between {$min} and {$max} keyframes, except for a presenter shot. Use as many as the silent story above needs and no more: every step a viewer must see to understand it without words gets its own keyframe.
             - Title: two to four words naming the moment.
-            - Description: exactly what is visible in this keyframe, two to four sentences, 30 to 70 words, in present tense. It goes to the image model as written and the check judges the image by it. Call the cast and sets by their exact names and never describe their appearance, such as age, build, hair, clothing or colours; their pictures decide that. Describe the spot with the context objects on it and where they are, and any object that is not in the cast and sets (use the same wording for these in every keyframe), then each person's pose, gaze and expression, which hand holds what, and the state of the key objects. Say which way each person faces from the camera's point of view: face to the camera, back to the camera, or side-on facing left or right in the frame, and whether they move towards or away from the camera or to the left or right of the frame. Never write "forward", "looking forward", "ahead" or "angled into": the image model then draws them facing the viewer. Concrete nouns, no style words: the visual style is added separately.
+            - Description: exactly what is visible in this keyframe, two to four sentences, 30 to 70 words, in present tense. It goes to the image model as written and the check judges the image by it. Call the cast and sets by their exact names and never describe their appearance, such as age, build, hair, clothing or colours; their pictures decide that. Describe the spot with the context objects on it and where they are, and any object that is not in the cast and sets (use the same wording for these in every keyframe), then each person's pose, gaze and expression, which hand holds what, and the state of the key objects. In a scene, say which way each person faces from the camera's point of view: face to the camera, back to the camera, or side-on facing left or right in the frame, and whether they move towards or away from the camera or to the left or right of the frame. Never write "forward", "looking forward", "ahead" or "angled into": the image model then draws them facing the viewer. Concrete nouns, no style words: the visual style is added separately.
             - Spatial fact: for a scene, as its rule below says; leave it empty for a montage or a presenter shot.
             - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
             - Props: use as few hand-held objects as the story needs, ideally one per character. Leave out anything that does not change what the viewer learns, such as a lighter when the point is putting the cigarette away.
@@ -87,13 +91,11 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         return [
             'title' => $schema->string()->required(),
             'kind' => $schema->string()->enum(array_column(ShotKind::cases(), 'value'))->required(),
-            'split' => $schema->object([
-                'needed' => $schema->boolean()->required(),
-                'parts' => $schema->array()->items($schema->object([
-                    'takeaway' => $schema->string()->required(),
-                    'kind' => $schema->string()->enum(array_column(ShotKind::cases(), 'value'))->required(),
-                ]))->max(2)->required(),
-            ])->required(),
+            'new_elements' => $schema->array()->items($schema->object([
+                'name' => $schema->string()->required(),
+                'type' => $schema->string()->enum(['place', 'object'])->required(),
+                'description' => $schema->string()->required(),
+            ]))->max(4)->required(),
             'storyline' => $schema->string()->required(),
             'framing' => $schema->object([
                 'spot' => $schema->string()->required(),
@@ -116,34 +118,11 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     /**
      * The prompt for a fresh keyframe plan, or a revision of the current one.
      */
-    public function promptFor(?string $instruction = null): string
+    public function promptFor(): string
     {
-        $shot = $this->shot;
+        $brief = (filled($this->shot->title) ? "Shot title: {$this->shot->title}\n" : '') . $this->shot->brief();
 
-        $brief = (filled($shot->title) ? "Shot title: {$shot->title}\n" : '') . $shot->brief();
-
-        if ($chosen = $shot->chosenStoryline()) {
-            $brief .= "\n\nChosen storyline ({$chosen['title']}): {$chosen['storyline']}";
-        }
-
-        if (blank($instruction) || $shot->storyline === null) {
-            return "Write the storyline of this shot and break it into keyframes.\n\n{$brief}";
-        }
-
-        $current = collect($shot->storylineKeyframes())
-            ->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . $keyframe['title'] . ': ' . $keyframe['description'] . (filled($keyframe['spatial'] ?? null) ? " Spatial fact: {$keyframe['spatial']}" : ''))
-            ->join("\n");
-
-        return <<<PROMPT
-            Revise the current keyframes for this shot. Keep what works and apply the requested change.
-
-            {$brief}
-
-            Current keyframes:
-            {$current}
-
-            Requested change: {$instruction}
-            PROMPT;
+        return "Write the storyline of this shot and break it into keyframes.\n\n{$brief}";
     }
 
     private function purposeBrief(): string
@@ -174,7 +153,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             ShotKind::SCENE => 'A scene plays at one place with a camera that does not move: every keyframe is drawn on the same empty place and the video moves through the keyframes.',
             ShotKind::MONTAGE => 'A montage is a row of separate stills, each its own place and moment: every still is drawn on its own, animated with a small movement and joined to the next with a crossfade.',
             ShotKind::PRESENTER => 'A presenter shot is one person from the cast who speaks the voice-over straight to the camera, lip-synced, from the chest up in front of a softly blurred place.',
-            ShotKind::CLOSE_UP => 'A close-up is one small hand action at one surface, with the camera close and still: the hands and one object fill the frame, every keyframe is drawn on the same empty surface and the video moves through the keyframes.',
+            ShotKind::CLOSE_UP => 'A close-up is one small hand action with one object, with the camera close and still: the hands and the object fill the frame, on a person such as a badge on the chest, or on a thing such as a permit on a dashboard. Keyframe 1 is drawn first with them and the other keyframes are drawn on it.',
         };
     }
 
@@ -217,6 +196,8 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         return $heading . <<<'RULES'
             - Every keyframe is a still: one part of the takeaway, shown by someone or something in action in its own setting, such as a designer drawing a hull on a large drawing table, welders joining a hull section in a hall, a crane lowering a propeller onto a ship in dry dock, or the finished ship at sea. The stills in order tell the takeaway; each shows one part of it that a viewer recognises without words.
             - Never explain with a board, poster, screen, chart or display of pictograms in the frame: show the thing itself.
+            - Say which way someone faces only when the still depends on it; a person at work who faces the camera is fine.
+            - Every still has its own setting that fits its part; two parts never share a place unless the story says so. When no place in the cast and sets fits a part, give it as a new place in new_elements, such as "Design office": a bright office with a large drawing table under the windows. Never put a part in a place of the cast where it does not happen, such as designing in a shipbuilding hall.
             - Storyline: one sentence per still, in order.
             - Description of a still: start with its setting in one sentence, where it is and the one or two objects that matter there, then the people with their pose, which way they face from the camera's point of view and which hand holds what. Leave out a person in a still that is about a place or an object. Describe a moment in which something can move a little, such as sparks, a turning crane hook, a hand drawing, water or a flag, because each still is animated with a small movement, not a sequence of actions.
             - The people from the cast keep their names in every still they are in; use the same light in every still unless the story moves through the day.
@@ -239,9 +220,11 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         return $heading . <<<'RULES'
             - Two or three keyframes of one hand action with one small object, before and after: a badge not yet clipped and then clipped high on the chest, an open padlock and then closed, a cracked badge laid on the counter and then a new one handed over.
             - The object is large, clear and in a colour that stands out; when it is damaged, show it unmistakably, such as snapped in two, never a hairline crack.
-            - Description: start with the surface, such as the top of the reception counter or the chest of a hi-vis vest, then the object and its state, then whose hands do what and which hand holds what. Name the person whose hands they are; only the hands, forearms and sleeves are in the frame, never a face.
+            - The before state comes from the object itself: turned the wrong way round, hanging low, open, unclipped or broken. Never hide it behind or inside clothing, such as tucked under a jacket: the image model then invents extra layers of clothing.
+            - A person handles their own object, such as their own badge or buckle; nobody else touches their body or clothing.
+            - Description: start with where the action is, such as the chest of her hi-vis vest or the top of the reception counter, then the object and its state, then whose hands do what and which hand holds what. Name the person whose hands or body it is; show only as much of them as the action needs, such as the chest and hands, never the whole figure.
             - Spatial fact: where the object is relative to the hand, the surface or the body, such as "The badge clip is fastened on the vest pocket, high and centred on the chest."
-            - Spot: the surface in the place where the hands act, such as "the top of the reception counter, beside the badge tray"; the same in every keyframe.
+            - Spot: where the close-up is, such as "her chest, the vest pocket in the middle of the frame" or "the top of the reception counter, beside the badge tray"; the same in every keyframe.
             - Elements: the object, the person or people whose hands show, and the place the surface belongs to.
             - Seconds: about 2 seconds per step, between the shortest and the longest length allowed.
             RULES;
@@ -272,23 +255,31 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
      */
     private function lengthRule(): string
     {
-        $min = (int) Config::get('pipeline.video.min_duration');
-        $max = (int) Config::get('pipeline.video.max_duration');
-
         if ($this->shot->duration !== null) {
             $seconds = Shot::clampSeconds($this->shot->duration);
 
             return "Shot length: the director set {$seconds} seconds. Plan for that length and give {$seconds} as the seconds.";
         }
 
+        return 'Shot length: choose it yourself as the seconds. ' . self::timingRules();
+    }
+
+    /**
+     * How long a shot lasts for what its keyframes show: the rules of thumb the
+     * planner times a new plan with, and a changed plan is timed again with.
+     */
+    public static function timingRules(): string
+    {
+        $min = (int) Config::get('pipeline.video.min_duration');
+        $max = (int) Config::get('pipeline.video.max_duration');
+
         return <<<RULE
-            Shot length: choose it yourself as the seconds. Time each step from one keyframe to the next with these rules of thumb and add them up, plus one second to hold the last pose:
-              - a glance, a nod or a turn of the head: 1 second
-              - a hand gesture such as pointing, waving or a thumbs up: 1 second
-              - picking up, handing over or putting down an object: 1 to 2 seconds
+            The animation acts fast, so keep it short: time each step from one keyframe to the next with these rules of thumb and add them up, with no extra time to hold the last pose:
+              - a glance, a nod, a turn of the head or a hand gesture such as pointing or waving: 1 second
+              - picking up, handing over or putting down an object: 1 second
               - opening or closing a door, a lid or a buckle: 1 to 2 seconds
-              - a few steps: 2 seconds; walking past or through a space: 3 to 4 seconds
-              - putting on or taking off clothing or gear: 3 to 4 seconds
+              - a few steps: 1 to 2 seconds; walking past or through a space: 2 to 3 seconds
+              - putting on or taking off clothing or gear: 2 to 3 seconds
             Round to whole seconds, between {$min} and {$max}.
             RULE;
     }
@@ -299,9 +290,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     private function projectRules(): string
     {
         $rules = $this->shot->project->rulesBrief();
-        $shotRules = $this->shot->rulesBrief();
 
-        return ($rules === '' ? '' : "\nRules the director confirmed for this project, always follow them:\n{$rules}")
-            . ($shotRules === '' ? '' : "\nRules the director set for this shot; the storyline and every keyframe follow them, never break one:\n{$shotRules}");
+        return $rules === '' ? '' : "\nRules the director confirmed for this project, always follow them:\n{$rules}";
     }
 }

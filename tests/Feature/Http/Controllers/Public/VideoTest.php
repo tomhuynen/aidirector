@@ -8,7 +8,6 @@ use App\Enums\Disk;
 use App\Enums\ShotStatus;
 use App\Jobs\DownloadVideo;
 use App\Jobs\GenerateVideo;
-use App\Jobs\PollVideo;
 use App\Jobs\PollVideos;
 use App\Models\Director;
 use App\Models\Keyframe;
@@ -304,26 +303,16 @@ describe('poll', function () {
 
         Http::assertNothingSent();
     });
-
-    it('hands checks queued before the shared round over to it', function () {
-        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'video_job_id' => 'vid_123']);
-
-        (new PollVideo($shot, 'vid_123', now()->subMinute()->getTimestamp()))->handle();
-
-        expect($shot->fresh()->video_submitted_at)->not->toBeNull();
-        Queue::assertPushed(PollVideos::class);
-    });
 });
 
 describe('page', function () {
-    it('links the video and the prompt', function () {
+    it('links the video and the render settings', function () {
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_READY, 'video_prompt' => 'The prompt']);
         $shot->addMediaFromString(fakeMp4())->usingFileName('shot.mp4')->toMediaCollection(Shot::VIDEO);
 
         $response = actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
             ->assertInertia(fn($page) => $page
-                ->where('shot.videoPrompt', 'The prompt')
                 ->where('shot.videoResolution', config('pipeline.video.resolution'))
                 ->where('shot.videoResolutions', config('pipeline.video.resolutions'))
                 ->where('shot.videoUrl', fn(string $url) => str_contains($url, 'signature='))

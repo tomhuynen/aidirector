@@ -42,54 +42,30 @@
           :aspect-ratio="aspectRatio"
           :voice-over-tracks="shot.voiceOverTracks"
         />
-        <Pending
-          v-else-if="state === 'suggesting'"
-          :title="$t('Suggesting storylines')"
-          :description="$t('The director is reading your brief and writing three possible storylines.')"
-        />
-        <Storylines
-          v-else-if="state === 'options'"
-          :options="shot.storylineOptions ?? []"
-          :error="shot.storylineError"
-          :edit-url="shot.links?.update ?? '#'"
-          :suggest-url="shot.links?.storylineSuggest ?? '#'"
-          :choose-url="shot.links?.storylineChoose ?? '#'"
-        />
-        <template v-else-if="state === 'keyframes' || state === 'planning'">
-          <ShotDetails :shot="shot" :storyline="shot.chosenStoryline" :in-plan="planEditable" />
-          <!-- Planned or still to be written: the plan can be changed until the keyframes are drawn. -->
-          <PlanEditor
-            v-if="planEditable"
-            :key="`plan-${shot.id}`"
-            :storyline="shot.chosenStoryline?.storyline ?? ''"
-            :keyframes="shot.storyline?.keyframes ?? []"
-            :kind="shot.kind"
-            :kind-url="shot.links?.planKind ?? '#'"
-            :split="shot.split"
-            :split-url="shot.links?.planSplit"
-            :kinds="shotKinds"
-            :elements="elements"
-            :types="elementTypes"
-            :preferred="shot.preferredElements ?? []"
-            :max="shot.maxKeyframes"
-            :save-url="shot.links?.plan ?? '#'"
-            :draw-url="shot.links?.keyframesGenerate ?? '#'"
-            :changes-url="shot.links?.planChanges ?? '#'"
-            :write-url="shot.links?.planWrite ?? '#'"
-            :mode="planMode"
-            :rules="shot.rules"
-          />
-          <PlanSkeleton v-else-if="state === 'planning'" />
+        <template v-else>
+          <ShotDetails v-if="!planEditable && !planning" :shot="shot" :storyline="shot.chosenStoryline" />
+          <!-- Planned in conversation; an agreed plan is drawn straight away. -->
+          <div v-if="planEditable" class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-5 py-4">
+            <PlanChat
+              :key="`chat-${shot.id}`"
+              :chat-url="shot.links?.planChat"
+              :conversation="shot.planChat"
+              :kinds="shotKinds"
+              :elements="elements"
+              :new-elements="shot.newElements"
+              :elements-url="shot.links?.planElements"
+              :waiting-for="shot.waitingFor"
+            />
+          </div>
+          <PlanSkeleton v-else-if="planning" />
           <KeyframesPanel
             v-else
             :keyframes="panelKeyframes"
             :aspect-ratio="aspectRatio"
             :duration="duration"
             :generating="shot.status === 'keyframes-pending'"
-            :planning="false"
             :issue-groups="shot.issueGroups"
             :reviewing="shot.reviewing"
-            :drawable="shot.status === 'storyline-ready' && keyframes.length === 0"
             :fix-all-url="shot.fixableIssues ? shot.links?.issuesFixAll : null"
             :dismiss-all-url="shot.links?.issuesDismissAll"
             :error="shot.storylineError"
@@ -110,7 +86,6 @@
             }"
             :montage="shot.kind === 'montage'"
             :presenter="shot.kind === 'presenter'"
-            :close-up="shot.kind === 'close-up'"
             :reorder-url="shot.links?.keyframesReorder ?? '#'"
             :new-keyframe="{
               storeUrl: shot.links?.keyframesStore ?? '#',
@@ -128,7 +103,6 @@
             }"
           />
         </template>
-        <BriefForm v-else :project="project" :shot="shot" :elements="elements" :element-types="elementTypes" />
       </div>
     </main>
   </div>
@@ -138,16 +112,13 @@ import { Head, Link, usePoll } from '@inertiajs/vue3'
 import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
-import BriefForm from '@public:components/editor/BriefForm.vue'
 import KeyframesPanel, { type PanelKeyframe } from '@public:components/editor/KeyframesPanel.vue'
 import MergedShot from '@public:components/editor/MergedShot.vue'
-import Pending from '@public:components/editor/Pending.vue'
-import PlanEditor from '@public:components/editor/PlanEditor.vue'
+import PlanChat from '@public:components/editor/PlanChat.vue'
 import PlanSkeleton from '@public:components/editor/PlanSkeleton.vue'
 import { shotCode } from '@public:components/editor/shotCode'
 import ShotDetails from '@public:components/editor/ShotDetails.vue'
 import ShotList from '@public:components/editor/ShotList.vue'
-import Storylines from '@public:components/editor/Storylines.vue'
 import TopBar from '@public:components/editor/TopBar.vue'
 import { index as projectsIndex } from '@routes/public/projects'
 import { Combine } from 'lucide-vue-next'
@@ -163,49 +134,21 @@ const code = computed(() => shotCode(props.shot.position))
 const aspectRatio = computed(() => props.shot.aspectRatioOverride ?? props.project.aspectRatio)
 const duration = computed(() => props.shot.seconds)
 
-type State = 'brief' | 'suggesting' | 'options' | 'planning' | 'keyframes'
-
-const state = computed<State>(() => {
-  switch (props.shot.status) {
-    case 'options-pending':
-      return 'suggesting'
-    case 'options-ready':
-      return 'options'
-    case 'storyline-pending':
-      return 'planning'
-    case 'storyline-ready':
-    case 'first-keyframe-pending':
-    case 'first-keyframe-ready':
-    case 'keyframes-pending':
-    case 'keyframes-ready':
-    case 'video-pending':
-    case 'video-ready':
-      return props.shot.storyline ? 'keyframes' : 'options'
-    default:
-      return 'brief'
-  }
-})
-
-/**
- * While images are being generated the rendered keyframes are shown as they
- * arrive; before that the panel shows the plan with empty frames.
- */
-
-/** Whether the plan was drafted by the planner or is written by the director. */
-const planMode = computed(() =>
-  (props.shot.storyline as { mode?: string } | null)?.mode === 'manual' ? 'manual' : 'auto',
-)
+/** The draft plan of a shot from the project setup is being written. */
+const planning = computed(() => props.shot.status === 'storyline-pending')
 
 /** The shot starts from empty places to choose from, instead of options for keyframe 1. */
 const usesPlates = computed(
   () =>
-    (props.shot.kind === 'scene' || props.shot.kind === 'close-up') &&
+    props.shot.kind === 'scene' &&
     !props.shot.plateChosen &&
     (props.shot.plateOptions.length > 0 || (props.shot.startsWithPlate && !(props.keyframes[0]?.renders.length ?? 0))),
 )
 
-/** Planned or to be written by the director, and nothing drawn yet. */
-const planEditable = computed(() => props.shot.status === 'storyline-ready' && props.keyframes.length === 0)
+/** Nothing drawn yet: the plan is worked out in the plan chat. */
+const planEditable = computed(
+  () => (props.shot.status === 'storyline-ready' || props.shot.status === 'draft') && props.keyframes.length === 0,
+)
 
 const panelKeyframes = computed<PanelKeyframe[]>(() =>
   props.keyframes.length > 0
@@ -219,7 +162,6 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         thumbnailUrl: keyframe.thumbnailUrl,
         rendering: keyframe.rendering,
         renderStage: keyframe.renderStage,
-        renderNote: keyframe.renderNote,
         renderError: keyframe.renderError,
         renders: keyframe.renders,
         elements: keyframe.elements,
@@ -250,8 +192,9 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
 
 const busy = computed(
   () =>
-    state.value === 'suggesting' ||
-    state.value === 'planning' ||
+    // Waiting for another shot or new cast pictures: drawing starts by itself, so the page keeps looking.
+    Boolean(props.shot.waitingFor) ||
+    planning.value ||
     props.shot.status === 'first-keyframe-pending' ||
     props.shot.status === 'keyframes-pending' ||
     props.shot.status === 'video-pending' ||
@@ -270,6 +213,20 @@ const othersBusy = computed(
   () => !busy.value && props.siblings.some((sibling) => sibling.busy && sibling.id !== props.shot.id),
 )
 const siblingsPoll = usePoll(5000, { only: ['siblings'] }, { autoStart: false })
+
+/** The cast and sets whose pictures were redrawn from the plan chat. */
+const redrawn = computed(() => (props.shot.planChat ?? []).flatMap((turn) => turn.adjusted ?? []))
+
+/** Cast and sets added or redrawn from the plan chat whose pictures are still being drawn. */
+const newElementsDrawing = computed(() =>
+  props.elements.some(
+    (element) =>
+      element.rendering && (props.shot.addedElements.includes(element.id) || redrawn.value.includes(element.id)),
+  ),
+)
+const elementsPoll = usePoll(4000, { only: ['elements'] }, { autoStart: false })
+
+watch(newElementsDrawing, (current) => (current ? elementsPoll.start() : elementsPoll.stop()), { immediate: true })
 
 watch(othersBusy, (current) => (current ? siblingsPoll.start() : siblingsPoll.stop()), { immediate: true })
 
@@ -297,6 +254,10 @@ const shotList = computed(() =>
     status: sibling.status,
     busy: sibling.busy,
     thumbnailUrl: sibling.thumbnailUrl,
+    videoUrl: sibling.videoUrl,
+    voiceOvers: sibling.voiceOvers,
+    groupKey: sibling.groupKey,
+    waitingFor: sibling.waitingFor,
     url: sibling.url,
   })),
 )

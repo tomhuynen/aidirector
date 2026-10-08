@@ -43,7 +43,7 @@ class CopyController
 
         // It takes the original's position for now, so it gets the same plan when the keyframes are numbered again.
         $copy = $keyframe->replicate(['render_id', 'prompt']);
-        $copy->forceFill(['rendering' => false, 'render_error' => null, 'render_stage' => null, 'render_note' => null])->save();
+        $copy->forceFill(['rendering' => false, 'render_error' => null, 'render_stage' => null])->save();
         $copy->elements()->sync($keyframe->elements->modelKeys());
 
         $image = $keyframe->render();
@@ -59,7 +59,7 @@ class CopyController
         $shot->arrangeKeyframes($order);
 
         // Until the director describes it, the copy repeats the original's plan; marked as such so the check and review do not judge it by that text.
-        $shot->updatePlannedKeyframe($copy->refresh()->position, ['copied' => true], ['must_show']);
+        $shot->updatePlannedKeyframe($copy->refresh()->position, ['copied' => true]);
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

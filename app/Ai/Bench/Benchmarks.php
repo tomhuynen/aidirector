@@ -7,7 +7,6 @@ namespace App\Ai\Bench;
 use App\Ai\Bench\Benchmarks\CastSuggestionsBenchmark;
 use App\Ai\Bench\Benchmarks\KeyframePlanBenchmark;
 use App\Ai\Bench\Benchmarks\PhotoAnalysisBenchmark;
-use App\Ai\Bench\Benchmarks\StorylineOptionsBenchmark;
 use App\Ai\Bench\Benchmarks\StyleOptionsBenchmark;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -24,7 +23,6 @@ class Benchmarks
         PhotoAnalysisBenchmark::class,
         StyleOptionsBenchmark::class,
         CastSuggestionsBenchmark::class,
-        StorylineOptionsBenchmark::class,
         KeyframePlanBenchmark::class,
     ];
 

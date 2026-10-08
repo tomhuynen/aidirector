@@ -16,7 +16,7 @@
         {{ $t('Choose another place') }}
       </Button>
     </div>
-    <div class="flex items-center gap-3">
+    <div v-if="!hideChoose" class="flex items-center gap-3">
       <InputError :message="choice.errors.render ?? choice.errors.plate ?? reset.errors.plate" />
       <Button type="button" :disabled="disabled || selected === null || choice.processing" @click="choose">
         {{ field === 'plate' ? $t('Use this place') : $t('Use this keyframe') }}
@@ -43,6 +43,8 @@ const props = defineProps<{
   /** Keyframe 1 is drawn on a chosen place; this goes back to the places. */
   resetUrl?: string | null
   disabled?: boolean
+  /** The choice is made from the selected option's own card instead. */
+  hideChoose?: boolean
 }>()
 
 const choice = useForm<{ render?: number | null; plate?: number | null }>({})

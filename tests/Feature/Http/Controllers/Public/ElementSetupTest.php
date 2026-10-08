@@ -366,7 +366,7 @@ describe('generating shots', function () {
             ->and($shots->pluck('kind')->map->value->all())->toBe(['scene', 'close-up']);
 
         // Each is planned by the kind chosen for it.
-        Queue::assertPushed(GenerateStoryline::class, fn(GenerateStoryline $job) => $job->draw === false && $job->keepKind);
+        Queue::assertPushed(GenerateStoryline::class, fn(GenerateStoryline $job) => $job->keepKind);
         Queue::assertPushed(GenerateStoryline::class, 2);
     });
 

@@ -81,7 +81,7 @@ it('plans one still with the presenter rules', function () {
     StorylineWriter::fake([['title' => 'Welcome', 'kind' => 'presenter', 'storyline' => 'The host welcomes the viewer.', 'framing' => ['size' => 'medium', 'spot' => '', 'light' => 'as the visual style', 'seconds' => 5], 'keyframes' => presenterPlan()]]);
     $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_PENDING, 'kind' => ShotKind::PRESENTER]);
 
-    (new GenerateStoryline($shot, 'smile more'))->handle();
+    (new GenerateStoryline($shot, keepKind: true))->handle();
 
     expect($shot->fresh()->kind)->toBe(ShotKind::PRESENTER);
     StorylineWriter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Exactly one keyframe: the still the presenter speaks from.')
@@ -188,24 +188,27 @@ it('keeps every language with its sound and shows them on the shot', function ()
         ->assertInertia(fn($page) => $page->where('shot.languageVideos.1.locale', 'nl-NL')->where('shot.languageVideos.1.name', 'Dutch (Netherlands)'));
 })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
 
-it('rewrites the plan for the new kind when the director switches it before drawing', function () {
+it('switches to a presenter when the plan agreed in the chat says so, until the keyframes are drawn', function () {
     Queue::fake();
+    App\Ai\Agents\PlanDirector::fake([[
+        'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
+        'proposal' => ['takeaway' => '', 'kind' => 'presenter', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => presenterPlan()],
+    ]]);
     $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'kind' => ShotKind::SCENE, 'storyline' => ['keyframes' => presenterPlan()]]);
 
     actingAs($this->director, 'director')
-        ->post(route('public.shots.plan.kind', [$this->project, $shot]), ['kind' => 'presenter'])
-        ->assertSessionHasNoErrors();
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'let the manager say it'])
+        ->assertOk();
 
-    expect($shot->fresh())->kind->toBe(ShotKind::PRESENTER)->status->toBe(ShotStatus::STORYLINE_PENDING);
-    Queue::assertPushed(GenerateStoryline::class, fn(GenerateStoryline $job) => ! $job->draw && str_contains((string) $job->instruction, 'as a presenter shot'));
+    expect($shot->fresh()->kind)->toBe(ShotKind::PRESENTER);
 
-    // Once keyframes are drawn, the kind stays.
+    // Once keyframes are drawn, the plan and its kind stay.
     $drawn = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY, 'kind' => ShotKind::SCENE]);
     Keyframe::factory()->for($drawn)->create();
 
     actingAs($this->director, 'director')
-        ->post(route('public.shots.plan.kind', [$this->project, $drawn]), ['kind' => 'montage'])
-        ->assertSessionHasErrors('kind');
+        ->postJson(route('public.shots.plan.chat', [$this->project, $drawn]), ['message' => 'make it a montage'])
+        ->assertJsonValidationErrors('message');
 });
 
 it('offers no moving, no extra keyframes and no separate audio tracks on a presenter', function () {

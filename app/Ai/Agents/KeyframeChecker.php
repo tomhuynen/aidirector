@@ -85,9 +85,9 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
     private function setting(): string
     {
         return match (true) {
-            $this->keyframe->shot->isMontage() => 'This keyframe is one still of a montage: it has its own place and camera, so the place is never an issue; the people and objects must match their pictures and the image must show its description.',
+            $this->keyframe->shot->isMontage() => 'This keyframe is one still of a montage: it has its own place and camera, so the place is never an issue; the people and objects must match their pictures and the image must show its description. Which way a person faces is never an issue.',
             $this->keyframe->shot->isPresenter() => 'This keyframe is the still of a presenter who speaks to the camera: one person, from the chest up, facing the camera straight on with the face large and clear, in front of a softly blurred place. The place is never an issue; the person must match their picture, and a face that is small, turned away or covered is a high issue.',
-            $this->keyframe->shot->kindOrScene() === ShotKind::CLOSE_UP => 'This keyframe is a close-up: the hands and one object fill the frame and faces are out of it. People are known by their sleeves, gloves and cuffs. The camera stands still: the surface does not move between keyframes.',
+            $this->keyframe->shot->kindOrScene() === ShotKind::CLOSE_UP => 'This keyframe is a close-up: the hands and one object fill the frame, and faces may be out of it. People are known by their clothing, sleeves and gloves, and which way they face is never an issue. Clothing that differs from their picture, such as a second jacket or shirt layer, a doubled collar or another garment, is a high issue in category person. The camera stands still between keyframes.',
             default => 'The camera stands still: the place does not move between keyframes.',
         };
     }
@@ -106,13 +106,18 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             2. Compare the keyframe to check with that inventory: what disappeared, what changed in look, position, shape, angle or state.
             3. Look the other way: what is in the keyframe to check that is in none of the references, such as an extra object, person, lettering, logo or numbers. A person who is in the keyframe to check but not in keyframe 1 is fine when the description has them; compare them with their own reference.
 
-            Allowed changes, never report these: pose, gestures, where a person stands or looks, facial expression, and the change the description asks for. Everything else that changes is an issue.
+            Allowed changes, never report these: pose, gestures, where a person stands or looks, facial expression, and the change the description asks for. Never report these either, because a viewer never sees them as a mistake:
+            - a detail that differs from keyframe 1 or the place but looks the same as in the keyframe directly before: it does not change between these two keyframes, so it does not jump in the video;
+            - an object of the cast and sets, or one the description names, that now stands where a background object was;
+            - small background props that take no part in the story, such as items on a shelf, a counter or a desk.
+            - an object without lettering, such as a blank card, paper or badge: objects are known by their shape, colour, size and where they are, never by text, so never ask for text to make one recognisable.
+            Report what makes the story wrong, and what a viewer would see change between the keyframe directly before and this one.
 
-            Direction: when the description says which way someone faces or moves, such as back to the camera, walking away from the camera or into the place behind a door, check it. Someone who faces the camera or walks towards it while the description says they go away from it or into the place is a high issue in category state.
+            Direction: check which way someone faces or moves only when the story depends on it: someone who goes into or out of a place, or who must stand or move relative to a line, a zone, a door or a hazard. Then someone who faces the camera or walks towards it while the description says they go away from it or into the place is a high issue in category state. Otherwise a person who faces another way than the description says is not an issue.
 
             Severity:
-            - high: a viewer notices it at a glance, or it makes the story wrong, such as a different helmet, glasses that appear or disappear, an object that is both in a hand and in its box, lettering that appears, or a floor line that runs elsewhere.
-            - low: you only see it when you look for it.
+            - high: it makes the story wrong, such as the action, who is there or the spatial fact, or a viewer sees it change at a glance between the keyframe directly before and this one, such as a different helmet, glasses that appear or disappear, an object that is both in a hand and in its box, lettering that appears, or a floor line that runs elsewhere.
+            - low: everything else you would still mention.
 
             The point of the keyframe: what the description says about where people stand and what they do relative to lines, zones, doors, objects and hazards is what the keyframe is for. When a viewer cannot see that at a glance, add it as a high issue in category state.
 
@@ -127,15 +132,21 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
 
     private function placeInstructions(): string
     {
-        return <<<'INSTRUCTIONS'
-            You check whether the place stays the same between two keyframes of an animated e-learning film. The first image is keyframe 1 of the shot, the reference; it may show the place without people. The second image is a later keyframe of the same shot. The camera stands still, so the place must not move at all; people and the objects they handle may.
+        return <<<INSTRUCTIONS
+            You check whether the place stays the same between keyframes of an animated e-learning film. The camera stands still, so the place must not move at all; people and the objects they handle may.
+
+            {$this->imageList()}
+
+            The reference is the first image; it may show the place without people. When the keyframe directly before is attached too, a change it already shows is not an issue: the place does not jump between those two keyframes, so a viewer never sees it change.
 
             Work in three steps.
             1. Inventory of the place in the reference, with where each part is: floor markings and painted lines (where they start and end and at what angle), doors and door frames, walls, windows and what is seen through them, signs, bins, machines, vehicles, ships, and any lettering, logos or numbers on them.
             2. Compare the later keyframe with that inventory: what moved, changed shape, angle or size, or disappeared.
             3. Look the other way: what is part of the place in the later keyframe but not in the reference, such as new lettering, numbers or objects.
 
-            Ignore the people, what they hold and what they do. Ignore the objects the story moves or changes too, such as something put into or taken out of a bin or box, something picked up, put down or dropped, a door opened or closed: what the keyframe should show tells you what happens, and the keyframe before it may already have done it. Only the fixed place counts, where things stand and how they look, not what is in them.
+            When what the keyframe should show asks for a change of place, such as a vehicle that has driven on through a gate, only that change is allowed: the gate, barrier or booth it passed may be gone. Everything else of the place must still match, such as the road and its number of lanes, the lines on it, the kerbs and the buildings that are still in view; a change there is an issue.
+
+            Ignore the people, what they hold and what they do. Ignore objects of the cast and sets that stand where a background object was, and small background props that take no part in the story, such as items on a shelf or a counter. Ignore the objects the story moves or changes too, such as something put into or taken out of a bin or box, something picked up, put down or dropped, a door opened or closed: what the keyframe should show tells you what happens, and the keyframe before it may already have done it. Only the fixed place counts, where things stand and how they look, not what is in them.
 
             Severity:
             - high: a viewer of the animation would see the place jump, such as a floor line that runs elsewhere, a door frame that changes width, a sign that moves, or lettering that appears.
@@ -151,11 +162,9 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
     private function projectRules(): string
     {
         $rules = $this->keyframe->shot->project->rulesBrief();
-        $shotRules = $this->keyframe->shot->rulesBrief();
 
         return implode("\n", array_filter([
             $rules === '' ? null : "Also check the rules the director confirmed for this project; breaking one is a high issue:\n{$rules}",
-            $shotRules === '' ? null : "Also check the rules the director set for this shot; breaking one is a high issue, named with the rule:\n{$shotRules}",
         ]));
     }
 }

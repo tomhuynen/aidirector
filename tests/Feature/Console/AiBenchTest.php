@@ -62,8 +62,7 @@ it('lists the benchmarks with the cases this tenant has for them', function () {
             ['photo-analysis', 'Caption an uploaded photo and list the people, places and objects in it.', 0],
             ['style-options', 'Propose a round of styles, the first one or "more like this" from a style sheet.', 1],
             ['cast-suggestions', 'Suggest recurring people, places or objects from the brief confirmed in the chat.', 0],
-            ['storyline-options', 'Suggest different storylines for a shot brief.', 0],
-            ['keyframe-plan', 'Break a chosen storyline into keyframes with image prompts.', 0],
+            ['keyframe-plan', 'Plan a shot from its takeaway: storyline and keyframe descriptions.', 0],
         ])
         ->assertSuccessful();
 });
@@ -149,13 +148,9 @@ it('flags a model OpenRouter does not list in a dry run', function () {
         ->assertSuccessful();
 });
 
-it('plans keyframes for every suggested storyline as if the director chose it', function () {
-    Shot::factory()->for($this->project)->create([
-        'storyline_options' => [
-            ['title' => 'At the gate', 'storyline' => 'The visitor stops at the gate.'],
-            ['title' => 'On the quay', 'storyline' => 'The visitor walks along the quay.'],
-        ],
-    ]);
+it('plans every shot from its takeaway', function () {
+    Shot::factory()->for($this->project)->create(['takeaway' => 'Stop at the gate']);
+    Shot::factory()->for($this->project)->create(['takeaway' => 'Keep to the quay path']);
 
     StorylineWriter::fake(fn() => ['keyframes' => []]);
 
@@ -163,12 +158,12 @@ it('plans keyframes for every suggested storyline as if the director chose it', 
         ->expectsOutputToContain('2 cases × 1 variants × 1 runs = 2 calls.')
         ->assertSuccessful();
 
-    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Chosen storyline (At the gate): The visitor stops at the gate.'));
-    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Chosen storyline (On the quay): The visitor walks along the quay.'));
+    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Takeaway: Stop at the gate'));
+    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Takeaway: Keep to the quay path'));
 });
 
 it('skips a benchmark this tenant has no data for', function () {
-    $this->artisan('ai:bench', ['benchmarks' => ['storyline-options'], '--no-judge' => true])
+    $this->artisan('ai:bench', ['benchmarks' => ['keyframe-plan'], '--no-judge' => true])
         ->expectsOutputToContain('No cases')
         ->assertSuccessful();
 

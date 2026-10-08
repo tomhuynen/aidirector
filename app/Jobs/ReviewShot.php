@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Shot;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -24,6 +25,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -37,6 +39,7 @@ class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
         public readonly Shot $shot,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->shot);
     }
 
     /**
@@ -61,7 +64,7 @@ class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $keyframes = $shot->keyframes()->with('media')->get()->each->setRelation('shot', $shot);
         $review = $painter->review($shot, $keyframes);
 
-        if ($review === null) {
+        if ($review === null || $this->planReplaced()) {
             $shot->forceFill(['reviewing' => false])->save();
 
             return;

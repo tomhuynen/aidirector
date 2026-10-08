@@ -47,6 +47,9 @@ class PlateController
 
         GenerateRemainingKeyframes::startOnPlate($shot, $painter);
 
+        // Shots of the sequence that play in this place can be drawn now.
+        Shot::drawWaitingShots($project->id);
+
         return $this->afterAction($project, $shot);
     }
 

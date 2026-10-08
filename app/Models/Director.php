@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Ai\Concerns\HasConversations;
+use Laravel\Sanctum\HasApiTokens;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -21,6 +22,8 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
  */
 class Director extends Authenticatable implements CanResetPasswordContract
 {
+    /** Tokens for the read-only API that hands the director's videos to other applications. */
+    use HasApiTokens;
     use HasConversations;
     /** @use HasFactory<\Database\Factories\DirectorFactory> */
     use HasFactory;

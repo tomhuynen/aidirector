@@ -25,6 +25,11 @@ pest()
 
         Http::preventStrayRequests();
 
+        // Re-timing a shot writes its voice-over again; tests that check the text fake it themselves.
+        App\Ai\Agents\VoiceOverWriter::fake(fn() => ['text' => 'A short voice-over.']);
+        // Timing a shot again changes nothing unless a test fakes the timer itself.
+        App\Ai\Agents\ShotTimer::fake(fn() => throw new RuntimeException('Shots are not timed again in tests.'));
+
         $this->withoutVite();
     });
 

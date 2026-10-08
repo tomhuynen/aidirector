@@ -26,7 +26,7 @@
           id="new-keyframe-description"
           v-model="form.description"
           rows="6"
-          maxlength="500"
+          maxlength="2000"
           :placeholder="$t('Describe exactly what is visible at this moment: the pose, the key object and its state.')"
           class="text-[15px] leading-relaxed"
         />

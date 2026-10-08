@@ -99,8 +99,7 @@ it('moves the person, shows the place where they stood, and has the pose redrawn
 
     $moved = $keyframe->fresh()->render();
 
-    expect($moved->getCustomProperty(Keyframe::MOVED_BY_HAND))->toBeTrue()
-        ->and(pixelAt($moved->getPath(), 300, 540))->toBe([90, 110, 160])
+    expect(pixelAt($moved->getPath(), 300, 540))->toBe([90, 110, 160])
         ->and(pixelAt($moved->getPath(), 100, 540)[0])->toBeGreaterThan(200)
         ->and($keyframe->fresh()->rendering)->toBeTrue();
     Queue::assertPushed(PoseMovedPerson::class, fn(PoseMovedPerson $job) => str_contains($job->instruction, 'Keep the person exactly where they stand')
@@ -139,14 +138,12 @@ it('redraws the pose on a crop around the person, again when they wander off, an
 
     expect($calls)->toBe(2)
         ->and($keyframe->rendering)->toBeFalse()
-        ->and($render->getCustomProperty(Keyframe::MOVED_AWAY))->toBeNull()
         ->and($render->getCustomProperty(Keyframe::TWEAK_REQUEST))->toContain('He points at the container.')
         ->and($render->getCustomProperty(Keyframe::MOVE_WARNING))->toBe('He never enters the red zone, so the mistake the shot warns about is not shown.')
         ->and($keyframe->title)->toBe('Safe Lane')
         ->and($keyframe->shot->storylineKeyframes()[0]['title'])->toBe('Safe Lane')
         ->and($keyframe->shot->fresh()->chosenStoryline())->toBe(['title' => 'Under the load', 'storyline' => 'He stops in the blue lane and points at the container.'])
         ->and($keyframe->description)->toBe('He stands in the blue lane, side-on, and points at the container.')
-        ->and($keyframe->shot->storylineKeyframes()[0])->not->toHaveKey('must_show')
         ->and($render->getCustomProperty(Keyframe::SENT)['images'])->toBe(['A crop around the person moved by hand, the image that is edited']);
     Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this: Keep the person exactly where they stand.'));
     MovedPersonDescriber::assertPrompted(fn($prompt) => ! str_contains($prompt->prompt, 'Must show'));

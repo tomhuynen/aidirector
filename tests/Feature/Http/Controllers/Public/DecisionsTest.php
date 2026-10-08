@@ -27,24 +27,13 @@ beforeEach(function () {
     $this->project = Project::factory()->ownedBy($this->director)->create();
 });
 
-/**
- * @return list<array{title: string, storyline: string}>
- */
-function decisionStorylines(): array
-{
-    return [
-        ['title' => 'Calm', 'storyline' => 'A welder checks the sign before lighting up and walks on.'],
-        ['title' => 'Hesitation', 'storyline' => 'A worker reaches for a cigarette, sees the sign and puts it away.'],
-    ];
-}
-
 it('queues what waits for the director, oldest first', function () {
     $render = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::KEYFRAMES_READY, 'updated_at' => now()->subMinutes(5)]);
     Keyframe::factory()->for($render)->create();
-    $storyline = Shot::factory()->for($this->project)->create([
+    $plan = Shot::factory()->for($this->project)->create([
         'position' => 2,
-        'status' => ShotStatus::OPTIONS_READY,
-        'storyline_options' => decisionStorylines(),
+        'status' => ShotStatus::STORYLINE_READY,
+        'storyline' => ['keyframes' => [['title' => 'At the sign', 'description' => 'A welder checks the sign before lighting up.']]],
         'updated_at' => now()->subMinutes(10),
     ]);
     $failed = Shot::factory()->for($this->project)->create(['position' => 3, 'voice_over' => 'Never smoke here.', 'status' => ShotStatus::DRAFT, 'storyline_error' => 'The storyteller timed out.', 'updated_at' => now()->subMinute()]);
@@ -56,12 +45,12 @@ it('queues what waits for the director, oldest first', function () {
     $decisions = app(DecisionQueue::class)->for($this->project);
 
     expect($decisions->pluck('id')->all())->toBe([
-        "storyline-{$storyline->sqid}",
+        "plan-{$plan->sqid}",
         "render-{$render->sqid}",
         "rule-{$rule->sqid}",
         "attention-{$failed->sqid}",
     ])
-        ->and($decisions[0]['options'])->toEqual(decisionStorylines())
+        ->and($decisions[0]['plan'])->toBe([['title' => 'At the sign', 'description' => 'A welder checks the sign before lighting up.']])
         ->and($decisions[1]['keyframes'])->toHaveCount(1)
         ->and($decisions[1]['renderUrl'])->toBe(route('public.shots.video.generate', [$this->project, $render]))
         ->and($decisions[2]['rule']['text'])->toBe('People stand close to the hazard.')
@@ -111,7 +100,7 @@ it('leaves out shots whose keyframes are still being drawn', function () {
 });
 
 it('shows the decisions page and counts the decisions on the project and in the editor', function () {
-    $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::OPTIONS_READY, 'storyline_options' => decisionStorylines()]);
+    $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => [['title' => 'At the gate', 'description' => 'The visitor stops at the gate.']]]]);
 
     actingAs($this->director, 'director')
         ->get(route('public.projects.decisions', $this->project))
@@ -119,8 +108,8 @@ it('shows the decisions page and counts the decisions on the project and in the 
         ->assertInertia(fn($page) => $page
             ->component('projects/decisions')
             ->has('decisions', 1)
-            ->where('decisions.0.type', DecisionQueue::STORYLINE)
-            ->where('decisions.0.chooseUrl', route('public.shots.storyline.choose', [$this->project, $shot])));
+            ->where('decisions.0.type', DecisionQueue::PLAN)
+            ->where('decisions.0.drawUrl', route('public.shots.keyframes.generate', [$this->project, $shot])));
 
     actingAs($this->director, 'director')
         ->get(route('public.projects.view', $this->project))
@@ -134,13 +123,14 @@ it('shows the decisions page and counts the decisions on the project and in the 
 });
 
 it('returns to the decisions after a choice made there', function () {
-    $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::OPTIONS_READY, 'storyline_options' => decisionStorylines()]);
+    Queue::fake();
+    $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => [['title' => 'At the gate', 'description' => 'The visitor stops at the gate.']]]]);
 
     actingAs($this->director, 'director')
-        ->post(route('public.shots.storyline.choose', [$this->project, $shot]), ['option' => 0, 'return' => 'decisions'])
+        ->post(route('public.shots.keyframes.generate', [$this->project, $shot]), ['return' => 'decisions'])
         ->assertRedirect(route('public.projects.decisions', $this->project));
 
-    expect($shot->fresh()->status)->toBe(ShotStatus::STORYLINE_PENDING);
+    expect($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING);
 });
 
 it('explains running out of credits instead of the provider reply', function () {
@@ -326,7 +316,7 @@ describe('issues', function () {
         // The editor shows only what is left.
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
-            ->assertInertia(fn($page) => $page->where('shot.keyframeReview', ['clear' => false, 'notes' => ['The point is unclear.']]));
+            ->assertInertia(fn($page) => $page->where('shot.issueGroups.0.key', 'shot')->where('shot.issueGroups.0.issues', ['The point is unclear.'])->has('shot.issueGroups', 1));
     });
 
     it('offers Fix all on the shot and in the decision only when a keyframe can be redrawn', function () {
@@ -358,7 +348,7 @@ describe('issues', function () {
         expect(app(ShotIssues::class)->groups($shot->fresh(), $shot->keyframes()->with('media')->get()))->toBe([]);
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
-            ->assertInertia(fn($page) => $page->where('shot.keyframeReview', ['clear' => true, 'notes' => []]));
+            ->assertInertia(fn($page) => $page->where('shot.issueGroups', []));
     });
 
     it('offers Fix all after the video is rendered too, so the video can be made again', function () {

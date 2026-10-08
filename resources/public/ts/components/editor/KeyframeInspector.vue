@@ -78,7 +78,7 @@
           id="keyframe-description"
           v-model="description.description"
           rows="6"
-          maxlength="500"
+          maxlength="2000"
           :disabled="!canEdit"
           class="text-[15px] leading-relaxed"
         />
@@ -169,11 +169,6 @@
     <p v-if="checkIssues.length > 0" class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
       <span class="font-medium">{{ $t('The check found') }}</span>
       <span class="text-muted-foreground"> · {{ checkIssues.join(' ') }}</span>
-    </p>
-
-    <p v-if="checkProblems.length > 0" class="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">
-      <span class="font-medium">{{ $t('Redrawn automatically') }}</span>
-      <span class="text-muted-foreground"> · {{ checkProblems.join(' ') }}</span>
     </p>
 
     <section
@@ -291,7 +286,6 @@ const adjustment = computed(() => {
 })
 const busyLabel = computed(() => {
   if (props.keyframe.renderStage === 'checking') return $t('Checking the image…')
-  if (props.keyframe.renderStage === 'fixing') return $t('Fixing a mistake the check found…')
 
   return $t('Generating image…')
 })
@@ -308,8 +302,6 @@ const moveWarning = computed(() => props.keyframe.renders.find((render) => rende
 
 /** How much of the background stayed in place compared with the image it was drawn on. */
 const stillness = computed(() => props.keyframe.renders.find((render) => render.chosen)?.stillness ?? null)
-
-const checkProblems = computed(() => props.keyframe.renders.find((render) => render.chosen)?.checkProblems ?? [])
 
 const canTweak = computed(() => hasRender.value && Boolean(props.keyframe.tweakUrl) && !props.keyframe.rendering)
 

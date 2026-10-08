@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Ai\Agents\StorylineOptionsWriter;
 use App\Ai\Agents\StorylineWriter;
 use App\Ai\ElementPainter;
 use App\Ai\KeyframePainter;
@@ -92,14 +91,11 @@ describe('writing', function () {
         Element::factory()->for($this->project)->create();
         $shot = castShot($this->project)->load('project');
 
-        foreach ([new StorylineWriter($shot), new StorylineOptionsWriter($shot)] as $writer) {
-            expect((string) $writer->instructions())
-                ->toContain('Cast and sets of this project')
-                ->toContain('- Mark, the visitor (person): A middle-aged man');
-        }
+        expect((string) (new StorylineWriter($shot))->instructions())
+            ->toContain('Cast and sets of this project')
+            ->toContain('- Mark, the visitor (person): A middle-aged man');
 
-        expect((string) (new StorylineWriter($shot))->instructions())->toContain('never force an existing one into a story where it does not belong')
-            ->and((string) (new StorylineOptionsWriter($shot))->instructions())->toContain('never introduce a new person. Introduce a new place or recurring object only when a story needs one worth keeping');
+        expect((string) (new StorylineWriter($shot))->instructions())->toContain('never force an existing one into a story where it does not belong');
 
         expect((string) (new StorylineWriter($shot))->instructions())->toContain('Elements: the exact names of the cast and sets listed above');
     });
@@ -250,19 +246,15 @@ describe('pages', function () {
                 ->where('keyframes.0.elements', ['Mark, the visitor']));
     });
 
-    it('offers the cast and sets to pick from in the shot brief', function () {
-        $mark = withReference(Element::factory()->for($this->project)->create());
+    it('leaves picking the cast and sets to the plan chat, not the shot brief', function () {
+        withReference(Element::factory()->for($this->project)->create());
 
         actingAs($this->director, 'director')
             ->get(route('public.shots.create', $this->project))
             ->assertInertia(fn($page) => $page
-                ->component('shots/update')
-                ->where('elementTypes.0', ['value' => 'person', 'label' => 'Person', 'plural' => 'People'])
-                ->has('elementTypes', 3)
-                ->where('elements.0.id', $mark->sqid)
-                ->where('elements.0.type', 'person')
-                ->where('elements.0.name', 'Mark, the visitor')
-                ->where('shot.preferredElements', []));
+                ->component('shots/create')
+                ->missing('elements')
+                ->missing('elementTypes'));
     });
 
     it('lists the cast and sets on the project overview', function () {

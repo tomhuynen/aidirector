@@ -29,7 +29,6 @@ function busyShot(Project $project, ShotStatus $status): Shot
 {
     $shot = Shot::factory()->for($project)->create([
         'status' => $status,
-        'storyline_options' => [['title' => 'Straightforward', 'storyline' => 'He posts the letter.']],
         'chosen_storyline' => ['title' => 'Straightforward', 'storyline' => 'He posts the letter.'],
         'storyline' => ['keyframes' => [
             ['title' => 'At the mailbox', 'description' => 'He stands at the mailbox.'],
@@ -61,11 +60,6 @@ function restartingActions(): array
 {
     return [
         'draw the keyframes again' => ['post', 'public.shots.keyframes.generate', []],
-        'plan the storyline again' => ['post', 'public.shots.storyline.generate', []],
-        'suggest storylines again' => ['post', 'public.shots.storyline.suggest', []],
-        'choose a storyline' => ['post', 'public.shots.storyline.choose', ['option' => 0]],
-        'reopen the storylines' => ['delete', 'public.shots.storyline.reopen', []],
-        'change the brief' => ['post', 'public.shots.update', ['takeaway' => 'Smoking is not allowed.']],
         'render the video again' => ['post', 'public.shots.video.generate', []],
     ];
 }

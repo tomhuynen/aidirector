@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
-use App\Enums\ShotStatus;
 use App\Http\Controllers\Public\Shots\Concerns\GuardsBusyShots;
 use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
-use App\Jobs\GenerateKeyframes;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
@@ -34,12 +32,8 @@ class GenerateController
             ]);
         }
 
-        $shot->forceFill([
-            'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
-            'storyline_error' => null,
-        ])->save();
-
-        GenerateKeyframes::dispatch($shot);
+        // Waiting for new cast pictures or the setting from another shot, it is drawn as soon as they are there.
+        $shot->setRelation('project', $project)->drawKeyframes();
 
         return $this->afterAction($project, $shot);
     }

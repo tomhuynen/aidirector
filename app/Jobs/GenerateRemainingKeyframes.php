@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
@@ -28,6 +29,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class GenerateRemainingKeyframes implements ShouldQueue
 {
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -40,6 +42,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
         public readonly bool $onlyFirst = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->shot);
     }
 
     public function handle(KeyframePainter $painter): void
@@ -70,13 +73,22 @@ class GenerateRemainingKeyframes implements ShouldQueue
         }
 
         // Keyframe 1 with people gets a version without them, for the other keyframes to be drawn on; a chosen place is that already.
-        if ($plate === null) {
+        // A close-up is drawn on keyframe 1 itself: without its people there is nothing left to draw the hands on.
+        if ($plate === null && $shot->kindOrScene()->usesPlace()) {
             $painter->ensurePlate($shot, $siblings);
         }
 
         foreach ($siblings->skip(1) as $keyframe) {
+            if ($this->planReplaced()) {
+                return;
+            }
+
             $painter->render($keyframe, $siblings);
             $keyframe->load('media');
+        }
+
+        if ($this->planReplaced()) {
+            return;
         }
 
         $shot->forceFill([
@@ -87,6 +99,9 @@ class GenerateRemainingKeyframes implements ShouldQueue
 
         // The keyframes are shown straight away; the review of them together follows as its own job.
         ReviewShot::after($shot);
+
+        // Shots of the sequence that continue from these keyframes can be drawn now.
+        Shot::drawWaitingShots($shot->project_id);
 
         GenerationFinished::ready(__('All keyframes of “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $siblings->last()?->render(), Keyframe::THUMBNAIL)
             ->sendTo($shot->project);
@@ -101,6 +116,10 @@ class GenerateRemainingKeyframes implements ShouldQueue
     private function drawFirst(KeyframePainter $painter, Shot $shot, \Illuminate\Support\Collection $siblings, Keyframe $first): void
     {
         $painter->render($first, $siblings);
+
+        if ($this->planReplaced()) {
+            return;
+        }
 
         $shot->forceFill([
             'storyline_error' => null,
@@ -123,8 +142,16 @@ class GenerateRemainingKeyframes implements ShouldQueue
         }
 
         foreach ($siblings as $keyframe) {
+            if ($this->planReplaced()) {
+                return;
+            }
+
             $painter->render($keyframe, $siblings);
             $keyframe->load('media');
+        }
+
+        if ($this->planReplaced()) {
+            return;
         }
 
         $shot->forceFill([
@@ -134,6 +161,9 @@ class GenerateRemainingKeyframes implements ShouldQueue
         ])->save();
 
         ReviewShot::after($shot);
+
+        // Shots of the sequence that continue from these keyframes can be drawn now.
+        Shot::drawWaitingShots($shot->project_id);
 
         GenerationFinished::ready(__('All keyframes of “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $siblings->last()?->render(), Keyframe::THUMBNAIL)
             ->sendTo($shot->project);
@@ -175,6 +205,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
 
         $shotId = $shot->id;
         $onlyFirst = $this->onlyFirst;
+        $planVersion = $this->planVersion;
 
         Bus::batch($missing->map(fn(Element $element) => new GenerateElementReference(
             $element,
@@ -183,10 +214,11 @@ class GenerateRemainingKeyframes implements ShouldQueue
             ->name("Cast and sets for shot {$shot->id}")
             ->onQueue(Config::get('pipeline.queue'))
             ->allowFailures()
-            ->finally(static function () use ($shotId, $onlyFirst) {
+            ->finally(static function () use ($shotId, $onlyFirst, $planVersion) {
                 $shot = Shot::query()->find($shotId);
 
-                if ($shot !== null) {
+                // Reopened meanwhile: the keyframes of the old plan are no longer drawn.
+                if ($shot !== null && $shot->plan_version === $planVersion) {
                     self::dispatch($shot, elementsDrawn: true, onlyFirst: $onlyFirst);
                 }
             })
@@ -238,6 +270,10 @@ class GenerateRemainingKeyframes implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
+        if ($this->planReplaced()) {
+            return;
+        }
+
         $this->shot->keyframes()->where('rendering', true)->update([
             'rendering' => false,
             'render_error' => $exception?->getMessage(),

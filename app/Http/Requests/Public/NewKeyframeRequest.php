@@ -15,7 +15,7 @@ class NewKeyframeRequest extends FormRequest
     {
         return [
             'title' => ['required', 'string', 'max:60'],
-            'description' => ['required', 'string', 'max:500'],
+            'description' => ['required', 'string', 'max:2000'],
             'spatial' => ['nullable', 'string', 'max:500'],
         ];
     }

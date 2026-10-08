@@ -8,6 +8,7 @@ use App\Ai\ElementPainter;
 use App\Enums\ElementType;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Element;
+use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -50,6 +51,9 @@ class UpdateElementImage implements ShouldQueue
             : $painter->paint($element, includes: $includes);
 
         $element->forceFill(['rendering' => false, 'render_error' => null])->save();
+
+        // Shots that waited for this picture can be drawn now.
+        Shot::drawWaitingShots($element->project_id);
 
         // A person's voice follows from how they look; one chosen before stays.
         if ($element->type === ElementType::PERSON && $element->settings->voice === null) {

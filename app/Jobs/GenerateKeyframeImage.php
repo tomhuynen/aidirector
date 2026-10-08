@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Keyframe;
 use App\Notifications\Public\GenerationFinished;
@@ -22,6 +23,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class GenerateKeyframeImage implements ShouldQueue
 {
+    use FollowsPlan;
     use MarksRenderFailures;
     use Queueable;
 
@@ -33,6 +35,7 @@ class GenerateKeyframeImage implements ShouldQueue
         public readonly Keyframe $keyframe,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->keyframe);
     }
 
     public function handle(KeyframePainter $painter): void

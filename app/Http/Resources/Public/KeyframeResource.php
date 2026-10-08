@@ -39,17 +39,11 @@ class KeyframeResource extends JsonResource
             /** @var bool */
             'rendering' => $this->rendering,
             /**
-             * What the rendering is busy with after drawing: checking the image, or fixing what the check found.
+             * What the rendering is busy with after drawing: checking the image.
              *
-             * @var 'checking'|'fixing'|null
+             * @var 'checking'|null
              */
             'renderStage' => $this->rendering ? $this->render_stage : null,
-            /**
-             * While a mistake is being fixed: what the check found, in plain words.
-             *
-             * @var string|null
-             */
-            'renderNote' => $this->rendering ? $this->render_note : null,
             /** @var string|null */
             'renderError' => $this->render_error,
             /** @var array<int, string> */
@@ -58,7 +52,7 @@ class KeyframeResource extends JsonResource
             'imageUrl' => $rendered ? $this->imageUrl(null, $render) : null,
             /** @var string|null */
             'thumbnailUrl' => $rendered ? $this->imageUrl(Keyframe::THUMBNAIL, $render) : null,
-            /** @var array<int, array{id: int, chosen: bool, imageUrl: string, thumbnailUrl: string, request: string|null, instruction: string|null, checkProblems: array<int, string>, checkIssues: array<int, string>, sent: array{model: string, prompt: string, images: array<int, string>}|null, stillness: float|null, moveWarning: string|null}> */
+            /** @var array<int, array{id: int, chosen: bool, imageUrl: string, thumbnailUrl: string, request: string|null, instruction: string|null, checkIssues: array<int, string>, sent: array{model: string, prompt: string, images: array<int, string>}|null, stillness: float|null, moveWarning: string|null}> */
             'renders' => $this->renders()->map(fn(Media $media) => [
                 'id' => $media->id,
                 'chosen' => $media->id === $render?->id,
@@ -66,7 +60,6 @@ class KeyframeResource extends JsonResource
                 /** The adjustment came from the automatic check, not from the director. */
                 'requestFromCheck' => (bool) $media->getCustomProperty(Keyframe::TWEAK_FROM_CHECK, false),
                 'instruction' => $media->getCustomProperty(Keyframe::TWEAK_INSTRUCTION),
-                'checkProblems' => (array) $media->getCustomProperty(Keyframe::CHECK_PROBLEMS, []),
                 /** What the check found wrong with this version, kept as notes. */
                 'checkIssues' => array_values(array_map('strval', (array) $media->getCustomProperty(Keyframe::CHECK_ISSUES, []))),
                 /** What the image model got for this version: the model, the full prompt and what each attached image was. */

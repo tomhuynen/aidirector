@@ -8,6 +8,7 @@ use App\Ai\Agents\TweakInterpreter;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Enums\CorrectionSource;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Element;
 use App\Models\Keyframe;
@@ -36,6 +37,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class TweakKeyframeImage implements ShouldQueue
 {
+    use FollowsPlan;
     use MarksRenderFailures;
     use Queueable;
 
@@ -59,6 +61,7 @@ class TweakKeyframeImage implements ShouldQueue
         public readonly bool $describedByDirector = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->keyframe);
     }
 
     public function handle(KeyframePainter $painter): void
@@ -94,7 +97,7 @@ class TweakKeyframeImage implements ShouldQueue
             $base?->collection_name === Shot::PLATE => $painter->paintOn(
                 $base,
                 $keyframe,
-                KeyframeImageBrief::tweakOnPlate($instruction, withPreviousKeyframe: $previous !== null, shotRules: $keyframe->shot->rulesBrief()),
+                KeyframeImageBrief::tweakOnPlate($instruction, withPreviousKeyframe: $previous !== null),
                 [$painter->referenceFor($base), ...$references],
                 choose: $this->option === null,
                 model: (string) Config::get('pipeline.models.keyframe_edit'),
@@ -103,7 +106,7 @@ class TweakKeyframeImage implements ShouldQueue
             default => $painter->paintOn(
                 $base,
                 $keyframe,
-                KeyframeImageBrief::tweak($instruction, withPreviousKeyframe: $previous !== null, shotRules: $keyframe->shot->rulesBrief()),
+                KeyframeImageBrief::tweak($instruction, withPreviousKeyframe: $previous !== null),
                 $references,
                 choose: $this->option === null,
                 model: (string) Config::get('pipeline.models.keyframe_edit'),
@@ -212,8 +215,11 @@ class TweakKeyframeImage implements ShouldQueue
         }
 
         if ($description !== '') {
+            $before = $keyframe->fullDescription();
             $keyframe->forceFill(['description' => $description])->save();
-            $shot->updatePlannedKeyframe($keyframe->position, ['description' => $description], ['must_show', 'copied', 'prompt']);
+            $shot->updatePlannedKeyframe($keyframe->position, ['description' => $description], ['copied', 'prompt']);
+            // The storyline follows before the image is drawn and reviewed.
+            FollowStoryline::follow($keyframe, $before);
         }
     }
 

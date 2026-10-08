@@ -172,7 +172,7 @@ class ChatController
             ]);
 
             // Planned straight away by the kind chosen for it, drawn once the director starts it from the decisions.
-            GenerateStoryline::dispatch($shot, draw: false, keepKind: true);
+            GenerateStoryline::dispatch($shot, keepKind: true);
         }
     }
 

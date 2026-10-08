@@ -11,7 +11,6 @@ use App\Enums\CorrectionSource;
 use App\Enums\Disk;
 use App\Enums\ProjectRuleStatus;
 use App\Enums\ShotStatus;
-use App\Jobs\ClassifyCorrection;
 use App\Models\Correction;
 use App\Models\Director;
 use App\Models\Keyframe;
@@ -51,22 +50,6 @@ function readyShot(Project $project, int $position = 1): Shot
 }
 
 describe('recording', function () {
-    it('keeps storyline feedback and has it labelled in the background', function () {
-        Queue::fake();
-        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::OPTIONS_READY, 'storyline_options' => [['title' => 'Gate', 'storyline' => 'At the gate.']]]);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.storyline.suggest', [$this->project, $shot]), ['feedback' => 'Show the consequence, not just the rule']);
-
-        $correction = Correction::query()->sole();
-
-        expect($correction)->source->toBe(CorrectionSource::FEEDBACK)
-            ->request->toBe('Show the consequence, not just the rule')
-            ->shot_id->toBe($shot->id)
-            ->kind->toBeNull();
-        Queue::assertPushed(ClassifyCorrection::class, fn(ClassifyCorrection $job) => $job->correction->is($correction));
-    });
-
     it('keeps a deleted keyframe and a rewritten description', function () {
         Queue::fake();
         $shot = readyShot($this->project);

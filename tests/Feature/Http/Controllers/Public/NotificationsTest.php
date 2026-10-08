@@ -2,11 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Ai\Agents\StorylineOptionsWriter;
 use App\Ai\ElementPainter;
 use App\Enums\Disk;
-use App\Enums\ShotStatus;
-use App\Jobs\GenerateStorylineOptions;
 use App\Jobs\GenerateVideo;
 use App\Jobs\UpdateElementImage;
 use App\Models\Director;
@@ -28,21 +25,6 @@ beforeEach(function () {
 });
 
 describe('sending', function () {
-    it('tells the director when storylines are ready, with a link to the shot', function () {
-        StorylineOptionsWriter::fake([['options' => collect(range(1, 3))->map(fn(int $i) => ['title' => "Take {$i}", 'storyline' => 'A guard waves.'])->all()]]);
-        $shot = Shot::factory()->for($this->project)->create(['title' => 'No smoking', 'status' => ShotStatus::OPTIONS_PENDING]);
-
-        (new GenerateStorylineOptions($shot))->handle();
-
-        $notification = $this->director->notifications()->sole();
-
-        expect($notification->type)->toBe(GenerationFinished::class)
-            ->and($notification->data['title'])->toBe('Storylines for “No smoking” are ready')
-            ->and($notification->data['url'])->toBe(route('public.shots.view', [$this->project, $shot]))
-            ->and($notification->data['failed'])->toBeFalse()
-            ->and($notification->read_at)->toBeNull();
-    });
-
     it('tells the director when a generation failed', function () {
         $shot = Shot::factory()->for($this->project)->create(['title' => 'No smoking']);
 

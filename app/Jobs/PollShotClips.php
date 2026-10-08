@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Shots\MergeShots;
@@ -35,6 +36,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -47,6 +49,7 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
         public readonly Shot $shot,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->shot);
     }
 
     public function uniqueId(): string
@@ -226,6 +229,10 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
+        if ($this->planReplaced()) {
+            return;
+        }
+
         $this->fail($this->shot, (string) $exception?->getMessage());
     }
 

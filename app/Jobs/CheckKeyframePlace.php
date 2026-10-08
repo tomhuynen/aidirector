@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Keyframe;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -21,6 +22,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 #[DeleteWhenMissingModels]
 class CheckKeyframePlace implements ShouldQueue
 {
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -32,6 +34,7 @@ class CheckKeyframePlace implements ShouldQueue
         public readonly int $renderId,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->keyframe);
     }
 
     /**

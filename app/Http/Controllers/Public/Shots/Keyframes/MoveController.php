@@ -81,7 +81,6 @@ class MoveController
         $moved = $keyframe->addMedia($output)
             ->usingFileName("keyframe-{$keyframe->position}.png")
             ->withCustomProperties([
-                Keyframe::MOVED_BY_HAND => true,
                 Keyframe::SENT => ['model' => '', 'prompt' => 'Moved by hand.', 'images' => ['The place without people', 'The version before']],
             ])
             ->toMediaCollection(Keyframe::RENDERS);

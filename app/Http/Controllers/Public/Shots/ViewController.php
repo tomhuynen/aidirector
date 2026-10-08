@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots;
 
-use App\Enums\ElementType;
 use App\Enums\ShotKind;
 use App\Enums\ShotTransition;
 use App\Http\Resources\Public\ElementResource;
@@ -38,8 +37,6 @@ class ViewController
             'keyframes' => fn() => KeyframeResource::collection(
                 $shot->keyframes()->with(['media', 'elements'])->get()->each->setRelation('shot', $shot)
             ),
-            /** @var array<int, array{value: string, label: string, plural: string}> */
-            'elementTypes' => fn() => ElementType::catalogue(),
             /** The cast and sets the director can ask the storylines to use. */
             'elements' => fn() => ElementResource::collection(
                 $project->elements()->with('media')->get()->each->setRelation('project', $project)
@@ -66,7 +63,7 @@ class ViewController
                 'url' => route('public.shots.view', [$project, $merged]),
             ],
             'siblings' => fn() => ShotListItemResource::collection(
-                $project->shots()->with(['project', 'keyframes.media', 'parts.keyframes.media'])->withCount(['keyframes', 'parts'])->get()
+                $project->shots()->with(['project', 'media', 'keyframes.media', 'parts.keyframes.media'])->withCount(['keyframes', 'parts'])->get()
             ),
         ]);
     }

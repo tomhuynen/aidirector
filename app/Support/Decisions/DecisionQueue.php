@@ -23,8 +23,6 @@ class DecisionQueue
 {
     public function __construct(private readonly ShotIssues $issues) {}
 
-    public const STORYLINE = 'storyline';
-
     public const PLAN = 'plan';
 
     public const FIRST_KEYFRAME = 'first-keyframe';
@@ -75,7 +73,6 @@ class DecisionQueue
         $type = match (true) {
             $shot->status === ShotStatus::DRAFT && filled($shot->storyline_error) => self::ATTENTION,
             $failed !== null => self::ATTENTION,
-            $shot->status === ShotStatus::OPTIONS_READY => self::STORYLINE,
             $shot->status === ShotStatus::STORYLINE_READY && $keyframes->isEmpty() && $shot->storylineKeyframes() !== [] => self::PLAN,
             $shot->status === ShotStatus::FIRST_KEYFRAME_READY && ! (bool) $keyframes->first()?->rendering => self::FIRST_KEYFRAME,
             // Asked only once the keyframes are drawn and reviewed together, so the issues are known.
@@ -107,7 +104,6 @@ class DecisionQueue
         ];
 
         return match ($type) {
-            self::STORYLINE => [...$decision, 'options' => $shot->storylineOptions(), 'chooseUrl' => route('public.shots.storyline.choose', [$project, $shot])],
             self::PLAN => [
                 ...$decision,
                 'plan' => array_map(fn(array $keyframe) => ['title' => $keyframe['title'], 'description' => $keyframe['description']], $shot->storylineKeyframes()),

@@ -10,10 +10,11 @@ use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
 use App\Events\ShotDeleting;
+use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateVoiceOverAudio;
+use App\Jobs\RetimeShot;
 use App\Jobs\ReviewShot;
 use Closure;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -88,12 +89,12 @@ class Shot extends Model implements HasMedia
      *  montage_clips: 'array',
      *  purpose_override: 'App\Enums\ProjectPurpose',
      *  aspect_ratio_override: 'App\Enums\AspectRatio',
-     *  preferred_elements: 'array',
      *  keyframe_review: 'array',
      *  voice_over_tracks: 'array',
-     *  storyline_options: 'array',
      *  chosen_storyline: 'array',
      *  storyline: 'array',
+     *  plan_chat: 'array',
+     *  plan_version: 'integer',
      *  merge_transition: 'App\Enums\ShotTransition',
      *  video_submitted_at: 'datetime',
      *  reviewing: 'boolean',
@@ -107,16 +108,15 @@ class Shot extends Model implements HasMedia
             'montage_clips' => 'array',
             'purpose_override' => ProjectPurpose::class,
             'aspect_ratio_override' => AspectRatio::class,
-            'preferred_elements' => 'array',
             'keyframe_review' => 'array',
             'voice_over_tracks' => 'array',
-            'storyline_options' => 'array',
             'chosen_storyline' => 'array',
             'storyline' => 'array',
+            'plan_chat' => 'array',
+            'plan_version' => 'integer',
             'merge_transition' => ShotTransition::class,
             'video_submitted_at' => 'datetime',
             'reviewing' => 'boolean',
-            'rules' => 'array',
         ];
     }
 
@@ -162,43 +162,15 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * The storylines suggested by the AI for the director to choose from.
-     *
-     * @return list<array{title: string, storyline: string}>
-     */
-    public function storylineOptions(): array
-    {
-        return array_values($this->storyline_options ?? []);
-    }
-
-    /**
-     * The director's brief as the writers read it: the takeaway, the context
-     * and the cast and sets the director asked for. Older shots also carry a
-     * subject and action written by hand.
+     * The brief as the writers read it: the takeaway, and the idea agreed for
+     * this shot when it is part of a sequence.
      */
     public function brief(): string
     {
-        $lines = ["Takeaway: {$this->takeaway}"];
-
-        if (filled($this->subject)) {
-            $lines[] = "Subject: {$this->subject}";
-        }
-
-        if (filled($this->action)) {
-            $lines[] = "Action: {$this->action}";
-        }
-
-        if (filled($this->notes)) {
-            $lines[] = "Context from the director: {$this->notes}";
-        }
-
-        $preferred = $this->preferredElements();
-
-        if ($preferred->isNotEmpty()) {
-            $lines[] = "The director wants these in the shot:\n" . $preferred->map(fn(Element $element) => '- ' . $element->promptLine())->join("\n");
-        }
-
-        return implode("\n", $lines);
+        return implode("\n", array_filter([
+            "Takeaway: {$this->takeaway}",
+            filled($this->notes) ? "The idea for this shot: {$this->notes}" : null,
+        ]));
     }
 
     /**
@@ -256,23 +228,6 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * The cast and sets the director wants the storylines to use, in the
-     * library's order. Elements deleted since are left out.
-     *
-     * @return Collection<int, Element>
-     */
-    public function preferredElements(): Collection
-    {
-        $ids = $this->preferred_elements ?? [];
-
-        if ($ids === []) {
-            return new Collection();
-        }
-
-        return $this->project->elements()->whereKey($ids)->get();
-    }
-
-    /**
      * The storyline the director picked from the suggestions.
      *
      * @return array{title: string, storyline: string}|null
@@ -287,43 +242,11 @@ class Shot extends Model implements HasMedia
      *
      * Older plans also carry a `prompt`: an image instruction no longer written or used; the description goes to the image model.
      *
-     * @return list<array{title: string, description: string, spatial?: string, prompt?: string, must_show?: string, elements?: list<string>, copied?: bool}>
+     * @return list<array{title: string, description: string, spatial?: string, prompt?: string, elements?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
         return array_values($this->storyline['keyframes'] ?? []);
-    }
-
-    /**
-     * The rules the director set for this shot, such as "she never crosses the red line with more than one foot".
-     *
-     * @return list<string>
-     */
-    public function shotRules(): array
-    {
-        return collect((array) ($this->rules ?? []))->map(fn(mixed $rule) => trim((string) $rule))->filter(fn(string $rule) => $rule !== '')->values()->all();
-    }
-
-    /**
-     * The shot's rules as lines for the writers, image prompts and checks; empty when there are none.
-     */
-    public function rulesBrief(): string
-    {
-        return collect($this->shotRules())->map(fn(string $rule) => "- {$rule}")->join("\n");
-    }
-
-    /**
-     * Add a rule for this shot, once.
-     */
-    public function addRule(string $rule): void
-    {
-        $rule = trim($rule);
-
-        if ($rule === '' || in_array(mb_strtolower($rule), array_map('mb_strtolower', $this->shotRules()), true)) {
-            return;
-        }
-
-        $this->forceFill(['rules' => [...$this->shotRules(), $rule]])->save();
     }
 
     /**
@@ -359,6 +282,152 @@ class Shot extends Model implements HasMedia
     }
 
     /**
+     * The label of the shot in the sequence, such as SH070.
+     */
+    public function code(): string
+    {
+        return 'SH' . str_pad((string) ($this->position * 10), 3, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * The shot directly before this one in the sequence, if any.
+     */
+    public function previousShot(): ?self
+    {
+        return self::query()->where('project_id', $this->project_id)->whereNull('merged_into_id')
+            ->where('position', '<', $this->position)->orderByDesc('position')->first();
+    }
+
+    /**
+     * The shot directly after this one in the sequence, if any.
+     */
+    public function nextShot(): ?self
+    {
+        return self::query()->where('project_id', $this->project_id)->whereNull('merged_into_id')
+            ->where('position', '>', $this->position)->orderBy('position')->first();
+    }
+
+    /** The setting from another shot's last keyframe, whichever position that turns out to be. */
+    public const LAST_KEYFRAME = -1;
+
+    /**
+     * Where the keyframes take their setting from: a keyframe of another shot,
+     * its last keyframe (-1), or its place (0). Agreed in the plan chat or when
+     * a story is split into shots; without one, a close-up planned together
+     * with the shot before it continues from that shot's last keyframe, as a
+     * cut-in on the same moment.
+     *
+     * @return array{shot: self, keyframe: int, chosen: bool}|null
+     */
+    public function settingFrom(): ?array
+    {
+        $chosen = $this->storyline['setting_from'] ?? null;
+
+        if (is_array($chosen)) {
+            $source = isset($chosen['shot_id']) ? self::query()->where('project_id', $this->project_id)->whereKey($chosen['shot_id'])->first() : null;
+
+            return $source === null || $source->is($this) ? null : ['shot' => $source, 'keyframe' => max(self::LAST_KEYFRAME, (int) ($chosen['keyframe'] ?? 0)), 'chosen' => true];
+        }
+
+        $previous = $this->kindOrScene() === ShotKind::CLOSE_UP && $this->group_key !== null ? $this->previousShot() : null;
+
+        return $previous !== null && $previous->group_key === $this->group_key
+            ? ['shot' => $previous, 'keyframe' => self::LAST_KEYFRAME, 'chosen' => false]
+            : null;
+    }
+
+    /**
+     * What the setting from another shot needs that is not there yet, such as
+     * "the place of SH100" before that place is chosen; null when it is ready
+     * or the shot has its own setting.
+     */
+    public function settingWaitsFor(): ?string
+    {
+        $from = $this->settingFrom();
+
+        if ($from === null) {
+            return null;
+        }
+
+        $source = $from['shot'];
+
+        return match (true) {
+            $from['keyframe'] === 0 => $source->hasChosenPlate() || $source->keyframes()->where('position', 1)->whereNotNull('render_id')->exists() ? null : __('the place of :shot', ['shot' => $source->code()]),
+            $from['keyframe'] === self::LAST_KEYFRAME => in_array($source->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_PENDING, ShotStatus::VIDEO_READY], true) && ! $source->keyframes()->where('rendering', true)->exists()
+                ? null
+                : __('the keyframes of :shot', ['shot' => $source->code()]),
+            default => $source->keyframes()->where('position', $from['keyframe'])->whereNotNull('render_id')->exists() ? null : __('keyframe :n of :shot', ['n' => $from['keyframe'], 'shot' => $source->code()]),
+        };
+    }
+
+    /**
+     * The chosen place of the shot this scene takes its place from: the same
+     * place, used as it is, so nothing new is offered to choose from.
+     */
+    public function inheritedPlate(): ?Media
+    {
+        $from = $this->settingFrom();
+
+        if ($from === null || $from['keyframe'] !== 0 || ! $this->kindOrScene()->usesPlace()) {
+            return null;
+        }
+
+        return $from['shot']->media()->where('collection_name', self::PLATE)->where('custom_properties->' . self::PLATE_CHOSEN, true)->latest('id')->first();
+    }
+
+    /**
+     * What the keyframes wait for before they can be drawn: the pictures of
+     * new cast and sets, or the setting from another shot; null when nothing.
+     */
+    public function waitsFor(): ?string
+    {
+        $named = collect($this->storylineKeyframes())->flatMap(fn(array $keyframe) => (array) ($keyframe['elements'] ?? []))->unique()->all();
+
+        if ($named !== [] && Element::query()->where('project_id', $this->project_id)->whereIn('name', $named)->where('rendering', true)->exists()) {
+            return __('the pictures of the new cast and sets');
+        }
+
+        return $this->settingWaitsFor();
+    }
+
+    /**
+     * Starts drawing the keyframes of the plan, or has them drawn as soon as
+     * what they wait for is there.
+     */
+    public function drawKeyframes(): void
+    {
+        if ($this->waitsFor() !== null) {
+            $this->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'draw_when_ready' => true]);
+
+            return;
+        }
+
+        $this->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['draw_when_ready' => true]));
+        $this->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_PENDING, 'storyline_error' => null])->save();
+
+        GenerateKeyframes::dispatch($this);
+    }
+
+    /**
+     * Whether drawing was asked for and the keyframes still wait for something.
+     */
+    public function waitsToDraw(): bool
+    {
+        return ($this->storyline['draw_when_ready'] ?? false) === true && $this->status === ShotStatus::STORYLINE_READY;
+    }
+
+    /**
+     * Draws the shots of the project that waited and have everything now: a
+     * place was chosen, keyframes were drawn or a picture of the cast is ready.
+     */
+    public static function drawWaitingShots(int $projectId): void
+    {
+        self::query()->with('project')->where('project_id', $projectId)->where('status', ShotStatus::STORYLINE_READY)->get()
+            ->filter(fn(self $shot) => $shot->waitsToDraw() && $shot->waitsFor() === null)
+            ->each->drawKeyframes();
+    }
+
+    /**
      * Whether the director chose the empty place every keyframe is drawn on.
      */
     public function hasChosenPlate(): bool
@@ -367,9 +436,8 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Where in the place the shot plays and how long it lasts, as the planner
-     * chose it. The camera always frames a full shot and the light is always
-     * the visual style's. Older plans have none.
+     * Where in the place the shot plays and how long it lasts. The camera
+     * follows the kind of shot and the light is always the visual style's.
      *
      * @return array{spot: string, seconds: int|null}|null
      */
@@ -491,6 +559,10 @@ class Shot extends Model implements HasMedia
         $this->unsetRelation('keyframes');
         $this->updateStoredJson('keyframe_review', fn(?array $review) => self::renumberedReview($review, $moved));
         $this->replacePlannedKeyframes($arranged);
+        // A keyframe deleted or copied: the shot is timed again for what its keyframes show now.
+        if (count($plans) !== count($arranged)) {
+            RetimeShot::dispatch($this);
+        }
 
         // The order is what the review judges, so it looks again; the renumbered notes stand until then.
         ReviewShot::after($this);

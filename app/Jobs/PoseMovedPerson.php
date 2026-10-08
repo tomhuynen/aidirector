@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Ai\Agents\MovedPersonDescriber;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Keyframe;
 use App\Models\Shot;
@@ -35,6 +36,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class PoseMovedPerson implements ShouldQueue
 {
+    use FollowsPlan;
     use MarksRenderFailures;
     use Queueable;
 
@@ -51,6 +53,7 @@ class PoseMovedPerson implements ShouldQueue
         public readonly array $box,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->keyframe);
     }
 
     public function handle(KeyframePainter $painter, PersonCutout $cutout, BackgroundDrift $drift): void
@@ -71,7 +74,6 @@ class PoseMovedPerson implements ShouldQueue
             $render = $this->redrawAround($painter, $cutout, $keyframe, $moved);
             $still = $drift->measure($plate, $render)['moved'] === false;
             $stayed = $this->stayedPut($cutout, $plate, $render);
-            $render->setCustomProperty(Keyframe::MOVED_AWAY, $stayed ? null : true)->save();
 
             if ($still && $stayed) {
                 $kept?->delete();
@@ -125,7 +127,7 @@ class PoseMovedPerson implements ShouldQueue
         try {
             $redrawn = $painter->paint(
                 $keyframe,
-                KeyframeImageBrief::tweak($this->instruction, shotRules: $keyframe->shot->rulesBrief()),
+                KeyframeImageBrief::tweak($this->instruction),
                 [ImageFile::fromStorage($stored, 'local')],
                 false,
                 (string) Config::get('pipeline.models.keyframe_edit'),
@@ -182,7 +184,7 @@ class PoseMovedPerson implements ShouldQueue
 
         if ($description !== '') {
             $keyframe->forceFill([...array_filter(['description' => $description, 'title' => $title]), 'spatial' => $spatial !== '' ? $spatial : null])->save();
-            $shot->updatePlannedKeyframe($keyframe->position, array_filter(['title' => $title, 'description' => $description, 'spatial' => $spatial]), $spatial === '' ? ['spatial', 'must_show', 'prompt'] : ['must_show', 'prompt']);
+            $shot->updatePlannedKeyframe($keyframe->position, array_filter(['title' => $title, 'description' => $description, 'spatial' => $spatial]), $spatial === '' ? ['spatial', 'prompt'] : ['prompt']);
         }
 
         // The storyline follows small moves too, so the review and the video prompt see one story.

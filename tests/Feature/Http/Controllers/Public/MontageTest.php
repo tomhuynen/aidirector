@@ -88,47 +88,30 @@ describe('planning', function () {
             ->toContain('For a scene:')
             ->toContain('For a montage:');
 
-        // A revision keeps the kind; the planner is told which one it is and gets only its rules.
-        (new GenerateStoryline($shot->fresh(), 'make the welders wear masks'))->handle();
+        // Keeping the kind, the planner is told which one it is and gets only its rules.
+        (new GenerateStoryline($shot->fresh(), keepKind: true))->handle();
 
         expect($shot->fresh()->kind)->toBe(ShotKind::MONTAGE);
         StorylineWriter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'This shot is a montage: give montage as the kind.')
             && str_contains((string) $prompt->agent->instructions(), 'Never explain with a board, poster, screen, chart or display of pictograms')
+            && str_contains((string) $prompt->agent->instructions(), 'two parts never share a place unless the story says so')
             && ! str_contains((string) $prompt->agent->instructions(), 'Keyframe 1 sets the camera for the whole shot'));
     });
 
-    it('lets the director switch the kind in the plan', function () {
+    it('lets the director switch the kind in the plan chat', function () {
+        Illuminate\Support\Facades\Queue::fake();
+        App\Ai\Agents\PlanDirector::fake([[
+            'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
+            'proposal' => ['takeaway' => '', 'kind' => 'montage', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => montagePlan()],
+        ]]);
         $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'kind' => ShotKind::SCENE, 'storyline' => ['keyframes' => montagePlan()]]);
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.plan', [$this->project, $shot]), [
-                'storyline' => 'Designed, built and repaired.',
-                'kind' => 'montage',
-                'framing' => ['size' => 'full', 'spot' => '', 'light' => '', 'seconds' => 7],
-                'keyframes' => montagePlan(),
-            ])
-            ->assertSessionHasNoErrors();
+            ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'make it a montage'])
+            ->assertOk();
 
         expect($shot->fresh()->kind)->toBe(ShotKind::MONTAGE);
     });
-});
-
-it('writes keyframes in the plan chat by the rules of the kind chosen in the form, before it is saved', function () {
-    App\Ai\Agents\PlanFrameWriter::fake([['keyframes' => []]]);
-    $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'kind' => ShotKind::SCENE, 'storyline' => ['mode' => 'auto', 'keyframes' => montagePlan()]]);
-
-    actingAs($this->director, 'director')
-        ->postJson(route('public.shots.plan.write', [$this->project, $shot]), [
-            'message' => 'add the ship at sea',
-            'storyline' => 'Designed, built and repaired.',
-            'kind' => 'montage',
-            'keyframes' => [...montagePlan(), ['title' => '', 'description' => '']],
-            'targets' => [['position' => 4, 'instruction' => 'the finished ship at sea']],
-        ])
-        ->assertOk();
-
-    App\Ai\Agents\PlanFrameWriter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'This shot is a montage: give montage as the kind.'));
-    expect($shot->fresh()->kind)->toBe(ShotKind::SCENE);
 });
 
 describe('drawing', function () {
@@ -178,6 +161,8 @@ describe('video', function () {
         (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(KeyframePainter::class));
 
         Http::assertSentCount(3);
+        // Each clip lasts its share of the 7-second shot (2.67 s), rounded up to whole seconds; the join cuts it back.
+        Http::assertSent(fn(Request $request) => $request['duration'] === 3);
         Http::assertSent(fn(Request $request) => ($request['frame_images'][0]['frame_type'] ?? null) === 'first_frame'
             && ! isset($request['input_references'])
             && str_contains($request['prompt'], 'welders join a hull section'));

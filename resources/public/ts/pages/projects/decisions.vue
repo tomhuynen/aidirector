@@ -29,10 +29,7 @@
             </h2>
           </header>
 
-          <div
-            v-if="current.shot?.voiceOver && current.type !== 'storyline'"
-            class="flex items-start gap-3 rounded-lg border border-border p-4"
-          >
+          <div v-if="current.shot?.voiceOver" class="flex items-start gap-3 rounded-lg border border-border p-4">
             <Mic class="mt-0.5 size-6 shrink-0 text-signal" />
             <p class="space-y-1">
               <span class="block font-semibold">{{ $t('Voice-over') }}</span>
@@ -91,10 +88,7 @@
             </div>
           </template>
 
-          <p
-            v-if="current.shot?.storyline && current.type !== 'storyline'"
-            class="text-[15px] leading-relaxed text-muted-foreground"
-          >
+          <p v-if="current.shot?.storyline" class="text-[15px] leading-relaxed text-muted-foreground">
             {{ current.shot.storyline }}
           </p>
           <Button v-if="current.shot" as-child variant="outline" size="sm">
@@ -162,26 +156,8 @@
       </aside>
 
       <div class="flex min-h-0 flex-col gap-5">
-        <!-- Choose one of the suggested storylines. -->
-        <div v-if="current.type === 'storyline'" class="grid min-h-0 content-start gap-3 overflow-y-auto">
-          <button
-            v-for="(option, i) in current.options"
-            :key="i"
-            type="button"
-            :disabled="busy"
-            class="flex items-start gap-4 rounded-xl bg-card/60 px-5 py-4 text-left transition-colors hover:bg-signal-soft/40"
-            @click="send(current.chooseUrl, { option: i })"
-          >
-            <span :class="badge">{{ i + 1 }}</span>
-            <span class="min-w-0 space-y-1">
-              <span class="block text-lg font-semibold">{{ option.title }}</span>
-              <span class="block text-[15px] leading-relaxed text-muted-foreground">{{ option.storyline }}</span>
-            </span>
-          </button>
-        </div>
-
         <!-- A planned shot: the steps it will show, drawn once the director starts it. -->
-        <ol v-else-if="current.type === 'plan'" class="grid min-h-0 content-start gap-3 overflow-y-auto">
+        <ol v-if="current.type === 'plan'" class="grid min-h-0 content-start gap-3 overflow-y-auto">
           <li v-for="(step, i) in current.plan" :key="i" class="flex items-start gap-4 rounded-xl bg-card/60 px-5 py-4">
             <span :class="badge">{{ i + 1 }}</span>
             <span class="min-w-0 space-y-1">
@@ -294,7 +270,6 @@ import { Button } from '@shared:ui/button'
 import {
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   Check,
   ChevronRight,
   CircleCheck,
@@ -325,7 +300,6 @@ type DecisionShot = {
 }
 
 type Decision = { id: string; waitingSince: string | null; shot?: DecisionShot } & (
-  | { type: 'storyline'; options: { title: string; storyline: string }[]; chooseUrl: string }
   | { type: 'plan'; plan: { title: string; description: string }[]; drawUrl: string }
   | {
       type: 'first-keyframe'
@@ -426,7 +400,6 @@ const badge =
 const headingIcon = computed(
   () =>
     ({
-      'storyline': BookOpen,
       'plan': Wand,
       'first-keyframe': ImageIcon,
       'render': Clapperboard,
@@ -438,7 +411,6 @@ const headingIcon = computed(
 const heading = computed(
   () =>
     ({
-      'storyline': $t('Choose a storyline'),
       'plan': $t('Draw the keyframes'),
       'first-keyframe':
         current.value?.type === 'first-keyframe' && current.value.options.length === 1
@@ -476,8 +448,6 @@ const onKey = (event: KeyboardEvent) => {
 
   if (event.key.toLowerCase() === 's') {
     skip()
-  } else if (decision.type === 'storyline' && decision.options[index]) {
-    send(decision.chooseUrl, { option: index })
   } else if (decision.type === 'first-keyframe' && decision.options[index]) {
     send(decision.chooseUrl, { [decision.field ?? 'render']: decision.options[index].id })
   } else if (decision.type === 'plan' && event.key === 'Enter') {

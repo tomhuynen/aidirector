@@ -623,27 +623,6 @@ describe('job', function () {
             && str_contains($job->instruction, 'stay exactly as in the current version; only the background is the place\'s own again.'));
     });
 
-    it('draws, adjusts and checks every keyframe by the shot\'s rules', function () {
-        Image::fake(fn() => fakePng());
-        TweakInterpreter::fake([['instruction' => 'Raise his hand.', 'approach' => 'edit', 'description' => 'The man raises his hand at the mailbox.', 'absent' => []]]);
-        $shot = plannedShot($this->project, ['rules' => ['The man never touches the mailbox with both hands.']]);
-        renderAllKeyframes($shot);
-
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains("Rules for this shot, never break them:\n- The man never touches the mailbox with both hands."));
-
-        $first = $shot->keyframes()->firstOrFail();
-        (new TweakKeyframeImage($first, 'raise his hand'))->handle(app(KeyframePainter::class));
-
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this: raise his hand')
-            && $prompt->contains("Rules for this shot, the change never breaks them:\n- The man never touches the mailbox with both hands."));
-        TweakInterpreter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Rules for this shot; never write an instruction that breaks one')
-            && str_contains((string) $prompt->agent->instructions(), 'where someone looks, a gesture such as a thumbs up or a wave, and a pose'));
-
-        $checker = new \App\Ai\Agents\KeyframeChecker($first->fresh(), ['the keyframe to check']);
-
-        expect((string) $checker->instructions())->toContain("Also check the rules the director set for this shot; breaking one is a high issue, named with the rule:\n- The man never touches the mailbox with both hands.");
-    });
-
     it('replaces the keyframes of an earlier render', function () {
         Image::fake(fn() => fakePng());
 
@@ -1185,16 +1164,16 @@ describe('update', function () {
         expect($keyframe->fresh()->rendering)->toBeFalse();
     });
 
-    it('drops the must show and the copy mark of the old wording', function () {
+    it('drops the copy mark of the old wording', function () {
         $plans = plannedKeyframes();
-        $plans[1] = [...$plans[1], 'must_show' => 'The envelope is halfway into the slot.', 'copied' => true];
+        $plans[1] = [...$plans[1], 'copied' => true];
         $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY, 'storyline' => ['keyframes' => $plans]]);
         $keyframe = Keyframe::factory()->for($shot)->create(['position' => 2, 'title' => 'Posting']);
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'The street is empty; he is not there yet.']);
 
-        expect($shot->fresh()->storylineKeyframes()[1])->not->toHaveKeys(['must_show', 'copied'])
+        expect($shot->fresh()->storylineKeyframes()[1])->not->toHaveKey('copied')
             ->and($shot->fresh()->plannedKeyframeIsCopy(2))->toBeFalse();
     });
 
@@ -1423,7 +1402,8 @@ describe('tweak', function () {
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => str_contains((string) $prompt->prompt, 'Most important, this must be clearly visible'));
         KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'The point of the keyframe: what the description says about where people stand')
             && ! str_contains((string) $prompt->agent->instructions(), 'Must show:'));
-        KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Someone who faces the camera or walks towards it while the description says they go away from it')
+        KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'someone who faces the camera or walks towards it while the description says they go away from it')
+            && str_contains((string) $prompt->agent->instructions(), 'Direction: check which way someone faces or moves only when the story depends on it')
             && str_contains((string) $prompt->agent->instructions(), 'lettering that appears, or a floor line that runs elsewhere')
             && str_contains((string) $prompt->agent->instructions(), 'Image 1: keyframe 1 of the shot: the reference for the place and the camera, and for how the people look.'));
     });
@@ -1606,8 +1586,7 @@ describe('tweak', function () {
 
         $second = $shot->keyframes()->where('position', 2)->firstOrFail();
 
-        expect($second->renders())->toHaveCount(1)
-            ->and($second->render()->getCustomProperty(Keyframe::CHECK_PROBLEMS))->toBeNull();
+        expect($second->renders())->toHaveCount(1);
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Correct these mistakes'));
     });
 
@@ -1826,7 +1805,7 @@ describe('generate', function () {
     });
 
     it('rejects rendering before the keyframes are planned', function () {
-        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::OPTIONS_READY]);
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::DRAFT]);
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.keyframes.generate', [$this->project, $shot]))
@@ -1914,5 +1893,109 @@ describe('image', function () {
         actingAs($this->director, 'director')
             ->get(route('public.shots.keyframes.image', [$this->project, $shot, $keyframe]))
             ->assertNotFound();
+    });
+});
+
+describe('back to the chat', function () {
+    it('throws the keyframes away and goes on with the conversation', function () {
+        $shot = Shot::factory()->for($this->project)->create([
+            'status' => ShotStatus::KEYFRAMES_READY,
+            'storyline' => ['keyframes' => plannedKeyframes()],
+            'plan_chat' => [['role' => 'director', 'text' => 'yes'], ['role' => 'assistant', 'text' => 'Drawing them now.']],
+        ]);
+        Keyframe::factory()->for($shot)->count(2)->create();
+
+        actingAs($this->director, 'director')
+            ->delete(route('public.shots.plan.reopen', [$this->project, $shot]))
+            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+
+        $shot->refresh();
+
+        expect($shot->status)->toBe(ShotStatus::STORYLINE_READY)
+            ->and($shot->keyframes()->count())->toBe(0)
+            ->and($shot->plan_version)->toBe(1)
+            ->and($shot->storylineKeyframes())->toHaveCount(3)
+            ->and(collect($shot->plan_chat)->last()['text'])->toBe('What did not work in the keyframes?');
+    });
+
+    it('stops the jobs of the old plan', function () {
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_PENDING, 'storyline' => ['keyframes' => plannedKeyframes()]]);
+        $keyframe = Keyframe::factory()->for($shot)->create();
+        $drawing = new GenerateRemainingKeyframes($shot);
+        $tweaking = new TweakKeyframeImage($keyframe, 'closer');
+        $runs = fn(object $job) => $job->middleware()[0]($job, fn() => true) === true;
+
+        expect($runs($drawing))->toBeTrue()->and($runs($tweaking))->toBeTrue();
+
+        actingAs($this->director, 'director')->delete(route('public.shots.plan.reopen', [$this->project, $shot]));
+
+        expect($runs($drawing))->toBeFalse()
+            ->and($drawing->planReplaced())->toBeTrue()
+            ->and($runs(new GenerateRemainingKeyframes($shot->fresh())))->toBeTrue();
+
+        // The places of the old plan are not offered once they are done.
+        GenerateKeyframes::finishPlates($shot->id, planVersion: 0);
+        expect($shot->fresh()->status)->toBe(ShotStatus::STORYLINE_READY);
+    });
+});
+
+describe('text and places in the checks', function () {
+    it('never asks for text and accepts a change of place the description asks for', function () {
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY]);
+        $keyframe = Keyframe::factory()->for($shot)->create(['description' => 'Through the windscreen the car has driven through the gate.']);
+
+        expect((string) (new KeyframeChecker($keyframe, ['keyframe 1', 'the keyframe to check'], KeyframeChecker::PLACE))->instructions())
+            ->toContain('only that change is allowed')
+            ->and((string) (new KeyframeChecker($keyframe, ['keyframe 1', 'the keyframe to check']))->instructions())
+            ->toContain('never ask for text to make one recognisable')
+            ->and((string) (new TweakInterpreter($keyframe, []))->instructions())
+            ->toContain('Never ask for text');
+    });
+});
+
+describe('length', function () {
+    it('times the shot again from its keyframes and writes the voice-over for the new length', function () {
+        Queue::fake([App\Jobs\GenerateVoiceOver::class]);
+        App\Ai\Agents\ShotTimer::fake([['seconds' => 2]]);
+        $shot = Shot::factory()->for($this->project)->create(['duration' => null, 'voice_over' => 'An old text.', 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 5], 'keyframes' => plannedKeyframes()]]);
+
+        (new App\Jobs\RetimeShot($shot))->handle();
+
+        expect($shot->fresh()->durationInSeconds())->toBe(2)
+            ->and($shot->fresh()->voice_over)->toBeNull();
+        Queue::assertPushed(App\Jobs\GenerateVoiceOver::class);
+        App\Ai\Agents\ShotTimer::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '2. Posting: A man in a navy suit pushes a white envelope')
+            && str_contains((string) $prompt->agent->instructions(), 'picking up, handing over or putting down an object: 1 second'));
+    });
+
+    it('keeps a length the director set', function () {
+        Queue::fake([App\Jobs\GenerateVoiceOver::class]);
+        App\Ai\Agents\ShotTimer::fake([['seconds' => 2]]);
+        $shot = Shot::factory()->for($this->project)->create(['duration' => 6, 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 5], 'keyframes' => plannedKeyframes()]]);
+
+        (new App\Jobs\RetimeShot($shot))->handle();
+
+        expect($shot->fresh()->durationInSeconds())->toBe(6);
+        App\Ai\Agents\ShotTimer::assertNeverPrompted();
+        Queue::assertNotPushed(App\Jobs\GenerateVoiceOver::class);
+    });
+
+    it('times the shot again once a keyframe is added or described differently', function () {
+        Queue::fake([App\Jobs\RetimeShot::class, App\Jobs\GenerateKeyframeImage::class, App\Jobs\TweakKeyframeImage::class, App\Jobs\FollowStoryline::class]);
+        $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY, 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 4], 'keyframes' => plannedKeyframes()]]);
+        $keyframe = Keyframe::factory()->for($shot)->create(['position' => 1, 'description' => 'Old.']);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He walks all the way across the hall.', 'redraw' => true])
+            ->assertSessionHasNoErrors();
+
+        Queue::assertPushed(App\Jobs\RetimeShot::class);
+    });
+
+    it('renders a short shot at its own length', function () {
+        $shot = Shot::factory()->for($this->project)->create(['duration' => null, 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 2], 'keyframes' => plannedKeyframes()]]);
+
+        expect($shot->durationInSeconds())->toBe(2)
+            ->and(App\Jobs\GenerateVideo::duration($shot))->toBe(2);
     });
 });

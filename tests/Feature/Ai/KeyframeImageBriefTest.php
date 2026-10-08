@@ -128,3 +128,22 @@ it('takes the people from their pictures and the state of things from the keyfra
         ->toContain('The second attached image is the picture of Female engineer (person). Draw Female engineer exactly like it')
         ->toContain('The third attached image is the keyframe directly before this one. Carry over the state and position of every object from it');
 });
+
+it('never lets the image model write labels on cards, badges or permits', function () {
+    expect(KeyframeImageBrief::tweak('the permit lies on the dashboard'))
+        ->toContain('never write words, labels, numbers or ID details on cards, badges, permits')
+        ->and(KeyframeImageBrief::tweakOnPlate('the permit lies on the dashboard'))
+        ->toContain('never write words, labels, numbers or ID details on cards, badges, permits');
+});
+
+it('plans around what the video model cannot do, and has the plan director explain it and propose another way', function () {
+    $shot = Shot::factory()->create();
+
+    expect(App\Ai\Briefs\VideoLimitsBrief::limits())->toHaveCount(10)
+        ->and((string) (new App\Ai\Agents\StorylineWriter($shot->load('project')))->instructions())
+        ->toContain('What the video model cannot do in one shot')
+        ->toContain('The place changes within the shot, such as driving through a gate')
+        ->and((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
+        ->toContain('tell the director in plain words why it will not work')
+        ->toContain('Never write a plan that runs into one of these limits');
+});

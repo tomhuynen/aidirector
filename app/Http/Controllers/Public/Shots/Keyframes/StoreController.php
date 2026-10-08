@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Public\Shots\Keyframes;
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\NewKeyframeRequest;
 use App\Jobs\GenerateKeyframeImage;
+use App\Jobs\RetimeShot;
 use App\Models\Keyframe;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
@@ -50,6 +51,8 @@ class StoreController
         ]);
 
         $shot->appendPlannedKeyframe($plan);
+        // One more step, described already: the shot is timed again.
+        RetimeShot::dispatch($shot);
 
         GenerateKeyframeImage::dispatch($keyframe);
 

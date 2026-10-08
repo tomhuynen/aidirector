@@ -13,8 +13,8 @@ use App\Enums\Traits\EnumHelpers;
  * own place and moment: every still is drawn on its own, animated a little,
  * and the clips are joined with crossfades. A presenter is one person who
  * speaks the voice-over to the camera, lip-synced, once per language. A
- * close-up is a scene at one surface where hands and one object fill the
- * frame, drawn on a chosen empty surface like a scene on its place.
+ * close-up shows hands and one object large in frame: keyframe 1 is drawn
+ * straight away with them, and the other keyframes are drawn on it.
  */
 enum ShotKind: string
 {
@@ -39,11 +39,11 @@ enum ShotKind: string
     }
 
     /**
-     * Whether the keyframes are drawn on one shared empty place, chosen first: a scene's spot, or a close-up's surface.
+     * Whether the shot starts from an empty place to choose, every keyframe drawn on it.
      */
     public function usesPlace(): bool
     {
-        return in_array($this, [self::SCENE, self::CLOSE_UP], true);
+        return $this === self::SCENE;
     }
 
     /**

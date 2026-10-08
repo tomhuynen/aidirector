@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
+use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
@@ -28,6 +30,7 @@ use Throwable;
 #[DeleteWhenMissingModels]
 class GenerateKeyframes implements ShouldQueue
 {
+    use FollowsPlan;
     use Queueable;
 
     public int $tries = 1;
@@ -39,6 +42,7 @@ class GenerateKeyframes implements ShouldQueue
         public readonly bool $more = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
+        $this->followPlan($this->shot);
     }
 
     public function handle(): void
@@ -50,6 +54,7 @@ class GenerateKeyframes implements ShouldQueue
         }
 
         $shotId = $shot->id;
+        $planVersion = $this->planVersion;
 
         // A montage or a presenter has no shared place: every keyframe is drawn on its own, straight away.
         if ($shot->drawsStandalone()) {
@@ -61,10 +66,19 @@ class GenerateKeyframes implements ShouldQueue
         }
 
         // Start from empty places: the director chooses one, and every keyframe is drawn on it.
-        if (Config::get('pipeline.keyframes.start_with_plate')) {
+        // A close-up has no empty place to start from: its hands and object are on a person or a thing, so keyframe 1 is drawn with them.
+        if (Config::get('pipeline.keyframes.start_with_plate') && $shot->kindOrScene()->usesPlace()) {
             if (! $this->more) {
                 $shot->clearMediaCollection(Shot::PLATE_OPTIONS);
                 $shot->clearMediaCollection(Shot::PLATE);
+            }
+
+            // The same place as another shot of the sequence: its chosen place is used as it is, with nothing to choose.
+            if (! $this->more && ($inherited = $shot->inheritedPlate()) !== null) {
+                $inherited->copy($shot, Shot::PLATE)->setCustomProperty(Shot::PLATE_CHOSEN, true)->save();
+                GenerateRemainingKeyframes::startOnPlate($shot->refresh(), app(KeyframePainter::class));
+
+                return;
             }
 
             $drawnPlates = $shot->getMedia(Shot::PLATE_OPTIONS)->count();
@@ -73,7 +87,7 @@ class GenerateKeyframes implements ShouldQueue
                 ->name("Places for shot {$shot->id}")
                 ->onQueue(Config::get('pipeline.queue'))
                 ->allowFailures()
-                ->finally(static fn(Batch $batch) => self::finishPlates($shotId, $batch->failedJobs))
+                ->finally(static fn(Batch $batch) => self::finishPlates($shotId, $batch->failedJobs, $planVersion))
                 ->dispatch();
 
             return;
@@ -86,7 +100,7 @@ class GenerateKeyframes implements ShouldQueue
             ->name("Keyframe 1 options for shot {$shot->id}")
             ->onQueue(Config::get('pipeline.queue'))
             ->allowFailures()
-            ->finally(static fn(Batch $batch) => self::finishOptions($shotId, $batch->failedJobs))
+            ->finally(static fn(Batch $batch) => self::finishOptions($shotId, $batch->failedJobs, $planVersion))
             ->dispatch();
     }
 
@@ -94,12 +108,12 @@ class GenerateKeyframes implements ShouldQueue
      * Once every option of a round is drawn or failed: wait for the director's
      * choice when there is anything to choose from, otherwise report the failure.
      */
-    public static function finishOptions(int $shotId, int $failed = 0): void
+    public static function finishOptions(int $shotId, int $failed = 0, ?int $planVersion = null): void
     {
         $shot = Shot::query()->find($shotId);
         $first = $shot?->keyframes()->with('media')->first();
 
-        if ($shot === null || $first === null) {
+        if ($shot === null || $first === null || ($planVersion !== null && $shot->plan_version !== $planVersion)) {
             return;
         }
 
@@ -132,11 +146,12 @@ class GenerateKeyframes implements ShouldQueue
      * Once every place of a round is drawn or failed: wait for the director to
      * choose one when there is anything to choose from, otherwise report it.
      */
-    public static function finishPlates(int $shotId, int $failed = 0): void
+    public static function finishPlates(int $shotId, int $failed = 0, ?int $planVersion = null): void
     {
         $shot = Shot::query()->find($shotId);
 
-        if ($shot === null) {
+        // Reopened meanwhile: the places of the old plan are not offered.
+        if ($shot === null || ($planVersion !== null && $shot->plan_version !== $planVersion)) {
             return;
         }
 
@@ -162,6 +177,10 @@ class GenerateKeyframes implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
+        if ($this->planReplaced()) {
+            return;
+        }
+
         $this->shot->keyframes()->where('rendering', true)->update([
             'rendering' => false,
             'render_error' => $exception?->getMessage(),

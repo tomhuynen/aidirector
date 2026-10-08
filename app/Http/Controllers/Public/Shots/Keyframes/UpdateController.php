@@ -7,7 +7,9 @@ namespace App\Http\Controllers\Public\Shots\Keyframes;
 use App\Enums\CorrectionSource;
 use App\Http\Controllers\Public\Shots\Concerns\GuardsBusyShots;
 use App\Http\Requests\Public\KeyframeRequest;
+use App\Jobs\FollowStoryline;
 use App\Jobs\GenerateKeyframeImage;
+use App\Jobs\RetimeShot;
 use App\Jobs\TweakKeyframeImage;
 use App\Models\Keyframe;
 use App\Models\Policies\Public\ShotPolicy;
@@ -49,8 +51,15 @@ class UpdateController
         ])->save();
 
         // Kept in step, so a full re-render keeps the director's wording. The old must show and the copy mark belong to the old wording.
-        $shot->updatePlannedKeyframe($keyframe->position, array_filter(['description' => $description, 'spatial' => $spatial]), $spatial === '' ? ['spatial', 'must_show', 'copied', 'prompt'] : ['must_show', 'copied', 'prompt']);
+        $shot->updatePlannedKeyframe($keyframe->position, array_filter(['description' => $description, 'spatial' => $spatial]), $spatial === '' ? ['spatial', 'copied', 'prompt'] : ['copied', 'prompt']);
         $current = $keyframe->fullDescription();
+
+        // The storyline follows the new description first, so the review reads one story.
+        if ($changed) {
+            FollowStoryline::dispatch($keyframe, $previous);
+            // What happens may take longer or shorter now: the shot is timed again.
+            RetimeShot::dispatch($shot);
+        }
 
         $adjust
             ? TweakKeyframeImage::dispatch($keyframe, "The description of this keyframe changed from \"{$previous}\" to \"{$current}\". Change the image so it shows what the new description says; keep everything the change does not touch.", rewrite: true, describedByDirector: true)

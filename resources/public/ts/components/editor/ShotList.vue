@@ -16,6 +16,18 @@
         >
           <Combine class="size-4" />
         </Button>
+        <!-- Plays the shots that have a video one after another, from the open shot onwards. -->
+        <Button
+          v-if="playQueue.length > 0"
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          :aria-label="currentId ? $t('Play from this shot') : $t('Play all')"
+          :title="currentId ? $t('Play from this shot') : $t('Play all')"
+          @click="playFromCurrent"
+        >
+          <Play class="size-4" />
+        </Button>
         <Button as-child variant="outline" size="icon-sm" :aria-label="$t('Add shot')">
           <Link :href="createUrl"><Plus class="size-4" /></Link>
         </Button>
@@ -31,7 +43,7 @@
     </p>
 
     <ol v-else ref="list" scroll-region class="flex-1 space-y-1 overflow-y-auto p-2" @scroll.passive="rememberScroll">
-      <li v-for="(shot, i) in shots" :key="shot.id" class="group relative">
+      <li v-for="(shot, i) in shots" :key="shot.id" :data-shot="shot.id" :class="cn('group relative', groupOutline(i))">
         <label
           v-if="merging"
           :class="
@@ -57,7 +69,7 @@
           <Placeholder v-else class="h-11 w-[72px] shrink-0 bg-background" />
           <div class="min-w-0">
             <p class="text-[15px] font-semibold">{{ shot.code }}</p>
-            <p class="truncate text-sm text-muted-foreground">{{ shot.title }}</p>
+            <p class="truncate text-sm text-muted-foreground">{{ shot.title || $t('New shot') }}</p>
           </div>
         </label>
         <div
@@ -94,7 +106,7 @@
           :class="
             cn(
               'flex items-center gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors hover:bg-card',
-              shot.id === currentId && 'border-signal bg-signal-soft/60 hover:bg-signal-soft/60',
+              shot.id === highlightedId && 'border-signal bg-signal-soft/60 hover:bg-signal-soft/60',
             )
           "
         >
@@ -106,11 +118,14 @@
               :class="
                 cn(
                   'block h-11 w-[72px] rounded-md border border-border object-cover',
-                  shot.id === currentId && 'border-signal',
+                  shot.id === highlightedId && 'border-signal',
                 )
               "
             />
-            <Placeholder v-else :class="cn('h-11 w-[72px] bg-background', shot.id === currentId && 'border-signal')" />
+            <Placeholder
+              v-else
+              :class="cn('h-11 w-[72px] bg-background', shot.id === highlightedId && 'border-signal')"
+            />
             <!-- Another shot that is still being generated; the open shot shows its own progress. -->
             <span
               v-if="shot.busy && shot.id !== currentId"
@@ -122,11 +137,16 @@
             </span>
           </span>
           <div class="min-w-0">
-            <p :class="cn('text-[15px] font-semibold', shot.id === currentId && 'text-signal')">
+            <p :class="cn('text-[15px] font-semibold', shot.id === highlightedId && 'text-signal')">
               {{ shot.code }}
             </p>
             <p class="truncate text-sm text-muted-foreground">
-              <template v-if="shot.partsCount > 0">
+              <!-- Drawn once the place or keyframes of another shot in its sequence are there. -->
+              <template v-if="shot.waitingFor">
+                <Clock class="inline size-3.5 align-[-2px]" />
+                {{ $t('Waits for :what', { what: shot.waitingFor }) }}
+              </template>
+              <template v-else-if="shot.partsCount > 0">
                 {{ $t(':count shots merged', { count: String(shot.partsCount) }) }} ·
                 {{ $t(':count s', { count: String(shot.duration) }) }}
               </template>
@@ -154,6 +174,7 @@
       </div>
     </div>
 
+    <SequencePlayer v-model:index="playing" :queue="playQueue" />
     <MergeShotsDialog
       v-if="mergeUrl"
       v-model:open="dialogOpen"
@@ -170,11 +191,12 @@ import { $t } from '@public/ts/shared/i18n'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Checkbox } from '@shared:ui/checkbox'
-import { ArrowDown, ArrowUp, Combine, LoaderCircle, Plus } from 'lucide-vue-next'
-import { computed, onMounted, ref } from 'vue'
+import { ArrowDown, ArrowUp, Clock, Combine, LoaderCircle, Play, Plus } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import MergeShotsDialog from './MergeShotsDialog.vue'
 import Placeholder from './Placeholder.vue'
+import SequencePlayer from './SequencePlayer.vue'
 import type { ShotTransitionOption } from './TransitionPicker.vue'
 
 export type ShotListItem = {
@@ -184,12 +206,20 @@ export type ShotListItem = {
   statusLabel: string
   duration: number
   keyframesCount: number
+  /** Shots planned together in one conversation share this key. */
+  groupKey?: string | null
+  /** What the keyframes wait for, such as "the place of SH100". */
+  waitingFor?: string | null
   /** How many shots this one was merged from; 0 for an ordinary shot. */
   partsCount: number
   status: string
   /** Storylines, keyframes or the video are being generated right now. */
   busy: boolean
   thumbnailUrl: string | null
+  /** The shot's video, for playing the sequence. */
+  videoUrl?: string | null
+  /** The spoken track per language, played along with the video. */
+  voiceOvers?: { locale: string; audioUrl: string }[]
   url: string
 }
 
@@ -201,6 +231,56 @@ const props = defineProps<{
   mergeUrl?: string
   transitions?: ShotTransitionOption[]
 }>()
+
+/*
+ * Play all: the shots with a video play one after another, and the list
+ * highlights the one that plays instead of the open shot.
+ */
+/**
+ * Shots planned together share a purple outline: the first of a run opens
+ * it, the last closes it, and the gap between them is taken inside.
+ */
+const inGroup = (i: number, step: number) => {
+  const key = props.shots[i]?.groupKey
+
+  return Boolean(key) && props.shots[i + step]?.groupKey === key
+}
+
+const groupOutline = (i: number) => {
+  if (!inGroup(i, -1) && !inGroup(i, 1)) return ''
+
+  return cn(
+    'border-x-2 border-signal/70 px-1',
+    inGroup(i, -1) ? '!mt-0 pt-1' : 'rounded-t-xl border-t-2 pt-1',
+    inGroup(i, 1) ? '' : 'rounded-b-xl border-b-2 pb-1',
+  )
+}
+
+const playQueue = computed(() => props.shots.filter((shot) => shot.videoUrl))
+const playing = ref<number | null>(null)
+/** The first shot with a video at or after the open shot; from the start when there is none. */
+const startIndex = computed(() => {
+  const from = props.shots.findIndex((shot) => shot.id === props.currentId)
+  const next = from < 0 ? -1 : playQueue.value.findIndex((shot) => props.shots.indexOf(shot) >= from)
+
+  return Math.max(next, 0)
+})
+
+// The open shot's video loops on the page; it pauses so only the sequence plays.
+const playFromCurrent = () => {
+  document.querySelectorAll<HTMLVideoElement>('video').forEach((video) => video.pause())
+  playing.value = startIndex.value
+}
+
+const highlightedId = computed(() => (playing.value === null ? props.currentId : playQueue.value[playing.value]?.id))
+
+watch(playing, async (index) => {
+  if (index === null) return
+  await nextTick()
+  list.value
+    ?.querySelector(`[data-shot="${playQueue.value[index]?.id}"]`)
+    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+})
 
 const reordering = ref(false)
 

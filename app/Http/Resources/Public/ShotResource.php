@@ -9,9 +9,7 @@ use App\Enums\ShotStatus;
 use App\Http\Resources\Concerns\AuthorizesResource;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateVoiceOver;
-use App\Models\Element;
 use App\Models\Keyframe;
-use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Shot;
 use App\Support\Decisions\ShotIssues;
 use Illuminate\Database\Eloquent\Collection;
@@ -45,12 +43,6 @@ class ShotResource extends JsonResource
             'takeaway' => $this->takeaway,
             /** @var string|null */
             'notes' => $this->notes,
-            /**
-             * The ids of the cast and sets the storylines must use.
-             *
-             * @var array<int, string>
-             */
-            'preferredElements' => $this->preferredElementSqids(),
             'status' => $this->status,
             /** A scene at one place, or a montage of separate stills; scene until planned. */
             'kind' => $this->kind ?? ShotKind::SCENE,
@@ -67,20 +59,12 @@ class ShotResource extends JsonResource
              * @var int
              */
             'seconds' => $this->durationInSeconds(),
-            /** @var array<int, array{title: string, storyline: string}>|null */
-            'storylineOptions' => $this->storyline_options,
             /** @var array{title: string, storyline: string}|null */
             'chosenStoryline' => $this->chosen_storyline,
             /** @var array{keyframes: array<int, array{title: string, description: string, prompt?: string}>}|null */
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
-            /**
-             * The review of all keyframes together, with only the notes not yet fixed or dismissed.
-             *
-             * @var array{clear: bool, notes: list<string>}|null
-             */
-            'keyframeReview' => $this->openReview(),
             /**
              * What the checks found, grouped per keyframe (position) or for the whole shot (position null), with what can be done about it.
              *
@@ -97,12 +81,6 @@ class ShotResource extends JsonResource
             'plateOptions' => $this->resource->exists
                 ? $this->getMedia(Shot::PLATE_OPTIONS)->map(fn(Media $media) => ['id' => $media->id, 'imageUrl' => (string) $this->mediaUrl($media)])->values()->all()
                 : [],
-            /**
-             * What must always or never happen in this shot, set by the director.
-             *
-             * @var array<int, string>
-             */
-            'rules' => $this->resource->shotRules(),
             /** Whether a place is chosen and keyframe 1 is drawn on it. */
             'plateChosen' => $this->resource->exists && $this->resource->hasChosenPlate(),
             /** New drawings start from empty places to choose from. */
@@ -119,16 +97,16 @@ class ShotResource extends JsonResource
             /** @var string|null */
             'voiceOver' => $this->voice_over,
             /**
-             * How long the voice-over takes at a calm pace, in seconds.
-             *
-             * @var float|null
-             */
-            /**
              * The spoken track per voice-over language of the project; empty while the voice-over is off.
              *
              * @var array<int, array{locale: string, name: string, status: string, audioUrl: string|null, outdated: bool, error: string|null}>
              */
             'voiceOverTracks' => $this->voiceOverTracks(),
+            /**
+             * How long the voice-over takes at a calm pace, in seconds.
+             *
+             * @var float|null
+             */
             'voiceOverSeconds' => $this->voice_over === null ? null : round(GenerateVoiceOver::words($this->voice_over) / GenerateVoiceOver::WORDS_PER_SECOND, 1),
             /** @var int */
             'firstKeyframeOptions' => GenerateKeyframes::optionCount(),
@@ -137,8 +115,6 @@ class ShotResource extends JsonResource
             'videoResolution' => $this->videoResolution(),
             /** @var array<int, string> */
             'videoResolutions' => config('pipeline.video.resolutions'),
-            /** @var string|null */
-            'videoPrompt' => $this->video_prompt,
             /** @var string|null */
             'videoError' => $this->video_error,
             /** @var string|null */
@@ -152,21 +128,33 @@ class ShotResource extends JsonResource
              */
             'languageVideos' => $this->languageVideos(),
             /**
-             * The planner's proposal to split this shot into two, each with one message; null when there is none or it was dismissed.
+             * Places and objects the plan needs that the cast and sets do not have yet.
              *
-             * @var array{parts: array<int, array{takeaway: string, kind: string}>}|null
+             * @var array<int, array{name: string, type: string, description: string}>
              */
-            'split' => isset($this->storyline['split']['parts']) && $this->status === ShotStatus::STORYLINE_READY ? ['parts' => $this->storyline['split']['parts']] : null,
+            'newElements' => $this->status === ShotStatus::STORYLINE_READY ? array_values((array) ($this->storyline['new_elements'] ?? [])) : [],
+            /**
+             * The ids of the cast and sets added from this shot's plan, marked as new on its keyframes.
+             *
+             * @var array<int, string>
+             */
+            'addedElements' => array_values((array) ($this->storyline['added_elements'] ?? [])),
+            /**
+             * The conversation about the plan: the director's messages and the plan director's replies, some with the plan they wrote into the shot.
+             *
+             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}}>
+             */
+            'planChat' => array_values((array) ($this->plan_chat ?? [])),
+            /**
+             * What the keyframes wait for before they are drawn, such as "the place of SH100", once drawing was asked for.
+             *
+             * @var string|null
+             */
+            'waitingFor' => $this->resource->waitsToDraw() ? $this->resource->waitsFor() : null,
             'createdAt' => $this->created_at,
-            'updatedAt' => $this->updated_at,
             'links' => $this->when($this->resource->exists, fn() => [
                 'view' => route('public.shots.view', [$this->project, $this->resource]),
-                'update' => route('public.shots.update', [$this->project, $this->resource]),
                 'destroy' => route('public.shots.destroy', [$this->project, $this->resource]),
-                'storylineSuggest' => route('public.shots.storyline.suggest', [$this->project, $this->resource]),
-                'storylineChoose' => route('public.shots.storyline.choose', [$this->project, $this->resource]),
-                'storylineGenerate' => route('public.shots.storyline.generate', [$this->project, $this->resource]),
-                'storylineReopen' => route('public.shots.storyline.reopen', [$this->project, $this->resource]),
                 'keyframesGenerate' => route('public.shots.keyframes.generate', [$this->project, $this->resource]),
                 'keyframesStore' => route('public.shots.keyframes.store', [$this->project, $this->resource]),
                 'keyframesReorder' => route('public.shots.keyframes.reorder', [$this->project, $this->resource]),
@@ -174,28 +162,20 @@ class ShotResource extends JsonResource
                 'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
                 'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
-                'plan' => route('public.shots.plan', [$this->project, $this->resource]),
-                'planKind' => route('public.shots.plan.kind', [$this->project, $this->resource]),
-                'planSplit' => route('public.shots.plan.split', [$this->project, $this->resource]),
+                'planChat' => route('public.shots.plan.chat', [$this->project, $this->resource]),
+                'planReopen' => route('public.shots.plan.reopen', [$this->project, $this->resource]),
+                'planElements' => route('public.shots.plan.elements', [$this->project, $this->resource]),
                 'plateChoose' => route('public.shots.plate.choose', [$this->project, $this->resource]),
                 'plateReset' => route('public.shots.plate.reset', [$this->project, $this->resource]),
                 'plateAdjust' => route('public.shots.plate.adjust', [$this->project, $this->resource]),
-                'planChanges' => route('public.shots.plan.changes', [$this->project, $this->resource]),
-                'planWrite' => route('public.shots.plan.write', [$this->project, $this->resource]),
                 'issuesFixAll' => route('public.shots.issues.fix-all', [$this->project, $this->resource]),
                 'issuesDismissAll' => route('public.shots.issues.dismiss-all', [$this->project, $this->resource]),
                 'voiceOver' => route('public.shots.voice-over', [$this->project, $this->resource]),
                 'voiceOverAudio' => route('public.shots.voice-over.audio', [$this->project, $this->resource]),
             ]),
-            /** @var array<string, bool> */
-            'can' => $this->when(! is_null($request->user()), fn() => $this->authorizations($request, ShotPolicy::abilities(ShotPolicy::CREATE)), []),
         ];
     }
 
-    /**
-     * A signed link to a private media file. The expiry is rounded to the hour
-     * so the link stays the same while the page polls and the browser can cache it.
-     */
     /**
      * A signed link that saves the clip under a readable name, such as "SH070 Quay Stop Line.mp4".
      */
@@ -259,20 +239,6 @@ class ShotResource extends JsonResource
     }
 
     /**
-     * @return array{clear: bool, notes: list<string>}|null
-     */
-    private function openReview(): ?array
-    {
-        if ($this->keyframe_review === null || ! $this->resource->exists) {
-            return null;
-        }
-
-        $notes = app(ShotIssues::class)->openNotes($this->resource, $this->checkedKeyframes());
-
-        return ['clear' => $notes === [], 'notes' => $notes];
-    }
-
-    /**
      * @return list<array{key: string, position: int|null, issues: list<string>, fixUrl: string|null, dismissUrl: string}>
      */
     private function issueGroups(): array
@@ -306,6 +272,10 @@ class ShotResource extends JsonResource
         return $this->checkedGroups ??= $this->resource->exists ? app(ShotIssues::class)->groups($this->resource, $this->checkedKeyframes()) : [];
     }
 
+    /**
+     * A signed link to a private media file. The expiry is rounded to the hour
+     * so the link stays the same while the page polls and the browser can cache it.
+     */
     private function mediaUrl(?Media $media): ?string
     {
         if ($media === null) {
@@ -315,15 +285,4 @@ class ShotResource extends JsonResource
         return URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $media]);
     }
 
-    /**
-     * @return array<int, string>
-     */
-    private function preferredElementSqids(): array
-    {
-        if (blank($this->preferred_elements) || ! $this->resource->exists) {
-            return [];
-        }
-
-        return $this->preferredElements()->map(fn(Element $element) => $element->sqid)->values()->all();
-    }
 }

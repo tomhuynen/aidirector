@@ -32,13 +32,25 @@
       <div class="flex items-start justify-between gap-3 p-6">
         <h2 class="text-2xl leading-tight font-semibold text-balance">{{ shot.title }}</h2>
         <div class="flex shrink-0 items-center">
-          <!-- Back to the brief: submitting it again plans and draws the shot anew. -->
-          <Button v-if="shot.links?.update" as-child variant="outline" size="sm">
-            <Link :href="shot.links.update">
-              <Pencil class="size-4" />
-              {{ $t('Edit brief') }}
-            </Link>
-          </Button>
+          <!-- Not happy with the keyframes: back to the plan chat to say what did not work, then they are drawn again. -->
+          <ConfirmDelete
+            v-if="shot.links?.planReopen"
+            :action="shot.links.planReopen"
+            :title="$t('Back to the chat?')"
+            :description="
+              $t(
+                'The keyframes and the video of this shot are thrown away, and anything still being drawn for it stops. Tell the director what did not work, and the keyframes are drawn again from the new plan.',
+              )
+            "
+            :confirm-label="$t('Back to the chat')"
+          >
+            <template #trigger>
+              <Button type="button" variant="outline" size="sm">
+                <MessageSquare class="size-4" />
+                {{ $t('Back to the chat') }}
+              </Button>
+            </template>
+          </ConfirmDelete>
         </div>
       </div>
 
@@ -50,22 +62,12 @@
         <p class="text-[15px] leading-relaxed">{{ shot.takeaway }}</p>
       </section>
 
-      <section v-if="storyline && !inPlan" class="space-y-2 border-t border-border p-6">
+      <section v-if="storyline" class="space-y-2 border-t border-border p-6">
         <h3 class="flex items-center gap-2 font-semibold">
           <ListOrdered class="size-4 text-muted-foreground" />
           {{ $t('Storyline') }}
         </h3>
         <p class="text-[15px] leading-relaxed text-muted-foreground">{{ storyline.storyline }}</p>
-      </section>
-
-      <section v-if="shot.rules.length > 0 && !inPlan" class="space-y-2 border-t border-border p-6">
-        <h3 class="flex items-center gap-2 font-semibold">
-          <ShieldCheck class="size-4 text-muted-foreground" />
-          {{ $t('Rules for this shot') }}
-        </h3>
-        <ul class="list-inside list-disc space-y-1 text-[15px] leading-relaxed text-muted-foreground">
-          <li v-for="rule in shot.rules" :key="rule">{{ rule }}</li>
-        </ul>
       </section>
 
       <section v-if="storyline" class="space-y-2 border-t border-border p-6">
@@ -170,7 +172,7 @@
   </aside>
 </template>
 <script setup lang="ts">
-import { Link, router } from '@inertiajs/vue3'
+import { router } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
@@ -179,12 +181,11 @@ import { Button } from '@shared:ui/button'
 import {
   AudioLines,
   ListOrdered,
+  MessageSquare,
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
-  Pencil,
   RefreshCw,
-  ShieldCheck,
   Target,
   Trash2,
 } from 'lucide-vue-next'
@@ -195,8 +196,6 @@ import AudioTracks from './AudioTracks.vue'
 const props = defineProps<{
   shot: Inertia.Pages.Shots.View['shot']
   storyline: { title: string; storyline: string } | null
-  /** The plan editor next to it shows the storyline and the rules, so they are not repeated here. */
-  inPlan?: boolean
 }>()
 
 /** Remembered for this browser tab's session, so the column stays folded while moving between shots. */
