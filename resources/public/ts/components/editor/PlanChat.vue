@@ -1,7 +1,10 @@
 <template>
-  <!-- The conversation with the plan director: the shot is built up step by step, and the plan written once all is agreed. -->
+  <!-- The conversation about the shot: planned step by step, then about the drawn images, with what is selected. -->
   <div class="flex min-h-0 flex-1 flex-col gap-3">
-    <ol class="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs" :aria-label="$t('Steps')">
+    <p v-if="target !== undefined" class="shrink-0 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+      {{ target?.label ?? $t('The images are being drawn') }}
+    </p>
+    <ol v-else class="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs" :aria-label="$t('Steps')">
       <li v-for="(step, i) in steps" :key="step.value" class="flex items-center gap-1.5">
         <ChevronRight v-if="i > 0" class="size-3 text-muted-foreground/60" />
         <span
@@ -24,8 +27,12 @@
       :error="error"
       :disabled="!chatUrl"
       :user-initial="userInitial"
-      :label="$t('Talk about the plan')"
-      :placeholder="$t('Talk about the plan, for example: the camera stays in front of her')"
+      :label="target !== undefined ? $t('Talk about the images') : $t('Talk about the plan')"
+      :placeholder="
+        target !== undefined
+          ? $t('For example: she should hold the badge in her right hand')
+          : $t('Talk about the plan, for example: the camera stays in front of her')
+      "
       @send="(text: string) => send(text)"
     >
       <template #text="{ message }">
@@ -59,7 +66,16 @@
           class="flex max-w-[85%] flex-col gap-3 text-[15px] leading-relaxed text-foreground"
           :class="message.role === 'user' ? 'rounded-2xl rounded-tr-md bg-signal-soft/70 px-4 py-3' : 'py-1'"
         >
+          <p v-if="turnOf(message)?.about" class="text-xs text-muted-foreground">{{ turnOf(message)?.about }}</p>
           <p class="whitespace-pre-wrap">{{ message.content }}</p>
+
+          <!-- Changes to the drawn images, made one keyframe after the other. -->
+          <ul v-if="turnOf(message)?.changes?.length" class="space-y-1 text-sm text-muted-foreground">
+            <li v-for="(change, c) in turnOf(message)?.changes ?? []" :key="c" class="flex items-start gap-1.5">
+              <Wand2 class="mt-0.5 size-3.5 shrink-0 text-signal" />
+              {{ change }}
+            </li>
+          </ul>
 
           <!-- The cast and sets made or redrawn here: drawn while the conversation goes on, then shown with their picture. -->
           <ul v-if="drawnHere(message).length" class="grid grid-cols-3 gap-2">
@@ -141,7 +157,7 @@ import Chat from '@public:components/chat/Chat.vue'
 import type { ChatMessage } from '@public:components/chat/types'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { Check, ChevronRight, LoaderCircle } from 'lucide-vue-next'
+import { Check, ChevronRight, LoaderCircle, Wand2 } from 'lucide-vue-next'
 import { computed, reactive, ref } from 'vue'
 
 /** What the chat shows of a plan it wrote into the shot. */
@@ -155,10 +171,23 @@ export type PlanChatTurn = {
   adjusted?: string[]
   cast?: string[]
   proposal?: PlanProposal
+  /** Once the images are drawn: what the director had selected. */
+  about?: string
+  /** The changes made to the drawn images. */
+  changes?: string[]
 }
+
+/** What the director has selected among the drawn images: a place to choose, an option for keyframe 1, or a keyframe. */
+export type ChatTarget =
+  | { kind: 'place'; option: number; label: string }
+  | { kind: 'option'; option: number; label: string }
+  | { kind: 'keyframe'; keyframe: string; label: string }
+  | null
 
 const props = defineProps<{
   chatUrl?: string
+  /** Once the images are drawn: what is selected, sent along so the director sees it; null while nothing is drawn yet. */
+  target?: ChatTarget
   /** The conversation so far, as stored with the shot. */
   conversation?: PlanChatTurn[]
   kinds: { value: string; label: string; description: string }[]
@@ -275,12 +304,20 @@ const send = async (text: string, extra: { made?: string[] } = {}) => {
 
   busy.value = true
   error.value = null
-  turns.value = [...turns.value, { role: 'director', text: message, ...extra }]
+  turns.value = [...turns.value, { role: 'director', text: message, about: props.target?.label, ...extra }]
+
+  const target = props.target
+  const selection = !target
+    ? {}
+    : target.kind === 'keyframe'
+      ? { target: 'keyframe', keyframe: target.keyframe }
+      : { target: target.kind, option: target.option }
 
   try {
     const { messages: saved, reload } = await postJson<{ messages: PlanChatTurn[]; reload: boolean }>(props.chatUrl, {
       message,
       ...extra,
+      ...selection,
     })
     turns.value = saved
 

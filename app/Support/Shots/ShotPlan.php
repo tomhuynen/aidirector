@@ -22,7 +22,7 @@ class ShotPlan
      */
     public static function apply(Shot $shot, mixed $proposal): ?array
     {
-        if (! is_array($proposal) || ! is_array($proposal['keyframes'] ?? null) || $proposal['keyframes'] === []) {
+        if (! self::isPlan($proposal)) {
             return null;
         }
 
@@ -33,6 +33,8 @@ class ShotPlan
             'title' => trim((string) ($keyframe['title'] ?? '')),
             'description' => trim((string) ($keyframe['description'] ?? '')),
             'spatial' => trim((string) ($keyframe['spatial'] ?? '')),
+            'place_change' => trim((string) ($keyframe['place_change'] ?? '')),
+            'place_part' => trim((string) ($keyframe['place_part'] ?? '')),
         ]) + [
             'elements' => collect((array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
         ])->all();
@@ -70,6 +72,16 @@ class ShotPlan
             'kind' => $shot->kindOrScene()->value,
             'settingFrom' => $source === null ? null : $source->code() . ' · ' . ($keyframe > 0 ? __('keyframe :n', ['n' => $keyframe]) : __('place')),
         ];
+    }
+
+    /**
+     * Whether the proposal is a plan to apply: it has keyframes.
+     *
+     * @phpstan-assert-if-true array<string, mixed> $proposal
+     */
+    public static function isPlan(mixed $proposal): bool
+    {
+        return is_array($proposal) && is_array($proposal['keyframes'] ?? null) && $proposal['keyframes'] !== [];
     }
 
     /**

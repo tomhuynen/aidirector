@@ -86,7 +86,7 @@ class ShotIssues
                 ->map(fn(array $issue) => $issue['problem'])
                 ->join(' ');
 
-            $base?->collection_name === Shot::PLATE
+            $base !== null && $this->painter->isPlace($base)
                 ? TweakKeyframeImage::dispatch($keyframe, 'Nothing else: the people, their poses, where they look, their gestures and what they hold stay exactly as in the current version; only the background is the place\'s own again.' . ($others !== '' ? " Also solve this: {$others}" : ''), fromCheck: true)
                 : GenerateKeyframeImage::dispatch($keyframe);
             $this->resolve($shot, $keyframes, $found);

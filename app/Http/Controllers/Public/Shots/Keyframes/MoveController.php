@@ -13,6 +13,7 @@ use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Images\PersonCutout;
+use App\Support\Media\LocalMediaFiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -43,13 +44,14 @@ class MoveController
 
         $point = $request->validate(['x' => ['required', 'numeric', 'between:0,1'], 'y' => ['required', 'numeric', 'between:0,1']]);
         [$plate, $render] = $this->images($shot, $keyframe, 'x');
-        $shape = $this->cutout->select($plate->getPath(), $render->getPath(), (float) $point['x'], (float) $point['y']);
+        $files = new LocalMediaFiles();
+        $shape = $this->cutout->select($files->path($plate), $files->path($render), (float) $point['x'], (float) $point['y']);
 
         if ($shape === null) {
             throw ValidationException::withMessages(['x' => __('Nothing was added to the place there. Click the person you want to move.')]);
         }
 
-        return response()->json(['box' => $shape['box'], ...$this->cutout->previews($plate->getPath(), $render->getPath(), $shape)]);
+        return response()->json(['box' => $shape['box'], ...$this->cutout->previews($files->path($plate), $files->path($render), $shape)]);
     }
 
     /**
@@ -63,9 +65,10 @@ class MoveController
 
         $output = storage_path('app/tmp/moved-' . Str::random(12) . '.png');
         @mkdir(dirname($output), 0755, true);
+        $files = new LocalMediaFiles();
         $box = $this->cutout->move(
-            $plate->getPath(),
-            $render->getPath(),
+            $files->path($plate),
+            $files->path($render),
             (float) $request->validated('x'),
             (float) $request->validated('y'),
             (float) $request->validated('dx'),

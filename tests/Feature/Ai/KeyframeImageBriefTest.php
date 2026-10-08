@@ -83,7 +83,9 @@ it('draws later keyframes as an edit of keyframe 1, so every fixed part of the p
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('first.png'))))
         ->toStartWith('Edit the first attached image. It is keyframe 1 of this shot')
-        ->toContain('the floor and every marking or painted line on it, and the background, all at exactly the same place, size and angle')
+        ->toContain('The place itself stays exactly as it is in the first image')
+        ->toContain('The state of things follows the story: open or closed')
+        ->toContain('a handset lifted off its hook leaves the cradle empty')
         ->toContain('never add a second copy of anyone')
         ->not->toContain('Framing:')
         ->not->toContain('Visual style:');

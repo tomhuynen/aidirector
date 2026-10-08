@@ -132,8 +132,25 @@
         />
       </section>
 
+      <!-- The conversation about the shot goes on here; the panels below stay for now, hidden. -->
+      <aside
+        v-if="chat && !adding && !showVideo"
+        class="flex w-[22rem] shrink-0 flex-col border-l border-border px-5 py-4"
+      >
+        <PlanChat
+          :key="`chat`"
+          :chat-url="chat.url"
+          :conversation="chat.conversation"
+          :kinds="chat.kinds"
+          :elements="chat.elements"
+          :new-elements="chat.newElements"
+          :elements-url="chat.elementsUrl"
+          :waiting-for="null"
+          :target="chatTarget"
+        />
+      </aside>
       <FirstKeyframeInspector
-        v-if="choosing.active && keyframes[0] && !checkingFirst"
+        v-if="showInspectors && choosing.active && keyframes[0] && !checkingFirst"
         :keyframe="keyframes[0]"
         :adjust-url="choosing.adjustUrl"
         :plates="Boolean(choosing.plates)"
@@ -149,7 +166,7 @@
         @added="adding = false"
       />
       <KeyframeInspector
-        v-else-if="selected && !showVideo"
+        v-else-if="showInspectors && selected && !showVideo"
         :key="selected.id"
         :keyframe="selected"
         :index="selectedIndex"
@@ -471,6 +488,7 @@ import { createKeyframeMover } from './keyframeMover'
 import KeyframeMover from './KeyframeMover.vue'
 import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
+import PlanChat, { type ChatTarget, type PlanChatTurn } from './PlanChat.vue'
 import VideoActions from './VideoActions.vue'
 
 export type PanelIssueGroup = {
@@ -560,6 +578,15 @@ export type PanelVideo = {
 }
 
 const props = defineProps<{
+  /** The conversation about the shot, which goes on next to the drawn images. */
+  chat?: {
+    url?: string
+    conversation?: PlanChatTurn[]
+    kinds: { value: string; label: string; description: string }[]
+    elements: { id: string; type: string; name: string; imageUrl: string | null; rendering?: boolean }[]
+    newElements?: { name: string; type: string; description: string }[]
+    elementsUrl?: string
+  }
   keyframes: PanelKeyframe[]
   aspectRatio: string
   duration: number
@@ -588,6 +615,37 @@ const selectedIndex = ref(0)
 
 /** The keyframe 1 option the director selected, shared by the options and the column that adjusts them. */
 const selectedOption = ref<number | null>(null)
+
+/** The inspectors of a keyframe and of keyframe 1 are kept, but the chat takes their place. */
+const showInspectors = false
+
+/** What the chat is about: the selected place or option while choosing, otherwise the selected keyframe. */
+const chatTarget = computed<ChatTarget>(() => {
+  if (props.choosing.active) {
+    if (selectedOption.value === null) return null
+
+    const number =
+      (props.choosing.plates ?? props.keyframes[0]?.renders ?? []).findIndex(
+        (option) => option.id === selectedOption.value,
+      ) + 1
+
+    return props.choosing.plates
+      ? { kind: 'place', option: selectedOption.value, label: $t('About place :n', { n: String(number) }) }
+      : {
+          kind: 'option',
+          option: selectedOption.value,
+          label: $t('About option :n for keyframe 1', { n: String(number) }),
+        }
+  }
+
+  return selected.value
+    ? {
+        kind: 'keyframe',
+        keyframe: selected.value.id,
+        label: $t('About keyframe :n · :title', { n: String(selectedIndex.value + 1), title: selected.value.title }),
+      }
+    : null
+})
 /** Moving a person in the selected keyframe by hand; stops when another keyframe is selected. */
 const mover = createKeyframeMover()
 

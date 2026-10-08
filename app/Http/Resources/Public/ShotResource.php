@@ -132,7 +132,7 @@ class ShotResource extends JsonResource
              *
              * @var array<int, array{name: string, type: string, description: string}>
              */
-            'newElements' => $this->status === ShotStatus::STORYLINE_READY ? array_values((array) ($this->storyline['new_elements'] ?? [])) : [],
+            'newElements' => array_values((array) ($this->storyline['new_elements'] ?? [])),
             /**
              * The ids of the cast and sets added from this shot's plan, marked as new on its keyframes.
              *
@@ -163,7 +163,6 @@ class ShotResource extends JsonResource
                 'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
                 'planChat' => route('public.shots.plan.chat', [$this->project, $this->resource]),
-                'planReopen' => route('public.shots.plan.reopen', [$this->project, $this->resource]),
                 'planElements' => route('public.shots.plan.elements', [$this->project, $this->resource]),
                 'plateChoose' => route('public.shots.plate.choose', [$this->project, $this->resource]),
                 'plateReset' => route('public.shots.plate.reset', [$this->project, $this->resource]),

@@ -188,7 +188,7 @@ it('keeps every language with its sound and shows them on the shot', function ()
         ->assertInertia(fn($page) => $page->where('shot.languageVideos.1.locale', 'nl-NL')->where('shot.languageVideos.1.name', 'Dutch (Netherlands)'));
 })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
 
-it('switches to a presenter when the plan agreed in the chat says so, until the keyframes are drawn', function () {
+it('switches to a presenter when the plan agreed in the chat says so', function () {
     Queue::fake();
     App\Ai\Agents\PlanDirector::fake([[
         'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
@@ -202,13 +202,6 @@ it('switches to a presenter when the plan agreed in the chat says so, until the 
 
     expect($shot->fresh()->kind)->toBe(ShotKind::PRESENTER);
 
-    // Once keyframes are drawn, the plan and its kind stay.
-    $drawn = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY, 'kind' => ShotKind::SCENE]);
-    Keyframe::factory()->for($drawn)->create();
-
-    actingAs($this->director, 'director')
-        ->postJson(route('public.shots.plan.chat', [$this->project, $drawn]), ['message' => 'make it a montage'])
-        ->assertJsonValidationErrors('message');
 });
 
 it('offers no moving, no extra keyframes and no separate audio tracks on a presenter', function () {

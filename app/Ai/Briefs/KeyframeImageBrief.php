@@ -49,7 +49,7 @@ class KeyframeImageBrief
 
             foreach ($references->elements as $element) {
                 $lines[] = in_array($element->getKey(), $pictured, true)
-                    ? "- {$element->name} ({$element->type->value}): looks exactly like its attached picture."
+                    ? "- {$element->name} ({$element->type->value}): looks exactly like its attached picture; its state, such as open, held or lifted off its hook, follows the description."
                     : '- ' . $element->promptLine();
             }
 
@@ -99,7 +99,7 @@ class KeyframeImageBrief
 
             $lines[] = $closeUp && $element->type === ElementType::PERSON
                 ? 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} (person). Use it only for their clothing, skin and hands, exactly as in the picture; draw only the part of {$element->name} this close frame shows. Do not copy its background, pose or framing."
-                : 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says. Do not copy its background or pose.";
+                : 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says; the description decides its state, such as open, held or lifted off its hook. Do not copy its background or pose.";
         }
 
         return implode("\n", $lines);
@@ -159,7 +159,9 @@ class KeyframeImageBrief
             $references->firstIsPlate
                 ? 'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move.'
                 : 'Edit the first attached image. It is keyframe 1 of this shot: the place, seen from a camera that does not move.',
-            'Change only what this keyframe needs: the people, their poses and positions, and the objects they handle. Everything else stays exactly as it is in the first image: the walls, doors and door frames, signs, bins, windows, machines, vehicles, the floor and every marking or painted line on it, and the background, all at exactly the same place, size and angle. The framing, the camera, the light and the style stay the same.',
+            // The place stays put; what the story changes in it, such as a door that is shut by now, follows the story.
+            'Change only what this keyframe needs: the people, their poses and positions, and the objects they handle. The place itself stays exactly as it is in the first image: the walls, the floor and every line on it, signs, windows, fixed machines and the background, at the same place, size and angle, with the same framing, camera, light and style.',
+            'The state of things follows the story: open or closed, on or off, full or empty, smoke or none, held or in its place, as this keyframe shows and the keyframe before, even when the first image or a picture shows it otherwise. Whatever is picked up or taken out leaves its spot empty: a handset lifted off its hook leaves the cradle empty, and the object is never drawn twice.',
             match (true) {
                 $references->firstShowsCast => 'The people already in the first image move and change pose as described; never add a second copy of anyone.',
                 // A close-up shows the hands at work on the surface; the people's sleeves and gloves show who they are.
@@ -182,7 +184,7 @@ class KeyframeImageBrief
 
             foreach ($cast as $element) {
                 $lines[] = in_array($element->getKey(), $pictured, true)
-                    ? "- {$element->name} ({$element->type->value}): looks exactly like its attached picture."
+                    ? "- {$element->name} ({$element->type->value}): looks exactly like its attached picture; its state, such as open, held or lifted off its hook, follows the description."
                     : '- ' . $element->promptLine();
             }
 
@@ -198,7 +200,7 @@ class KeyframeImageBrief
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the picture of {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . '. Do not copy its background or pose.';
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the picture of {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . '. It decides how it looks, not its state: open, held or lifted off its hook follows the description. Do not copy its background or pose.';
         }
 
         if ($references->previous !== null) {
@@ -237,6 +239,7 @@ class KeyframeImageBrief
         array_push(
             $lines,
             'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later.',
+            'Draw everything in its state at step 1, such as a door open or closed as step 1 says; later changes to the place are made on this picture.',
             'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours.',
             self::plateVariation($variation),
         );
@@ -318,6 +321,21 @@ class KeyframeImageBrief
     }
 
     /**
+     * The prompt for a later state of the empty place, such as a door that is
+     * closed by now: only the change is made, the place stays without people.
+     */
+    public static function placeState(string $change): string
+    {
+        return implode("\n", [
+            'Edit the attached image. It is the empty place where a shot plays, without any people, seen from a camera that does not move.',
+            "Change only this, which is how it looks from now on in the shot: {$change}",
+            'Everything else stays exactly as it is: the walls, the floor and every line on it, the ceiling, doors, windows, signs, machines, objects and the background, at the same place, size and angle, with the same framing, camera, light and style.',
+            'Do not add people.',
+            'Do not add text, captions or watermarks. Signs and markings already in the image stay exactly as they are.',
+        ]);
+    }
+
+    /**
      * The prompt for a change to a keyframe drawn on a place: the place is
      * edited again, with the current version attached for the people and
      * everything that differs from the empty place, so only the asked change
@@ -326,7 +344,7 @@ class KeyframeImageBrief
     public static function tweakOnPlate(string $instruction, bool $withPreviousKeyframe = false): string
     {
         return implode("\n", array_filter([
-            'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move. Everything in it stays exactly as it is: the walls, doors, machines, the floor and every marking or painted line on it, and the background, all at exactly the same place, size and angle. The framing, the camera, the light and the style stay the same.',
+            'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move. The place itself stays exactly as it is: the walls, the floor and every line on it, signs, windows, fixed machines and the background, at the same place, size and angle, with the same framing, camera, light and style. The state of things, such as a door open or closed, follows the current version of this keyframe; whatever is picked up or taken out leaves its spot empty, such as the cradle of a lifted handset.',
             'The second attached image is the current version of this keyframe. Put into the place exactly what it shows that the empty place does not: the people with their look, pose, size and position, what they hold, and any thing of the place in another state or position, such as a load that is lowered or a door that is open. Copy only those from it, never its framing or background.',
             "Change only this compared with the current version: {$instruction}",
             $withPreviousKeyframe

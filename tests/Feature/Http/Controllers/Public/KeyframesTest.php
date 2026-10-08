@@ -1896,8 +1896,8 @@ describe('image', function () {
     });
 });
 
-describe('back to the chat', function () {
-    it('throws the keyframes away and goes on with the conversation', function () {
+describe('starting the plan over', function () {
+    it('throws the drawn keyframes away and keeps the plan and the conversation', function () {
         $shot = Shot::factory()->for($this->project)->create([
             'status' => ShotStatus::KEYFRAMES_READY,
             'storyline' => ['keyframes' => plannedKeyframes()],
@@ -1905,17 +1905,14 @@ describe('back to the chat', function () {
         ]);
         Keyframe::factory()->for($shot)->count(2)->create();
 
-        actingAs($this->director, 'director')
-            ->delete(route('public.shots.plan.reopen', [$this->project, $shot]))
-            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
-
+        $shot->startPlanOver();
         $shot->refresh();
 
         expect($shot->status)->toBe(ShotStatus::STORYLINE_READY)
             ->and($shot->keyframes()->count())->toBe(0)
             ->and($shot->plan_version)->toBe(1)
             ->and($shot->storylineKeyframes())->toHaveCount(3)
-            ->and(collect($shot->plan_chat)->last()['text'])->toBe('What did not work in the keyframes?');
+            ->and($shot->plan_chat)->toHaveCount(2);
     });
 
     it('stops the jobs of the old plan', function () {
@@ -1927,7 +1924,7 @@ describe('back to the chat', function () {
 
         expect($runs($drawing))->toBeTrue()->and($runs($tweaking))->toBeTrue();
 
-        actingAs($this->director, 'director')->delete(route('public.shots.plan.reopen', [$this->project, $shot]));
+        $shot->startPlanOver();
 
         expect($runs($drawing))->toBeFalse()
             ->and($drawing->planReplaced())->toBeTrue()

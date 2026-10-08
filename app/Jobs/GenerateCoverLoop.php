@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 /**
@@ -46,7 +47,7 @@ class GenerateCoverLoop implements ShouldQueue
             return;
         }
 
-        $frame = 'data:image/jpeg;base64,' . base64_encode(self::paddedFrame((string) file_get_contents($cover->getPath())));
+        $frame = 'data:image/jpeg;base64,' . base64_encode(self::paddedFrame((string) Storage::disk($cover->disk)->get($cover->getPathRelativeToRoot())));
         $model = (string) Config::get('pipeline.models.cover_loop');
 
         $jobId = $videos->submit(

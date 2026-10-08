@@ -249,10 +249,11 @@ const inGroup = (i: number, step: number) => {
 const groupOutline = (i: number) => {
   if (!inGroup(i, -1) && !inGroup(i, 1)) return ''
 
+  // The list spaces its items with a margin below each; inside a group that gap is taken as padding, so the line runs on.
   return cn(
-    'border-x-2 border-signal/70 px-1',
-    inGroup(i, -1) ? '!mt-0 pt-1' : 'rounded-t-xl border-t-2 pt-1',
-    inGroup(i, 1) ? '' : 'rounded-b-xl border-b-2 pb-1',
+    'border-x-2 border-signal/70 px-1 pt-1',
+    inGroup(i, -1) ? '' : 'rounded-t-xl border-t-2',
+    inGroup(i, 1) ? 'mb-0! pb-1' : 'rounded-b-xl border-b-2 pb-1',
   )
 }
 

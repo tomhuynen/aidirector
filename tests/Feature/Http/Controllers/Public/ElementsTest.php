@@ -97,7 +97,7 @@ describe('writing', function () {
 
         expect((string) (new StorylineWriter($shot))->instructions())->toContain('never force an existing one into a story where it does not belong');
 
-        expect((string) (new StorylineWriter($shot))->instructions())->toContain('Elements: the exact names of the cast and sets listed above');
+        expect((string) (new StorylineWriter($shot))->instructions())->toContain('Elements: the exact names of the cast and sets listed above')->toContain('the spot it came from is now empty');
     });
 
     it('says when there are no cast and sets yet', function () {
@@ -123,7 +123,7 @@ describe('linking', function () {
         $markBytes = Storage::disk(Disk::TENANT->value)->get($mark->reference()->getPathRelativeToRoot());
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
-            && $prompt->contains("People and objects in this keyframe:\n- Mark, the visitor (person): looks exactly like its attached picture.")
+            && $prompt->contains("People and objects in this keyframe:\n- Mark, the visitor (person): looks exactly like its attached picture; its state")
             && ! $prompt->contains('A middle-aged man')
             && $prompt->contains('Edit the first attached image. It is keyframe 1 of this shot')
             && $prompt->contains('The second attached image is the picture of Mark, the visitor (person). Draw Mark, the visitor exactly like it')

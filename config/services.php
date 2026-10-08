@@ -30,6 +30,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'replicate' => [
+        'token' => env('REPLICATE_API_TOKEN'),
+        'url' => env('REPLICATE_URL', 'https://api.replicate.com/v1'),
+    ],
+
     'resend' => [
         'key' => env('RESEND_KEY'),
     ],

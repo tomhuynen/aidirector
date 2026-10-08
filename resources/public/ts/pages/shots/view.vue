@@ -60,6 +60,14 @@
           <PlanSkeleton v-else-if="planning" />
           <KeyframesPanel
             v-else
+            :chat="{
+              url: shot.links?.planChat,
+              conversation: shot.planChat,
+              kinds: shotKinds,
+              elements,
+              newElements: shot.newElements,
+              elementsUrl: shot.links?.planElements,
+            }"
             :keyframes="panelKeyframes"
             :aspect-ratio="aspectRatio"
             :duration="duration"

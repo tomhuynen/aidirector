@@ -54,6 +54,12 @@ class Shot extends Model implements HasMedia
     /** On the plate: it was chosen from the options, so it is the base of every keyframe. */
     public const PLATE_CHOSEN = 'chosen';
 
+    /** The place in a later state, such as a door that is closed by now: the keyframe it starts at and later ones are drawn on it. */
+    public const PLACE_STATES = 'place_states';
+
+    /** On a place state: the place and the changes up to its keyframe it was made for, so a new plan or place makes it unused. */
+    public const PLACE_STATE_KEY = 'key';
+
     /** The spoken voice-over tracks, one per language, with the locale as a custom property. */
     public const VOICE_OVERS = 'voice_overs';
 
@@ -242,7 +248,7 @@ class Shot extends Model implements HasMedia
      *
      * Older plans also carry a `prompt`: an image instruction no longer written or used; the description goes to the image model.
      *
-     * @return list<array{title: string, description: string, spatial?: string, prompt?: string, elements?: list<string>, copied?: bool}>
+     * @return list<array{title: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
@@ -425,6 +431,44 @@ class Shot extends Model implements HasMedia
         self::query()->with('project')->where('project_id', $projectId)->where('status', ShotStatus::STORYLINE_READY)->get()
             ->filter(fn(self $shot) => $shot->waitsToDraw() && $shot->waitsFor() === null)
             ->each->drawKeyframes();
+    }
+
+    /**
+     * Starts the plan over after it was drawn: the keyframes, the places and
+     * the video are thrown away, and whatever is still drawn or rendered for
+     * the old plan stops. The plan and the conversation stay.
+     */
+    public function startPlanOver(): void
+    {
+        // First, so running jobs of the old plan stop at their next check.
+        $this->increment('plan_version');
+
+        $this->forgetKeyframes();
+        $this->clearMediaCollection(self::PLATE_OPTIONS);
+        $this->clearMediaCollection(self::PLATE);
+        $this->clearMediaCollection(self::PLACE_STATES);
+        $this->clearMediaCollection(self::MONTAGE_CLIPS);
+        $this->clearMediaCollection(self::PRESENTER_VIDEOS);
+
+        $this->forceFill([
+            'status' => ShotStatus::STORYLINE_READY,
+            'storyline_error' => null,
+            'montage_clips' => null,
+            'reviewing' => false,
+        ])->save();
+    }
+
+    /**
+     * Whether this shot of a sequence is still as the split left it: nothing
+     * planned or drawn and no conversation beyond its opening message. Only
+     * such a shot may be changed or removed when the sequence is agreed anew.
+     */
+    public function isUntouchedInSequence(): bool
+    {
+        return in_array($this->status, [ShotStatus::DRAFT, ShotStatus::STORYLINE_READY], true)
+            && $this->storylineKeyframes() === []
+            && count((array) ($this->plan_chat ?? [])) <= 1
+            && ! $this->keyframes()->exists();
     }
 
     /**
@@ -650,6 +694,7 @@ class Shot extends Model implements HasMedia
         $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::PLATE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PLATE_OPTIONS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::PLACE_STATES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }

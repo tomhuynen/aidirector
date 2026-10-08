@@ -78,6 +78,9 @@ class GenerateRemainingKeyframes implements ShouldQueue
             $painter->ensurePlate($shot, $siblings);
         }
 
+        // A change to the place, such as a door that closes, gets its own version of the place before the keyframes are drawn on it.
+        $painter->ensurePlaceStates($shot, $siblings);
+
         foreach ($siblings->skip(1) as $keyframe) {
             if ($this->planReplaced()) {
                 return;

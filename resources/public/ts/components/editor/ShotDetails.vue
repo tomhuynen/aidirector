@@ -31,27 +31,7 @@
     <template v-else>
       <div class="flex items-start justify-between gap-3 p-6">
         <h2 class="text-2xl leading-tight font-semibold text-balance">{{ shot.title }}</h2>
-        <div class="flex shrink-0 items-center">
-          <!-- Not happy with the keyframes: back to the plan chat to say what did not work, then they are drawn again. -->
-          <ConfirmDelete
-            v-if="shot.links?.planReopen"
-            :action="shot.links.planReopen"
-            :title="$t('Back to the chat?')"
-            :description="
-              $t(
-                'The keyframes and the video of this shot are thrown away, and anything still being drawn for it stops. Tell the director what did not work, and the keyframes are drawn again from the new plan.',
-              )
-            "
-            :confirm-label="$t('Back to the chat')"
-          >
-            <template #trigger>
-              <Button type="button" variant="outline" size="sm">
-                <MessageSquare class="size-4" />
-                {{ $t('Back to the chat') }}
-              </Button>
-            </template>
-          </ConfirmDelete>
-        </div>
+        <div class="flex shrink-0 items-center"></div>
       </div>
 
       <section class="space-y-2 border-t border-border p-6">
@@ -178,17 +158,7 @@ import type { Inertia } from '@public/ts/types/utils'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import {
-  AudioLines,
-  ListOrdered,
-  MessageSquare,
-  Mic,
-  PanelLeftClose,
-  PanelLeftOpen,
-  RefreshCw,
-  Target,
-  Trash2,
-} from 'lucide-vue-next'
+import { AudioLines, ListOrdered, Mic, PanelLeftClose, PanelLeftOpen, RefreshCw, Target, Trash2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import AudioTracks from './AudioTracks.vue'

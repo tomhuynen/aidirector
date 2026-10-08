@@ -13,6 +13,7 @@ use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Support\Images\BackgroundDrift;
 use App\Support\Images\PersonCutout;
+use App\Support\Media\LocalMediaFiles;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -115,7 +116,8 @@ class PoseMovedPerson implements ShouldQueue
      */
     private function redrawAround(KeyframePainter $painter, PersonCutout $cutout, Keyframe $keyframe, Media $moved): Media
     {
-        $image = new \Imagick($moved->getPath());
+        $files = new LocalMediaFiles();
+        $image = new \Imagick($files->path($moved));
         $crop = $cutout->cropAround($this->box, $image->getImageWidth(), $image->getImageHeight());
         $image->cropImage($crop['width'], $crop['height'], $crop['x'], $crop['y']);
         $image->setImagePage(0, 0, 0, 0);
@@ -139,7 +141,7 @@ class PoseMovedPerson implements ShouldQueue
 
         $output = storage_path('app/tmp/pose-' . Str::random(12) . '.png');
         @mkdir(dirname($output), 0755, true);
-        $cutout->pasteBack($moved->getPath(), $redrawn->getPath(), $crop, $output);
+        $cutout->pasteBack($files->path($moved), $files->path($redrawn), $crop, $output);
         $sent = $redrawn->getCustomProperty(Keyframe::SENT);
         $redrawn->delete();
 
@@ -200,7 +202,8 @@ class PoseMovedPerson implements ShouldQueue
      */
     private function stayedPut(PersonCutout $cutout, Media $plate, Media $render): bool
     {
-        $found = $cutout->locate($plate->getPath(), $render->getPath(), $this->box);
+        $files = new LocalMediaFiles();
+        $found = $cutout->locate($files->path($plate), $files->path($render), $this->box);
 
         if ($found === null) {
             return false;

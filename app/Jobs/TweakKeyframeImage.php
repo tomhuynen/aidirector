@@ -12,7 +12,6 @@ use App\Jobs\Concerns\FollowsPlan;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Element;
 use App\Models\Keyframe;
-use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Corrections\RecordCorrection;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -94,7 +93,7 @@ class TweakKeyframeImage implements ShouldQueue
         $render = match (true) {
             $approach === 'redraw' => $this->redraw($painter, $keyframe, $instruction),
             // On a place the edit starts from the place again, so the background cannot creep with every adjustment.
-            $base?->collection_name === Shot::PLATE => $painter->paintOn(
+            $base !== null && $painter->isPlace($base) => $painter->paintOn(
                 $base,
                 $keyframe,
                 KeyframeImageBrief::tweakOnPlate($instruction, withPreviousKeyframe: $previous !== null),

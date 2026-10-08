@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots\Plan;
 
 use App\Enums\ElementType;
-use App\Enums\ShotStatus;
 use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Jobs\UpdateElementImage;
 use App\Models\Policies\Public\ShotPolicy;
@@ -29,7 +28,7 @@ class ElementsController
 
         $proposed = (array) ($shot->storyline['new_elements'] ?? []);
 
-        if ($shot->status !== ShotStatus::STORYLINE_READY || $proposed === []) {
+        if ($proposed === []) {
             throw ValidationException::withMessages(['elements' => __('There is nothing to add to the cast and sets.')]);
         }
 

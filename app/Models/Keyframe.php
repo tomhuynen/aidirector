@@ -58,6 +58,9 @@ class Keyframe extends Model implements HasMedia
     /** On a render: its background moved compared with the image it was drawn on, even after drawing it again. */
     public const BACKGROUND_MOVED = 'background_moved';
 
+    /** On a render drawn on a place: only its people and the things named in it were kept, the rest is the place itself. */
+    public const COMPOSITED = 'composited';
+
     /** On a render: what the automatic check found wrong with it, kept as notes; nothing is redrawn by itself. */
     public const CHECK_ISSUES = 'check_issues';
 

@@ -147,6 +147,15 @@ return [
             'min_stillness' => (float) env('AI_DRIFT_MIN_STILLNESS', 0.85),
             'attempts' => (int) env('AI_DRIFT_ATTEMPTS', 3),
         ],
+        // A keyframe drawn on a place keeps only its people and the objects named in it; everything else is the place itself, pixel for pixel.
+        // A change to the place, such as a door that closes, becomes its own version of the place the same way. Needs a Replicate token.
+        'composite' => [
+            'enabled' => (bool) env('AI_COMPOSITE', true),
+            // Cuts out the people: BiRefNet.
+            'people_model' => env('AI_COMPOSITE_PEOPLE_MODEL', 'f74986db0355b58403ed20963af156525e2891ea3c2d499bfbfb2a28cd87c5d7'),
+            // Cuts out a thing by its name: Lang-SAM.
+            'object_model' => env('AI_COMPOSITE_OBJECT_MODEL', '891411c38a6ed2d44c004b7b9e44217df7a5b07848f29ddefd2e28bc7cbf93bc'),
+        ],
     ],
 
     'queue' => 'ai',

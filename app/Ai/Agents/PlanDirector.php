@@ -31,10 +31,12 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
 
     /**
      * @param  list<array{role: string, text: string}>  $conversation  the conversation so far
+     * @param  string  $selected  once the images are drawn: what the director has selected, its image attached
      */
     public function __construct(
         private readonly Shot $shot,
         private readonly array $conversation,
+        private readonly string $selected = '',
     ) {}
 
     public function instructions(): Stringable|string
@@ -59,9 +61,12 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
             - You can have the picture of an item in the cast and sets redrawn: when the director asks to change how one looks, such as an empty tray instead of one with a badge in it, or when its picture shows something that fights the plan, give it in adjust_elements with its exact name and the change in one plain sentence, and say its picture is being redrawn. Its picture is shared by every shot, so change only how it always looks; what it holds or how it stands in one keyframe belongs in the description. Otherwise adjust_elements is empty.
             - You see the other shots of the film: the list of all of them, and the shot before and after this one in detail, with any shot named in the conversation. Use them to keep the film consistent, and answer questions about them.
             - When the director wants the setting of another shot, such as "same setting as the previous shot", "the place of SH050" or "where keyframe 2 of SH090 ends", give it as setting_from in the proposal: that shot's code and the keyframe number, or 0 for its place. Its picture is then attached when keyframe 1 and the places are drawn, so this shot plays in that same place; describe the spot in the descriptions as it is in that shot, from this shot's own camera. A close-up planned together with the shot before it already continues from that shot's last keyframe, as a cut-in on the same moment; keep the screen direction of that shot, who is left and who is right. Keep setting_from as it is now unless the director changes it; null means the default.
+            - When shots of this sequence are no longer needed, such as a duplicate or a part the director dropped, ask first and name them by their code, such as "Shall I remove SH340? It tells the same as SH330." Only once the director agrees, give their codes in remove_shots; otherwise remove_shots is empty. Only shots marked "not planned yet" in the sequence can be removed; a shot that is drawn or talked about stays, and the director deletes it themselves if they want to. Agreeing on the shots of a sequence again updates the shots that follow in order; it never adds the sequence twice.
             - stage is the step your message is about.
             - When the director only wants the keyframes drawn (again), give the proposal with the plan exactly as it is now.
-            - When the director comes back after the keyframes were drawn and says what did not work, find what in the plan caused it, ask one question when that is unclear, and write a new proposal that fixes it; keep everything else.
+            - Once the keyframes are drawn, the conversation goes on about the images. The selected image is attached and named under "Selected". When the director says what they want changed and it is clear what and where, give it in changes: per keyframe one precise sentence about that image, saying where things are and should be from the camera's point of view and what stays the same; keyframe 0 is the selected image, a number is that keyframe. One request can change several keyframes, such as the same jacket in every keyframe; give a change for each. Say in plain words what you are changing; the changes are made straight away, one keyframe after the other, and whether an image is edited or drawn again is decided when it is made. When it is unclear what or where, ask one question first.
+            - A drawn shot keeps its plan: change the images, not the plan. Only when the plan itself has to change, such as other keyframes, another kind or another place, propose a new plan; once the director agrees with it, the drawn keyframes are thrown away and the new plan is drawn. Say so before they agree.
+            - The proposal and changes are never both given; changes are empty while nothing is drawn.
             - The director may go back to an earlier step, skip one or ask for the plan straight away; follow them. Once there is a plan, a change goes straight to a new proposal: the whole plan, changed as far as asked and otherwise exactly as it is now.
             - The proposal is null except in the plan step and for changes to a written plan. new_elements is empty except when you offer to make something.
             - When a request is unclear or does not fit the takeaway or what the chosen kind can show, say so in one sentence and ask one question, offering the option you would choose.
@@ -88,6 +93,11 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
         return [
             'reply' => $schema->string()->required(),
             'stage' => $schema->string()->enum(self::STAGES)->required(),
+            'remove_shots' => $schema->array()->items($schema->string())->max(6)->required(),
+            'changes' => $schema->array()->items($schema->object([
+                'keyframe' => $schema->integer()->min(0)->required(),
+                'change' => $schema->string()->required(),
+            ]))->max(8)->required(),
             'shots' => $schema->array()->items($schema->object([
                 'takeaway' => $schema->string()->required(),
                 'kind' => $schema->string()->enum(array_column(ShotKind::cases(), 'value'))->required(),
@@ -113,6 +123,8 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
                     'title' => $schema->string()->required(),
                     'description' => $schema->string()->required(),
                     'spatial' => $schema->string()->required(),
+                    'place_change' => $schema->string()->required(),
+                    'place_part' => $schema->string()->required(),
                     'elements' => $schema->array()->items($schema->string())->required(),
                 ]))->min(1)->required(),
                 'seconds' => $schema->integer()->required(),
@@ -132,6 +144,14 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
         return collect(ShotKind::cases())
             ->map(fn(ShotKind $kind) => "                 - {$kind->value}: when {$kind->useWhen()}")
             ->join("\n");
+    }
+
+    /**
+     * Whether the keyframes are drawn, and what is selected when they are.
+     */
+    private function drawn(): string
+    {
+        return $this->selected === '' ? 'no, the plan is still being made' : "yes. Selected: {$this->selected}";
     }
 
     private function storyline(): string
@@ -205,7 +225,9 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
                 default => ", continuing from {$from['shot']->code()}",
             };
 
-            return ($index + 1) . ". {$shot->code()}: " . (trim((string) $shot->notes) ?: $shot->takeaway) . " ({$shot->kindOrScene()->value}{$where})" . ($shot->is($this->shot) ? ' <- this shot' : '');
+            $state = $shot->is($this->shot) ? ' <- this shot' : ($shot->isUntouchedInSequence() ? ' (not planned yet)' : '');
+
+            return ($index + 1) . ". {$shot->code()}: " . (trim((string) $shot->notes) ?: $shot->takeaway) . " ({$shot->kindOrScene()->value}{$where}){$state}";
         })->join("\n");
 
         return "\nThis shot is part of a sequence of shots planned together, each showing only its own part:\n{$lines}";
@@ -238,6 +260,7 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
             Takeaway: {$takeaway}{$sequence}
             This shot: {$this->shot->code()}
             Kind of shot: {$this->shot->kindOrScene()->value}
+            Drawn: {$this->drawn()}
             Setting: {$settingLine}
 
             {$others}

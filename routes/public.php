@@ -46,7 +46,6 @@ use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpda
 use App\Http\Controllers\Public\Shots\MergeController as ShotMergeController;
 use App\Http\Controllers\Public\Shots\Plan\DirectorController as ShotPlanDirectorController;
 use App\Http\Controllers\Public\Shots\Plan\ElementsController as ShotPlanElementsController;
-use App\Http\Controllers\Public\Shots\Plan\PlanController as ShotPlanController;
 use App\Http\Controllers\Public\Shots\Plan\PlateController as ShotPlateController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
 use App\Http\Controllers\Public\Shots\RetryController as ShotRetryController;
@@ -138,7 +137,6 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/merge', [ShotMergeController::class, 'update'])->name('merge.update');
             Route::delete('{shot}/merge', [ShotMergeController::class, 'destroy'])->name('unmerge');
             Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
-            Route::delete('{shot}/plan/keyframes', [ShotPlanController::class, 'reopen'])->name('plan.reopen');
             Route::post('{shot}/plan/chat', [ShotPlanDirectorController::class, 'store'])->name('plan.chat');
             Route::post('{shot}/plan/elements', [ShotPlanElementsController::class, 'store'])->name('plan.elements');
             Route::delete('{shot}/plan/elements', [ShotPlanElementsController::class, 'destroy'])->name('plan.elements.skip');

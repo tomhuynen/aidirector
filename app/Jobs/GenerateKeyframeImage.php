@@ -46,6 +46,7 @@ class GenerateKeyframeImage implements ShouldQueue
         // Keyframe 1 with people gets a version without them, for the other keyframes to be drawn on.
         if ($this->keyframe->position > 1) {
             $painter->ensurePlate($shot, $siblings);
+            $painter->ensurePlaceStates($shot, $siblings);
         }
 
         $keyframe = $siblings->firstWhere('id', $this->keyframe->id) ?? $this->keyframe->setRelation('shot', $shot);

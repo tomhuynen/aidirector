@@ -14,9 +14,13 @@ use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Images\BackgroundDrift;
+use App\Support\Images\Cutout;
 use App\Support\Images\OpenRouterImageClient;
+use App\Support\Images\PlaceComposite;
+use App\Support\Images\ReplicateClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Files\StoredImage;
 use Laravel\Ai\Image;
@@ -30,7 +34,11 @@ use Throwable;
  */
 class KeyframePainter
 {
-    public function __construct(private readonly BackgroundDrift $drift) {}
+    public function __construct(
+        private readonly BackgroundDrift $drift,
+        private readonly Cutout $cutout,
+        private readonly PlaceComposite $composite,
+    ) {}
 
     /**
      * With `$choose` off the render is only added as a version, for options the director picks from later.
@@ -202,7 +210,11 @@ class KeyframePainter
         }
 
         $keyframe->load('media');
-        CheckKeyframePlace::start($keyframe, $render);
+
+        // A composite has the place itself as its background; there is no shift to look for.
+        if ($render->getCustomProperty(Keyframe::COMPOSITED) !== true) {
+            CheckKeyframePlace::start($keyframe, $render);
+        }
 
         return $render;
     }
@@ -218,6 +230,17 @@ class KeyframePainter
      */
     public function paintOn(?Media $base, Keyframe $keyframe, string $prompt, array $attachments = [], bool $choose = true, ?string $model = null, array $labels = []): Media
     {
+        // On a place only the people and the named things are kept, so the background cannot move and is not measured.
+        if ($base !== null && $this->isPlace($base) && $this->composites()) {
+            $render = $this->compositeOn($base, $keyframe, $this->paint($keyframe, $prompt, $attachments, false, $model, $labels));
+
+            if ($choose) {
+                $keyframe->forceFill(['render_id' => $render->id, 'rendering' => false, 'render_error' => null])->save();
+            }
+
+            return $render;
+        }
+
         if ($base === null || ! Config::get('pipeline.keyframes.drift.enabled')) {
             return $this->paint($keyframe, $prompt, $attachments, $choose, $model, $labels);
         }
@@ -267,7 +290,7 @@ class KeyframePainter
         }
 
         $firstKeyframe = KeyframeImageBrief::usesFirstKeyframe($keyframe->position) ? $siblings->firstWhere('position', 1) : null;
-        $plate = $this->chosenPlate($keyframe->shot) ?? ($firstKeyframe !== null ? $this->plateFor($keyframe->shot, $firstKeyframe) : null);
+        $plate = $this->placeAt($keyframe->shot, $siblings, $keyframe->position);
 
         return $plate ?? $firstKeyframe?->render();
     }
@@ -520,7 +543,7 @@ class KeyframePainter
         $standalone = $keyframe->shot->drawsStandalone();
         $firstKeyframe = ! $standalone && KeyframeImageBrief::usesFirstKeyframe($keyframe->position) ? $siblings->firstWhere('position', 1) : null;
         // A chosen place is the base of every keyframe, keyframe 1 included; otherwise the place made from keyframe 1, if any.
-        $plate = $standalone ? null : $this->chosenPlate($keyframe->shot) ?? ($firstKeyframe !== null ? $this->plateFor($keyframe->shot, $firstKeyframe) : null);
+        $plate = $standalone ? null : $this->placeAt($keyframe->shot, $siblings, $keyframe->position);
         $first = $plate ?? $firstKeyframe?->render();
 
         // On the plate keyframe 1 is not the base, so from keyframe 2 on the keyframe before carries how the people look.
@@ -652,6 +675,22 @@ class KeyframePainter
      */
     private function drawPlateOption(Shot $shot, string $prompt, array $images, array $labels, string $model): Media
     {
+        $result = $this->drawForShot($shot, $prompt, $images, $model);
+
+        return $shot->addMediaFromString($result['content'])
+            ->usingFileName('place.' . ($result['mime'] === 'image/jpeg' ? 'jpg' : 'png'))
+            ->withCustomProperties([Keyframe::SENT => ['model' => $result['model'], 'prompt' => $prompt, 'images' => $labels]])
+            ->toMediaCollection(Shot::PLATE_OPTIONS);
+    }
+
+    /**
+     * Draw an image for the shot itself, such as a place, logged on the shot.
+     *
+     * @param  list<StoredImage>  $images
+     * @return array{content: string, mime: string, provider: string, model: string, usage: array<string, mixed>}
+     */
+    private function drawForShot(Shot $shot, string $prompt, array $images, string $model): array
+    {
         $started = hrtime(true);
 
         try {
@@ -666,10 +705,7 @@ class KeyframePainter
 
         $shot->generations()->create(['director_id' => $shot->project->director_id, 'kind' => 'image', 'provider' => $result['provider'], 'model' => $result['model'], 'prompt' => $prompt, 'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000), 'usage' => $result['usage']]);
 
-        return $shot->addMediaFromString($result['content'])
-            ->usingFileName('place.' . ($result['mime'] === 'image/jpeg' ? 'jpg' : 'png'))
-            ->withCustomProperties([Keyframe::SENT => ['model' => $result['model'], 'prompt' => $prompt, 'images' => $labels]])
-            ->toMediaCollection(Shot::PLATE_OPTIONS);
+        return $result;
     }
 
     /**
@@ -772,5 +808,174 @@ class KeyframePainter
             ->usingFileName('plate.' . ($result['mime'] === 'image/jpeg' ? 'jpg' : 'png'))
             ->withCustomProperties([Shot::PLATE_FROM => $render->id, Keyframe::SENT => ['model' => $result['model'], 'prompt' => $prompt, 'images' => ['Keyframe 1']]])
             ->toMediaCollection(Shot::PLATE);
+    }
+
+    /**
+     * Whether keyframes on a place keep only their people and named things:
+     * switched on and with a Replicate token for the cut-outs.
+     */
+    public function composites(): bool
+    {
+        return (bool) Config::get('pipeline.keyframes.composite.enabled') && ReplicateClient::configured();
+    }
+
+    /**
+     * Whether the image is an empty place: the shot's place or a later state of it.
+     */
+    public function isPlace(Media $image): bool
+    {
+        return in_array($image->collection_name, [Shot::PLATE, Shot::PLACE_STATES], true);
+    }
+
+    /**
+     * Keeps of a render drawn on a place only the people, their shadows and
+     * the things named in the keyframe, and puts them on the place itself.
+     * The render is replaced by the composite. When the cut-out fails, the
+     * render stays as it was drawn.
+     */
+    public function compositeOn(Media $place, Keyframe $keyframe, Media $render): Media
+    {
+        $drawn = $this->bytes($render);
+        // The objects take their state from the keyframe, such as a handset lifted off its cradle; places and people are covered otherwise.
+        $things = $keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT)->pluck('name')->values()->all();
+
+        try {
+            $composite = $this->composite->keyframe(
+                $this->bytes($place),
+                $drawn,
+                $this->cutout->people($drawn),
+                array_map(fn(string $name) => $this->cutout->thing($drawn, $name), $things),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $render;
+        }
+
+        $kept = $keyframe
+            ->addMediaFromString($composite)
+            ->usingFileName("keyframe-{$keyframe->position}.png")
+            ->withCustomProperties([...$render->custom_properties, Keyframe::COMPOSITED => true])
+            ->toMediaCollection(Keyframe::RENDERS);
+        $render->delete();
+        $keyframe->load('media');
+
+        return $kept;
+    }
+
+    /**
+     * The empty place a keyframe is drawn on: the shot's place, in the latest
+     * state the plan reached by this keyframe, such as with the door closed
+     * from keyframe 2 on. States not made yet are skipped.
+     *
+     * @param  Collection<int, Keyframe>  $siblings
+     */
+    public function placeAt(Shot $shot, Collection $siblings, int $position): ?Media
+    {
+        $first = $siblings->firstWhere('position', 1);
+        $place = $this->chosenPlate($shot) ?? ($first !== null && $position > 1 ? $this->plateFor($shot, $first) : null);
+
+        if ($place === null) {
+            return null;
+        }
+
+        $states = $shot->media()->where('collection_name', Shot::PLACE_STATES)->get()->keyBy(fn(Media $state) => (string) $state->getCustomProperty(Shot::PLACE_STATE_KEY));
+
+        foreach ($this->placeChanges($shot, $position) as $change) {
+            $place = $states->get($this->stateKey($place, $change)) ?? $place;
+        }
+
+        return $place;
+    }
+
+    /**
+     * Makes the states of the place the plan needs, each from the one before:
+     * the image model draws the change on the empty place, and only the
+     * changed thing is kept, so the rest of the place stays as it was. A
+     * failure is logged; the keyframes are then drawn on the state before.
+     *
+     * @param  Collection<int, Keyframe>  $siblings
+     */
+    public function ensurePlaceStates(Shot $shot, Collection $siblings): void
+    {
+        $first = $siblings->firstWhere('position', 1);
+        $place = $this->chosenPlate($shot) ?? ($first !== null ? $this->plateFor($shot, $first) : null);
+
+        if ($place === null || $shot->drawsStandalone()) {
+            return;
+        }
+
+        $states = $shot->media()->where('collection_name', Shot::PLACE_STATES)->get()->keyBy(fn(Media $state) => (string) $state->getCustomProperty(Shot::PLACE_STATE_KEY));
+
+        foreach ($this->placeChanges($shot, count($shot->storylineKeyframes())) as $change) {
+            $key = $this->stateKey($place, $change);
+            $place = $states->get($key) ?? $this->drawPlaceState($shot, $place, $change, $key) ?? $place;
+        }
+    }
+
+    /**
+     * The changes to the place the plan makes up to a keyframe, in order.
+     *
+     * @return list<array{position: int, change: string, part: string}>
+     */
+    private function placeChanges(Shot $shot, int $position): array
+    {
+        return collect($shot->storylineKeyframes())
+            ->map(fn(array $keyframe, int $index) => ['position' => $index + 1, 'change' => trim((string) ($keyframe['place_change'] ?? '')), 'part' => trim((string) ($keyframe['place_part'] ?? ''))])
+            ->filter(fn(array $change) => $change['position'] > 1 && $change['position'] <= $position && $change['change'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array{position: int, change: string, part: string}  $change
+     */
+    private function stateKey(Media $place, array $change): string
+    {
+        return hash('sha256', "{$place->id}|{$change['position']}|{$change['change']}|{$change['part']}");
+    }
+
+    /**
+     * @param  array{position: int, change: string, part: string}  $change
+     */
+    private function drawPlaceState(Shot $shot, Media $place, array $change, string $key): ?Media
+    {
+        try {
+            $result = $this->drawForShot($shot, KeyframeImageBrief::placeState($change['change']), [$this->referenceFor($place)], (string) Config::get('pipeline.models.keyframe_edit'));
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        $before = $this->bytes($place);
+        $image = $result['content'];
+        $composited = false;
+
+        // Only the changed thing comes from the edit, found in the place before and after, so both its old and new shape are covered.
+        if ($this->composites() && $change['part'] !== '') {
+            try {
+                $image = $this->composite->state($before, $image, [$this->cutout->thing($before, $change['part']), $this->cutout->thing($image, $change['part'])]);
+                $composited = true;
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return $shot->addMediaFromString($image)
+            ->usingFileName("place-{$change['position']}.png")
+            ->withCustomProperties([
+                Shot::PLACE_STATE_KEY => $key,
+                'position' => $change['position'],
+                'change' => $change['change'],
+                Keyframe::COMPOSITED => $composited,
+                Keyframe::SENT => ['model' => $result['model'], 'prompt' => KeyframeImageBrief::placeState($change['change']), 'images' => ['The place before this change']],
+            ])
+            ->toMediaCollection(Shot::PLACE_STATES);
+    }
+
+    private function bytes(Media $media): string
+    {
+        return (string) Storage::disk($media->disk)->get($media->getPathRelativeToRoot());
     }
 }

@@ -20,7 +20,11 @@ use function Pest\Laravel\getJson;
 use function Pest\Laravel\withToken;
 
 beforeEach(function () {
-    Storage::fake(Disk::TENANT->value);
+    config(['media-library.disk_name' => Disk::TENANT_CLOUD->value]);
+    Storage::fake(Disk::TENANT_CLOUD->value);
+    Storage::disk(Disk::TENANT_CLOUD->value)->buildTemporaryUrlsUsing(
+        fn(string $path, DateTimeInterface $expiration, array $options) => 'https://bucket.test/' . $path . '?expires=' . $expiration->getTimestamp() . '&' . http_build_query($options, encoding_type: PHP_QUERY_RFC3986),
+    );
 
     $this->director = Director::factory()->create();
     $this->project = Project::factory()->ownedBy($this->director)->create(['title' => 'Welcome to Damen Naval']);
@@ -91,7 +95,7 @@ it('lists a project\'s shots in order, not another director\'s', function () {
     withToken($this->token)->getJson(route('api.v1.projects.shots.index', $other))->assertForbidden();
 });
 
-it('gives a shot\'s files as signed links that only work with the token', function () {
+it('gives a shot\'s files as presigned storage links that download under a readable name', function () {
     $shot = finishedShot($this->project);
 
     $assets = withToken($this->token)->getJson(route('api.v1.projects.shots.assets', [$this->project, $shot]))
@@ -102,19 +106,17 @@ it('gives a shot\'s files as signed links that only work with the token', functi
         ->assertJsonPath('voiceOvers.0.locale', 'nl-NL')
         ->json();
 
-    expect($assets['video']['url'])->toContain('signature=')->toContain('download=SH010')
-        ->and($assets['thumbnailUrl'])->toContain('/thumbnail')
+    $expires = now()->addHour()->getTimestamp();
+
+    expect($assets['video']['url'])->toStartWith('https://bucket.test/')
+        ->toContain("expires={$expires}")
+        ->toContain('ResponseContentDisposition=' . rawurlencode('attachment; filename="SH010 Security.mp4"'))
+        ->and($assets['voiceOvers'][0]['url'])->toContain(rawurlencode('filename="SH010 Security nl-NL.mp3"'))
+        ->and($assets['thumbnailUrl'])->toContain('/conversions/')->toContain('thumbnail')
         ->and($assets['voiceOverTexts'])->toBe([['locale' => 'nl-NL', 'text' => 'Beveiliging is je eerste aanspreekpunt.']])
         ->and($assets['keyframes'])->toHaveCount(1)
         ->and($assets['keyframes'][0])->toMatchArray(['position' => 1, 'title' => $shot->keyframes()->first()->title])
-        ->and($assets['keyframes'][0]['imageUrl'])->not->toContain('/thumbnail')->toContain('keyframe%201');
-
-    withToken($this->token)->get($assets['keyframes'][0]['imageUrl'])->assertOk();
-
-    withToken($this->token)->get($assets['video']['url'])->assertOk()->assertDownload('SH010 Security.mp4');
-    withToken($this->token)->get(strtok($assets['video']['url'], '?'))->assertForbidden();
-    $this->app['auth']->forgetGuards();
-    $this->flushHeaders()->get($assets['video']['url'], ['Accept' => 'application/json'])->assertUnauthorized();
+        ->and($assets['keyframes'][0]['imageUrl'])->not->toContain('/conversions/')->toContain(rawurlencode('keyframe 1'));
 });
 
 it('keeps another project\'s shot out of a project\'s assets', function () {

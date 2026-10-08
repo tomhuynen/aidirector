@@ -209,6 +209,41 @@ describe('create', function () {
             && str_contains((string) $prompt->agent->instructions(), 'what another shot of the sequence shows never happens in this one'));
     });
 
+    it('updates the sequence when it is agreed again, instead of adding it twice', function () {
+        $sequence = fn(string $second) => directorReply(['shots' => [
+            ['takeaway' => 'Ask before you take a photo', 'kind' => 'scene', 'idea' => 'The host stops the visitor at the dock.', 'setting' => 'new_place', 'same_place_as' => 0],
+            ['takeaway' => 'Photograph only where allowed', 'kind' => 'scene', 'idea' => $second, 'setting' => 'continues', 'same_place_as' => 0],
+        ]]);
+        PlanDirector::fake([$sequence('The host points to a safe spot.'), $sequence('The host points away from the dock.')]);
+        $shot = planShot($this->project, ['position' => 1]);
+
+        talkTo($this, $shot, 'ok');
+        talkTo($this, $shot->fresh(), 'perfect');
+
+        $shots = $this->project->shots()->get();
+
+        expect($shots)->toHaveCount(2)
+            ->and($shots[1]->notes)->toBe('The host points away from the dock.')
+            ->and($shots[1]->plan_chat)->toHaveCount(1)
+            ->and($shots[1]->plan_chat[0]['text'])->toContain('The host points away from the dock.');
+    });
+
+    it('removes only untouched shots of the sequence the director agreed to drop', function () {
+        $shot = planShot($this->project, ['position' => 1, 'group_key' => 'g1']);
+        $talked = planShot($this->project, ['position' => 2, 'group_key' => 'g1', 'plan_chat' => [['role' => 'assistant', 'text' => 'Idea'], ['role' => 'director', 'text' => 'yes']]]);
+        $duplicate = planShot($this->project, ['position' => 3, 'group_key' => 'g1', 'plan_chat' => [['role' => 'assistant', 'text' => 'Idea']]]);
+        $elsewhere = planShot($this->project, ['position' => 4]);
+        PlanDirector::fake([directorReply(['reply' => 'Removed.', 'remove_shots' => ['SH010', 'SH020', 'SH030', 'SH040']])]);
+
+        talkTo($this, $shot, 'yes, remove them')->assertJsonPath('reload', true);
+
+        expect(Shot::query()->find($duplicate->id))->toBeNull()
+            ->and($shot->fresh())->not->toBeNull()
+            ->and($talked->fresh())->not->toBeNull()
+            ->and($elsewhere->fresh()->position)->toBe(3)
+            ->and($this->project->shots()->pluck('position')->all())->toBe([1, 2, 3]);
+    });
+
     it('offers to make a new person when the director asks for one', function () {
         PlanDirector::fake([
             directorReply(['reply' => 'Shall I make him?', 'stage' => 'cast', 'new_elements' => [['name' => 'Male visitor', 'type' => 'person', 'description' => 'A man in his forties in a grey jacket, with no lanyard or badge.']]]),

@@ -6,7 +6,6 @@ use App\Http\Controllers\Api\Auth\MeController;
 use App\Http\Controllers\Api\Auth\TokenController;
 use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\ShotController;
-use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
 use App\Http\Middleware\Api\EnsureDirector;
 use App\Http\Middleware\Public\IdentifyTenant;
 use Illuminate\Support\Facades\Route;
@@ -35,6 +34,5 @@ Route::as('api.')->group(function () {
             Route::get('projects', [ProjectController::class, 'index'])->name('projects.index');
             Route::get('projects/{project}/shots', [ShotController::class, 'index'])->name('projects.shots.index');
             Route::get('projects/{project}/shots/{shot}/assets', [ShotController::class, 'assets'])->scopeBindings()->name('projects.shots.assets');
-            Route::get('media/{media}/{conversion?}', [MediaViewController::class, 'view'])->middleware('signed')->name('media.view');
         });
 });
