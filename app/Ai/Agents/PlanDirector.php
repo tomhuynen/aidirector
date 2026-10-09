@@ -80,6 +80,7 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
             - After the keyframes are drawn, you told the director what the checks found, numbered; the ones still waiting for an answer are listed under "Findings waiting for an answer". The director's answer decides per finding, in verdicts with its number: fix or ignore. "Yes", "fix them" or "do it" fixes all of them; "only 2" fixes 2 and leaves the others waiting; "1 is fine" ignores 1; "they are fine" or "leave it" ignores all. A finding they do not mention stays waiting. The fixes are made from the findings themselves, so never also put them in changes. Say in one short sentence what you do. When the director talks about something else, verdicts is empty.
             - In changes, name hands, arms and sides by where they are in the image, such as "the hand on the right of the frame", never by a person's own left or right: with someone who faces away those are the other way round. When the director names a hand by the person's own side, look at the image to see which side of the frame that is.
             - A request that makes the arms cross or a hand reach across to the other side of the body cannot be drawn: say so in one sentence and offer the natural version, the hand on that side doing it, such as "Crossed arms come out wrong; shall the hand on the right of the frame point instead, as now?". Changes stay empty until the director agrees: never quietly do something other than what they asked. When they name a hand by the person's own side, say which hand that is in the image, such as "His left hand is the one on the left of the frame, on the edge of the panel."
+            - When documents the director shared at the project setup are listed, such as the functional design, they are the source for the course: the order of the shots, what each shot must teach and why. Take the takeaway, the idea and the context from them before your own, and answer from them when the director asks what a shot is about or what comes first; this shot's place in the film tells you which part is this shot. Never say you have no plan or document when they are listed. What the director says in the chat comes first.
             - A drawn shot keeps its plan: change the images, not the plan. Only when the plan itself has to change, such as other keyframes, another kind or another place, propose a new plan; once the director agrees with it, the drawn keyframes are thrown away and the new plan is drawn. Say so before they agree.
             - The proposal and changes are never both given; changes are empty while nothing is drawn.
             - The director may go back to an earlier step, skip one or ask for the plan straight away; follow them. Once there is a plan, a change goes straight to a new proposal: the whole plan, changed as far as asked and otherwise exactly as it is now.
@@ -176,6 +177,16 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
     /**
      * Whether the keyframes are drawn, and what is selected when they are.
      */
+    /**
+     * The documents shared at the project setup, such as the functional design.
+     */
+    private function documents(): string
+    {
+        $documents = $this->shot->project->documentsBrief();
+
+        return $documents === '' ? '' : "{$documents}\n\n";
+    }
+
     /**
      * The findings you reported that the director has not answered yet.
      */
@@ -308,7 +319,7 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
         } . (($waits = $this->shot->settingWaitsFor()) !== null ? " (not there yet: the keyframes are drawn once {$waits} is ready)" : '');
 
         return <<<PROMPT
-            Takeaway: {$takeaway}{$sequence}
+            {$this->documents()}Takeaway: {$takeaway}{$sequence}
             This shot: {$this->shot->code()}
             Kind of shot: {$this->shot->kindOrScene()->value}, {$this->shot->shotSize()->value}
             Drawn: {$this->drawn()}

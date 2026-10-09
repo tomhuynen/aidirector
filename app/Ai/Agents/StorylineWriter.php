@@ -133,7 +133,9 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     {
         $brief = (filled($this->shot->title) ? "Shot title: {$this->shot->title}\n" : '') . $this->shot->brief();
 
-        return "Write the storyline of this shot and break it into keyframes.\n\n{$brief}";
+        $documents = $this->shot->project->documentsBrief();
+
+        return "Write the storyline of this shot and break it into keyframes.\n\n{$brief}" . ($documents === '' ? '' : "\n\n{$documents}\nUse what they say about this shot; the brief above comes first.");
     }
 
     private function purposeBrief(): string

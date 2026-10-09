@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Str;
 use Laravel\Ai\Models\Conversation;
 use Laravel\Ai\Models\ConversationMessage;
 use RedExplosion\Sqids\Concerns\HasSqids;
@@ -73,6 +74,9 @@ class Project extends Model implements HasMedia
     public const REFERENCE = 'reference';
 
     public const REFERENCE_MAX_EDGE = 1536;
+
+    /** How much of the shared documents goes into a prompt, in characters; a functional design is far shorter. */
+    public const DOCUMENTS_MAX_LENGTH = 20000;
 
     /**
      * The custom property holding a reference's one-line description.
@@ -157,6 +161,22 @@ class Project extends Model implements HasMedia
             ->pluck('content')
             ->map(fn(string $content) => trim(substr($content, (int) strpos($content, DocumentText::SHARED))))
             ->join("\n\n");
+    }
+
+    /**
+     * The shared documents as a section for a prompt: what they are and their
+     * text, cut off when they are very long. Empty without documents.
+     */
+    public function documentsBrief(): string
+    {
+        $documents = $this->sharedDocuments();
+
+        if ($documents === '') {
+            return '';
+        }
+
+        return "Documents the director shared at the project setup, such as the functional design. They are the source for what the course and each shot are about:\n"
+            . Str::limit($documents, self::DOCUMENTS_MAX_LENGTH, "\n(The rest of the documents is left out.)");
     }
 
     /**

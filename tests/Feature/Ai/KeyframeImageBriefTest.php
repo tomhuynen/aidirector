@@ -210,3 +210,21 @@ it('names hands by the side of the frame and never lets arms cross', function ()
         ->and((string) (new App\Ai\Agents\TweakInterpreter($keyframe, []))->instructions())
         ->toContain('have the hand on that side do it instead');
 });
+
+it('gives the plan director and the planner the documents shared at the project setup', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the gate.']);
+    $conversation = (string) Illuminate\Support\Str::uuid();
+    $shot->project->forceFill(['conversation_id' => $conversation])->save();
+    Laravel\Ai\Models\ConversationMessage::query()->create([
+        'id' => (string) Illuminate\Support\Str::uuid(), 'conversation_id' => $conversation, 'agent' => 'intake', 'role' => 'user',
+        'content' => "Here it is\n\n" . App\Support\Intake\DocumentText::SHARED . " \"design.txt\":\n<<<\n1. Welcome\n   Takeaway: Your safety is our highest priority.\n>>>",
+        'attachments' => '[]', 'tool_calls' => '[]', 'tool_results' => '[]', 'usage' => '[]', 'meta' => '[]',
+    ]);
+    $shot->load('project');
+
+    expect((new App\Ai\Agents\PlanDirector($shot, []))->promptFor('what is the first takeaway from the plan?'))
+        ->toContain('Documents the director shared at the project setup, such as the functional design.')
+        ->toContain('Takeaway: Your safety is our highest priority.')
+        ->and((new App\Ai\Agents\StorylineWriter($shot))->promptFor())
+        ->toContain('Takeaway: Your safety is our highest priority.');
+});

@@ -170,7 +170,7 @@ describe('reference images', function () {
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Show only this person, full body')
             && $prompt->contains('Security guard (person): A tall woman in a dark blue uniform.')
-            && $prompt->contains('The attached image is a keyframe in which Security guard appears.')
+            && $prompt->contains('The first attached image is a keyframe in which Security guard appears.')
             && $prompt->size === '1:1'
             && $prompt->attachments->first()->content() === $firstBytes);
 
