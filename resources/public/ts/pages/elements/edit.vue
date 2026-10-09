@@ -15,8 +15,19 @@
             v-if="element"
             class="relative aspect-square overflow-hidden rounded-xl border border-border bg-paper-deep"
           >
-            <img v-if="chosen" :src="chosen.imageUrl" :alt="element.name" class="size-full object-cover" />
+            <img
+              v-if="chosen && !element.rendering"
+              :src="chosen.imageUrl"
+              :alt="element.name"
+              class="size-full object-cover"
+            />
             <Placeholder v-else class="size-full rounded-none border-0 bg-paper-deep" />
+            <RenderProgress
+              :progress-key="`element:${element.id}`"
+              :active="Boolean(element.rendering)"
+              :seconds="progressSeconds"
+              :image-url="chosen?.imageUrl"
+            />
           </div>
 
           <div v-else class="space-y-2">
@@ -217,6 +228,7 @@ import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import Placeholder from '@public:components/editor/Placeholder.vue'
+import RenderProgress from '@public:components/editor/RenderProgress.vue'
 import ElementPicker from '@public:components/ElementPicker.vue'
 import InputError from '@public:components/Form/InputError.vue'
 import Page from '@public:components/Page.vue'
@@ -284,6 +296,32 @@ const choose = (version: number) => {
   )
 }
 
+/**
+ * A change to the picture runs on the slower edit model; a new description draws it again on the
+ * quick image model. Remembered per element, so the progress keeps its pace after a reload.
+ */
+const EDITING_KEY = 'element-editing'
+const readEditing = (): Record<string, boolean> => {
+  try {
+    return JSON.parse(sessionStorage.getItem(EDITING_KEY) ?? '{}') as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
+const editing = ref(props.element ? (readEditing()[props.element.id] ?? false) : false)
+const rememberEditing = (value: boolean) => {
+  editing.value = value
+  if (!props.element) return
+  try {
+    sessionStorage.setItem(EDITING_KEY, JSON.stringify({ ...readEditing(), [props.element.id]: value }))
+  } catch {
+    // Without storage the pace falls back to drawing after a reload.
+  }
+}
+const progressSeconds = computed(() =>
+  editing.value ? (props.renderSeconds?.edit ?? 90) : (props.renderSeconds?.draw ?? 15),
+)
+
 const generating = computed(() => form.processing || Boolean(props.element?.rendering) || uploads.busy.value)
 
 const canSave = computed(() => form.name.trim() !== '' && form.description.trim() !== '')
@@ -296,7 +334,11 @@ const buttonLabel = computed(() => {
   return $t('Save')
 })
 
-const save = () =>
+const save = () => {
+  rememberEditing(
+    Boolean(props.element?.imageUrl) && (form.change.trim() !== '' || (including.value && form.includes.length > 0)),
+  )
+
   form
     .transform((data) => ({
       ...data,
@@ -310,6 +352,7 @@ const save = () =>
         including.value = false
       },
     })
+}
 
 /**
  * While the image is being drawn, the page refreshes the element until it is done.

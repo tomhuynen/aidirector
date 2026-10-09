@@ -42,16 +42,13 @@
         </VideoActions>
         <FirstKeyframeChooser
           v-if="choosing.active && keyframes[0] && !checkingFirst"
-          v-model:selected="selectedOption"
           :options="choosing.plates ?? keyframes[0]?.renders ?? []"
           :option-count="choosing.optionCount"
           :field="choosing.plates ? 'plate' : 'render'"
           :aspect-ratio="aspectRatio"
           :pending="choosing.pending"
           :choose-url="choosing.chooseUrl"
-          :more-url="choosing.moreUrl"
           :adjusting="choosing.adjusting"
-          :reset-url="choosing.resetUrl"
         />
         <div v-else class="flex min-h-0 flex-1 items-center justify-center">
           <video
@@ -71,7 +68,23 @@
             class="relative flex max-h-full max-w-full items-end justify-center"
             :style="frameSize"
           >
+            <!-- Keyframe 1 on the chosen place: clicking it confirms it, as saying yes in the chat does. -->
+            <button
+              v-if="canConfirmFirst"
+              type="button"
+              class="group size-full cursor-pointer"
+              :disabled="confirming.processing"
+              :aria-label="$t('Use this keyframe')"
+              @click="confirmFirst"
+            >
+              <img
+                :src="selected.imageUrl"
+                :alt="selected.title"
+                class="size-full rounded-xl border border-border bg-card object-cover transition group-hover:border-signal group-hover:ring-4 group-hover:ring-signal/30"
+              />
+            </button>
             <img
+              v-else
               :src="selected.imageUrl"
               :alt="selected.title"
               :class="
@@ -122,14 +135,7 @@
             </div>
           </Placeholder>
         </div>
-        <FirstKeyframeActions
-          v-if="checkingFirst"
-          :selected="firstRender"
-          :choose-url="choosing.chooseUrl"
-          :more-url="choosing.moreUrl"
-          :reset-url="choosing.resetUrl"
-          :disabled="choosing.pending || Boolean(choosing.adjusting) || Boolean(keyframes[0]?.rendering)"
-        />
+        <InputError v-if="checkingFirst" :message="confirming.errors.render" />
       </section>
 
       <!-- The conversation about the shot goes on here; the panels below stay for now, hidden. -->
@@ -145,7 +151,7 @@
           :elements="chat.elements"
           :new-elements="chat.newElements"
           :elements-url="chat.elementsUrl"
-          :waiting-for="null"
+          :waiting-for="chat.waitingFor ?? null"
           :target="chatTarget"
         />
       </aside>
@@ -156,7 +162,7 @@
         :plates="Boolean(choosing.plates)"
         :on-plate="Boolean(choosing.resetUrl)"
         :steps="keyframes.map((keyframe) => keyframe.title)"
-        :selected="selectedOption"
+        :selected="null"
         :busy="choosing.pending || Boolean(choosing.adjusting)"
       />
       <NewKeyframeInspector
@@ -191,13 +197,13 @@
                 $t('The images are being generated. This takes a minute or two.')
               }}</template>
               <template v-else-if="choosing.active && choosing.plates">{{
-                $t('Choose the place. Every keyframe is drawn on it.')
+                $t('Click the place you like, or tell me in the chat. Every keyframe is drawn on it.')
               }}</template>
               <template v-else-if="choosing.active && choosing.resetUrl">{{
-                $t('Keyframe 1 on the chosen place. The others are drawn once you use it.')
+                $t('Keyframe 1 on the chosen place. Click it or say yes to draw the others.')
               }}</template>
               <template v-else-if="choosing.active">{{
-                $t('Choose the first keyframe. The others are drawn to match it.')
+                $t('Click the first keyframe you like, or tell me in the chat. The others are drawn to match it.')
               }}</template>
               <template v-else-if="presenter">{{
                 $t('A presenter: the keyframe is the still the person speaks from, lip-synced, in every language.')
@@ -298,22 +304,22 @@
               @click="selectById(keyframe.id)"
             >
               <img
-                v-if="keyframe.thumbnailUrl"
+                v-if="keyframe.thumbnailUrl && !keyframe.rendering"
                 :src="keyframe.thumbnailUrl"
                 :alt="keyframe.title"
                 draggable="false"
-                :class="cn('size-full object-cover', keyframe.rendering && 'opacity-50')"
+                class="size-full object-cover"
               />
               <Placeholder v-else class="size-full rounded-none border-0 bg-card" />
-              <span
-                v-if="keyframe.rendering"
-                class="absolute inset-0 flex items-center justify-center bg-background/40 text-signal"
-              >
-                <LoaderCircle class="size-5 animate-spin" />
-              </span>
+              <RenderProgress
+                :progress-key="`keyframe:${keyframe.id}`"
+                :active="keyframe.rendering"
+                :seconds="renderSeconds.keyframe"
+                :image-url="keyframe.thumbnailUrl"
+              />
               <!-- A light shade over the image, so the warning stands out. -->
               <span
-                v-else-if="issuesFor(keyframe.id)"
+                v-if="!keyframe.rendering && issuesFor(keyframe.id)"
                 class="absolute inset-0 bg-black/10"
                 :title="$t('The check found something here')"
               >
@@ -427,9 +433,15 @@
               class="absolute inset-0 size-full object-cover"
             />
             <Placeholder v-else class="absolute inset-0 size-full rounded-none border-0 bg-card" />
-            <LoaderCircle v-if="video.pending" class="relative size-6 animate-spin text-signal" />
+            <RenderProgress
+              :progress-key="`video:${video.generateUrl}`"
+              :active="video.pending"
+              :seconds="renderSeconds.video"
+              :started-at="video.submittedAt"
+              :image-url="keyframes[0]?.thumbnailUrl"
+            />
             <span
-              v-else-if="video.url"
+              v-if="!video.pending && video.url"
               class="relative flex size-11 items-center justify-center rounded-full bg-background/60 backdrop-blur-sm"
             >
               <Play class="size-5 fill-current" />
@@ -480,7 +492,6 @@ import {
 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
-import FirstKeyframeActions from './FirstKeyframeActions.vue'
 import FirstKeyframeChooser from './FirstKeyframeChooser.vue'
 import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
 import KeyframeInspector from './KeyframeInspector.vue'
@@ -489,6 +500,7 @@ import KeyframeMover from './KeyframeMover.vue'
 import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import PlanChat, { type ChatTarget, type PlanChatTurn } from './PlanChat.vue'
+import RenderProgress from './RenderProgress.vue'
 import VideoActions from './VideoActions.vue'
 
 export type PanelIssueGroup = {
@@ -551,7 +563,6 @@ export type PanelChoosing = {
   pending: boolean
   optionCount: number
   chooseUrl: string
-  moreUrl: string
   adjustUrl?: string
   adjusting?: boolean
   /** Empty places to choose from instead of options for keyframe 1. */
@@ -573,6 +584,8 @@ export type PanelVideo = {
   resolution: string
   resolutions: string[]
   generateUrl: string
+  /** When the video was handed to the video model; null until then. */
+  submittedAt?: string | null
   /** A presenter's video per language, each with its own sound. */
   languages?: { locale: string; name: string; url: string | null; downloadUrl: string | null }[]
 }
@@ -586,6 +599,8 @@ const props = defineProps<{
     elements: { id: string; type: string; name: string; imageUrl: string | null; rendering?: boolean }[]
     newElements?: { name: string; type: string; description: string }[]
     elementsUrl?: string
+    /** What the keyframes wait for before they are drawn, such as a picture still being made. */
+    waitingFor?: string | null
   }
   keyframes: PanelKeyframe[]
   aspectRatio: string
@@ -594,6 +609,8 @@ const props = defineProps<{
   error?: string | null
   imagesUrl: string
   video: PanelVideo
+  /** How long a keyframe image and a video usually take, in seconds. */
+  renderSeconds?: { keyframe: number; video: number }
   choosing: PanelChoosing
   /** Every keyframe is a separate still with its own place, joined with crossfades. */
   montage?: boolean
@@ -613,39 +630,21 @@ const props = defineProps<{
 
 const selectedIndex = ref(0)
 
-/** The keyframe 1 option the director selected, shared by the options and the column that adjusts them. */
-const selectedOption = ref<number | null>(null)
+const renderSeconds = computed(() => props.renderSeconds ?? { keyframe: 60, video: 180 })
 
 /** The inspectors of a keyframe and of keyframe 1 are kept, but the chat takes their place. */
 const showInspectors = false
 
-/** What the chat is about: the selected place or option while choosing, otherwise the selected keyframe. */
-const chatTarget = computed<ChatTarget>(() => {
-  if (props.choosing.active) {
-    if (selectedOption.value === null) return null
-
-    const number =
-      (props.choosing.plates ?? props.keyframes[0]?.renders ?? []).findIndex(
-        (option) => option.id === selectedOption.value,
-      ) + 1
-
-    return props.choosing.plates
-      ? { kind: 'place', option: selectedOption.value, label: $t('About place :n', { n: String(number) }) }
-      : {
-          kind: 'option',
-          option: selectedOption.value,
-          label: $t('About option :n for keyframe 1', { n: String(number) }),
-        }
-  }
-
-  return selected.value
+/** What the chat is about once the keyframes are drawn: the selected keyframe. While choosing, the chat sees what is on screen. */
+const chatTarget = computed<ChatTarget>(() =>
+  !props.choosing.active && selected.value
     ? {
         kind: 'keyframe',
         keyframe: selected.value.id,
         label: $t('About keyframe :n · :title', { n: String(selectedIndex.value + 1), title: selected.value.title }),
       }
-    : null
-})
+    : null,
+)
 /** Moving a person in the selected keyframe by hand; stops when another keyframe is selected. */
 const mover = createKeyframeMover()
 
@@ -731,6 +730,20 @@ watch([checkingFirst, selectedIndex], ([checking, index]) => {
 
 /** The version of keyframe 1 that is used when the director confirms it. */
 const firstRender = computed(() => props.keyframes[0]?.renders.find((render) => render.chosen)?.id ?? null)
+
+const canConfirmFirst = computed(
+  () =>
+    checkingFirst.value &&
+    selectedIndex.value === 0 &&
+    firstRender.value !== null &&
+    !props.choosing.pending &&
+    !props.keyframes[0]?.rendering,
+)
+
+const confirming = useForm<{ render: number | null }>({ render: null })
+
+const confirmFirst = () =>
+  confirming.transform(() => ({ render: firstRender.value })).post(props.choosing.chooseUrl, { preserveScroll: true })
 
 watch(
   () => selected.value?.id,

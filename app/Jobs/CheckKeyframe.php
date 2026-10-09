@@ -14,13 +14,14 @@ use Illuminate\Support\Facades\Config;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 /**
- * Checks after drawing, without holding the keyframe up, whether the place
- * stayed the same as in keyframe 1: shifted floor lines, door frames or
- * backgrounds. What it finds is kept on the render as notes the director can
- * have fixed or dismiss; it never redraws by itself.
+ * Checks a drawn keyframe after it is shown, without holding it up: whether
+ * the people, the objects and their state and the point of the keyframe are
+ * right. What it finds is kept on the render as notes; the plan director
+ * reports them in the chat once the shot review is done. It never redraws by
+ * itself.
  */
 #[DeleteWhenMissingModels]
-class CheckKeyframePlace implements ShouldQueue
+class CheckKeyframe implements ShouldQueue
 {
     use FollowsPlan;
     use Queueable;
@@ -38,11 +39,11 @@ class CheckKeyframePlace implements ShouldQueue
     }
 
     /**
-     * Queue the place check for a render of a keyframe after keyframe 1, when checks are on.
+     * Queue the check for a keyframe's render, when checks are on.
      */
     public static function start(Keyframe $keyframe, Media $render): void
     {
-        if (Config::get('pipeline.keyframe_check') && Config::get('pipeline.place_check') && $keyframe->position > 1) {
+        if (Config::get('pipeline.keyframe_check')) {
             // Shown as checking in the editor, without blocking the keyframe for changes.
             $keyframe->forceFill(['render_stage' => Keyframe::STAGE_CHECKING])->save();
             self::dispatch($keyframe, (int) $render->id);
@@ -57,15 +58,17 @@ class CheckKeyframePlace implements ShouldQueue
         $render = $keyframe?->renders()->firstWhere('id', $this->renderId);
 
         try {
-            // The keyframe was drawn again or moved to the front meanwhile.
-            if ($keyframe === null || $render === null || $keyframe->position === 1) {
+            // The keyframe was drawn again meanwhile; that render gets its own check.
+            if ($keyframe === null || $render === null || $keyframe->render_id !== $render->id) {
                 return;
             }
 
-            $issues = $painter->checkPlace($keyframe, $render, $painter->referencesFor($keyframe, $siblings));
+            $issues = $painter->check($keyframe, $render, $siblings);
 
             if ($issues !== null) {
-                $render->setCustomProperty(Keyframe::PLACE_ISSUES, $issues)->save();
+                $issues === []
+                    ? $render->forgetCustomProperty(Keyframe::CHECK_ISSUES)->save()
+                    : $render->setCustomProperty(Keyframe::CHECK_ISSUES, $issues)->save();
             }
         } finally {
             $this->doneChecking();

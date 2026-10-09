@@ -13,7 +13,8 @@ use Laravel\Ai\Models\Conversation;
 use Laravel\Ai\Models\ConversationMessage;
 
 /**
- * Removes everything a project owns before the project itself goes. Each
+ * When a project is deleted for good, removes everything it owns before the
+ * project itself goes; a project that is only deleted keeps it all. Each
  * child is deleted as a model, so its own listeners and media cleanup run
  * and no rendered image, sheet or video is left on disk. The usage log
  * (generations) is kept as cost history.
@@ -24,7 +25,13 @@ class DeleteProjectRelations
     {
         $project = $event->project;
 
-        $project->allShots()->get()->each(fn(Shot $shot) => $shot->delete());
+        // Only deleted for good; a deleted project keeps everything, so what the system can learn from it stays.
+        if (! $project->isForceDeleting()) {
+            return;
+        }
+
+        // Deleted shots too: a project that goes takes everything with it.
+        $project->allShots()->withTrashed()->get()->each(fn(Shot $shot) => $shot->forceDelete());
 
         $project->elements()->get()->each(fn(Element $element) => $element->delete());
 

@@ -11,6 +11,7 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
+use App\Support\Shots\FirstKeyframeChoice;
 use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -134,6 +135,10 @@ class GenerateKeyframes implements ShouldQueue
             'status' => $hasOptions ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
 
+        if ($hasOptions) {
+            $shot->say(self::optionCount() === 1 ? FirstKeyframeChoice::confirmQuestion() : __('The options for keyframe 1 are ready. Click the one you like or tell me which one, or ask me for more options.'));
+        }
+
         $url = route('public.shots.view', [$shot->project, $shot]);
 
         ($hasOptions
@@ -166,6 +171,10 @@ class GenerateKeyframes implements ShouldQueue
             },
             'status' => $hasPlates ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
+
+        if ($hasPlates) {
+            $shot->say(__('The places are ready. Click the one you like or tell me which one, or ask me for more places.'));
+        }
 
         $url = route('public.shots.view', [$shot->project, $shot]);
 

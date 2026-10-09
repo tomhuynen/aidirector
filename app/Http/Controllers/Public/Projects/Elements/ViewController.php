@@ -10,6 +10,7 @@ use App\Http\Resources\Public\ProjectResource;
 use App\Models\Element;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
+use App\Support\Shots\RenderEstimates;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
@@ -52,6 +53,12 @@ class ViewController
         return Inertia::render('elements/edit', [
             'project' => fn() => ProjectResource::make($project),
             'element' => fn() => ElementResource::make($element),
+            /**
+             * How long a picture usually takes, in seconds, for the progress shown while it is made: drawn anew or changed.
+             *
+             * @var array{draw: int, edit: int}
+             */
+            'renderSeconds' => fn() => app(RenderEstimates::class)->elementSeconds(),
             /** @var array{value: string, label: string, plural: string} */
             'type' => fn() => ['value' => $element->type->value, 'label' => $element->type->description(), 'plural' => $element->type->plural()],
             /** @var string */

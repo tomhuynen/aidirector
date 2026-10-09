@@ -8,7 +8,7 @@ use App\Ai\Agents\KeyframeChecker;
 use App\Ai\Agents\ShotReviewer;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Enums\ElementType;
-use App\Jobs\CheckKeyframePlace;
+use App\Jobs\CheckKeyframe;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
@@ -17,6 +17,7 @@ use App\Support\Images\BackgroundDrift;
 use App\Support\Images\Cutout;
 use App\Support\Images\OpenRouterImageClient;
 use App\Support\Images\PlaceComposite;
+use App\Support\Images\PlaceObjects;
 use App\Support\Images\ReplicateClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
@@ -38,6 +39,7 @@ class KeyframePainter
         private readonly BackgroundDrift $drift,
         private readonly Cutout $cutout,
         private readonly PlaceComposite $composite,
+        private readonly PlaceObjects $placeObjects,
     ) {}
 
     /**
@@ -192,28 +194,10 @@ class KeyframePainter
         $render = $this->paintOn($this->baseFor($keyframe, $siblings), $keyframe, $extra === '' ? $prompt : $prompt . "\n" . $extra, $references->images(), $choose, labels: $references->labels());
         $keyframe->load('media');
 
-        // Options for keyframe 1 are judged by the director; every keyframe that is used straight away is checked once.
+        // Options for keyframe 1 are judged by the director; every keyframe that is used straight away is checked once, after it is shown.
         // A copy the director has not described yet repeats another keyframe's plan, so there is nothing of its own to check it against.
-        if (! $choose || ! Config::get('pipeline.keyframe_check') || $shot->plannedKeyframeIsCopy($keyframe->position)) {
-            return $render;
-        }
-
-        // The keyframe stays busy while it is checked, so the director sees why it takes longer.
-        $keyframe->forceFill(['rendering' => true, 'render_stage' => Keyframe::STAGE_CHECKING])->save();
-        $check = $this->check($keyframe, $render, $references);
-
-        $keyframe->forceFill(['rendering' => false, 'render_stage' => null])->save();
-
-        // The check advises and never redraws by itself: what it found becomes notes the director can have fixed or dismiss.
-        if ($check !== null && ! $check['passes']) {
-            $render->setCustomProperty(Keyframe::CHECK_ISSUES, $check['problems'])->save();
-        }
-
-        $keyframe->load('media');
-
-        // A composite has the place itself as its background; there is no shift to look for.
-        if ($render->getCustomProperty(Keyframe::COMPOSITED) !== true) {
-            CheckKeyframePlace::start($keyframe, $render);
+        if ($choose && ! $shot->plannedKeyframeIsCopy($keyframe->position)) {
+            CheckKeyframe::start($keyframe, $render);
         }
 
         return $render;
@@ -364,15 +348,18 @@ class KeyframePainter
 
     /**
      * Has the checker compare a render with its references, each for its own
-     * part: keyframe 1 for the place, the keyframe the people first appear in
-     * (or their picture) for how they look, and the keyframe before for the
-     * state of objects. High issues count against the render. Returns null
-     * when the check itself fails, so a broken check never holds up the shot.
+     * part: the place or keyframe 1, the pictures of the people for who they
+     * are, and the keyframe before for the state of objects. Returns the
+     * problems a viewer would see, empty when there are none, or null when
+     * the check itself fails, so a broken check never holds up the shot.
      *
-     * @return array{passes: bool, problems: list<string>, fix: string}|null
+     * @param  Collection<int, Keyframe>  $siblings
+     * @return list<string>|null
      */
-    private function check(Keyframe $keyframe, Media $render, KeyframeReferences $references): ?array
+    public function check(Keyframe $keyframe, Media $render, Collection $siblings): ?array
     {
+        $references = $this->referencesFor($keyframe, $siblings);
+
         if ($references->first === null && ! $keyframe->shot->drawsStandalone()) {
             return null;
         }
@@ -381,44 +368,9 @@ class KeyframePainter
         $images[] = $this->referenceFor($render);
         $roles[] = 'the keyframe to check';
 
-        $checker = new KeyframeChecker($keyframe, $roles);
+        // On a composite the place is the place itself, so only the people, objects and the point of the keyframe are checked.
+        $checker = new KeyframeChecker($keyframe, $roles, placeIsFixed: $render->getCustomProperty(Keyframe::COMPOSITED) === true);
         $result = $this->runChecker($keyframe, $checker, $images, (string) Config::get('pipeline.models.keyframe_check'));
-
-        if ($result === null) {
-            return null;
-        }
-
-        $high = array_values(array_filter($result['issues'], fn(array $issue) => $issue['severity'] === 'high'));
-        $problems = array_map(fn(array $issue) => $issue['change'], $high);
-
-        return [
-            'passes' => $problems === [],
-            'problems' => $problems,
-            'fix' => $problems === [] ? '' : 'Keep everything else as it is and correct this: ' . implode(' ', $problems),
-        ];
-    }
-
-    /**
-     * Has the place checker compare a render with keyframe 1, for shifts in
-     * the place that the full check tends to miss. Returns the changes a
-     * viewer would see, or null when the check fails.
-     *
-     * @return list<string>|null
-     */
-    public function checkPlace(Keyframe $keyframe, Media $render, KeyframeReferences $references): ?array
-    {
-        if ($references->first === null) {
-            return null;
-        }
-
-        // The keyframe before shows whether a change jumps between the two, or was already there.
-        $before = $keyframe->position > ($references->firstIsPlate ? 1 : 2) ? $references->previous : null;
-        $checker = new KeyframeChecker($keyframe, array_values(array_filter([
-            'keyframe 1 of the shot, the reference for the place',
-            $before !== null ? 'the keyframe directly before the one to check' : null,
-            'the keyframe to check',
-        ])), scope: KeyframeChecker::PLACE);
-        $result = $this->runChecker($keyframe, $checker, array_values(array_filter([$references->first, $before, $this->referenceFor($render)])), (string) Config::get('pipeline.models.place_check'));
 
         if ($result === null) {
             return null;
@@ -829,23 +781,44 @@ class KeyframePainter
 
     /**
      * Keeps of a render drawn on a place only the people, their shadows and
-     * the things named in the keyframe, and puts them on the place itself.
-     * The render is replaced by the composite. When the cut-out fails, the
-     * render stays as it was drawn.
+     * the objects they touch, and puts them on the place itself; objects
+     * nobody touches stay exactly as in the place. The render is replaced by
+     * the composite. It stays as it was drawn when the people cannot be cut
+     * out, or when an object of the keyframe cannot be found in the place:
+     * its state might have changed, and half a change is worse than a
+     * background that moved a little.
      */
     public function compositeOn(Media $place, Keyframe $keyframe, Media $render): Media
     {
         $drawn = $this->bytes($render);
-        // The objects take their state from the keyframe, such as a handset lifted off its cradle; places and people are covered otherwise.
-        $things = $keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT)->pluck('name')->values()->all();
 
         try {
-            $composite = $this->composite->keyframe(
-                $this->bytes($place),
-                $drawn,
-                $this->cutout->people($drawn),
-                array_map(fn(string $name) => $this->cutout->thing($drawn, $name), $things),
-            );
+            $people = $this->cutout->people($drawn);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $render;
+        }
+
+        $areas = [];
+
+        foreach ($keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
+            $area = $this->placeObjects->maskIn($place, $object);
+
+            if ($area === null) {
+                $render->setCustomProperty(Keyframe::NOT_COMPOSITED, __(':name could not be found in the place, so the keyframe is kept as it was drawn.', ['name' => $object->name]))->save();
+
+                return $render;
+            }
+
+            // An object someone touches takes its state from the drawing, such as a handset off its cradle.
+            if ($this->composite->touches($area, $people)) {
+                $areas[] = $area;
+            }
+        }
+
+        try {
+            $composite = $this->composite->keyframe($this->bytes($place), $drawn, $people, $areas);
         } catch (Throwable $exception) {
             report($exception);
 
@@ -920,11 +893,76 @@ class KeyframePainter
      */
     private function placeChanges(Shot $shot, int $position): array
     {
-        return collect($shot->storylineKeyframes())
+        // What the plan changes in the place, from keyframe 2 on; then what the director changed in it, from any keyframe on.
+        $planned = collect($shot->storylineKeyframes())
             ->map(fn(array $keyframe, int $index) => ['position' => $index + 1, 'change' => trim((string) ($keyframe['place_change'] ?? '')), 'part' => trim((string) ($keyframe['place_part'] ?? ''))])
-            ->filter(fn(array $change) => $change['position'] > 1 && $change['position'] <= $position && $change['change'] !== '')
+            ->filter(fn(array $change) => $change['position'] > 1);
+        $edits = collect($shot->placeEdits())->map(fn(array $edit) => ['position' => $edit['from'], 'change' => $edit['change'], 'part' => $edit['part']]);
+
+        return $planned->concat($edits)
+            ->filter(fn(array $change) => $change['position'] <= $position && $change['change'] !== '')
+            ->sortBy('position')
             ->values()
             ->all();
+    }
+
+    /**
+     * Puts the people of a keyframe drawn on the place onto a newer version
+     * of that place, such as one without a door handle, without drawing them
+     * again: they, their shadows and the objects they touch are cut out of
+     * the current version. Returns the new version, or null when the cut-out
+     * fails or the keyframe is not a composite, so it has to be drawn again.
+     */
+    public function recomposite(Keyframe $keyframe, Media $place): ?Media
+    {
+        $render = $keyframe->render();
+
+        if ($render === null || $render->getCustomProperty(Keyframe::COMPOSITED) !== true) {
+            return null;
+        }
+
+        $current = $this->bytes($render);
+
+        try {
+            $people = $this->cutout->people($current);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        $areas = [];
+
+        foreach ($keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
+            $area = $this->placeObjects->maskIn($place, $object);
+
+            if ($area === null) {
+                return null;
+            }
+
+            if ($this->composite->touches($area, $people)) {
+                $areas[] = $area;
+            }
+        }
+
+        try {
+            $composite = $this->composite->keyframe($this->bytes($place), $current, $people, $areas);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        $kept = $keyframe
+            ->addMediaFromString($composite)
+            ->usingFileName("keyframe-{$keyframe->position}.png")
+            ->withCustomProperties($render->custom_properties)
+            ->toMediaCollection(Keyframe::RENDERS);
+        $keyframe->forceFill(['render_id' => $kept->id])->save();
+        $render->delete();
+        $keyframe->load('media');
+
+        return $kept;
     }
 
     /**

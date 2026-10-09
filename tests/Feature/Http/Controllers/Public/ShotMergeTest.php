@@ -206,12 +206,16 @@ describe('merged shot', function () {
             ->and($this->two->fresh()->video())->not->toBeNull();
     });
 
-    it('takes its parts along when the merged shot is deleted', function () {
+    it('keeps its parts with the deleted merged shot, and takes them along when it is deleted for good', function () {
         actingAs($this->director, 'director')
             ->delete(route('public.shots.destroy', [$this->project, $this->merged]));
 
-        expect(Shot::query()->whereKey([$this->two->id, $this->three->id])->count())->toBe(0)
-            ->and($this->project->shots()->pluck('position')->all())->toBe([1, 2]);
+        expect($this->project->shots()->pluck('position')->all())->toBe([1, 2])
+            ->and(Shot::query()->whereKey([$this->two->id, $this->three->id])->count())->toBe(2);
+
+        Shot::withTrashed()->findOrFail($this->merged->id)->forceDelete();
+
+        expect(Shot::query()->whereKey([$this->two->id, $this->three->id])->count())->toBe(0);
     });
 
     it('marks the merged shot failed when the clips cannot be joined', function () {

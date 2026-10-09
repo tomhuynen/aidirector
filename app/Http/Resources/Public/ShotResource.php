@@ -12,6 +12,7 @@ use App\Jobs\GenerateVoiceOver;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Support\Decisions\ShotIssues;
+use App\Support\Shots\RenderEstimates;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -117,6 +118,21 @@ class ShotResource extends JsonResource
             'videoResolutions' => config('pipeline.video.resolutions'),
             /** @var string|null */
             'videoError' => $this->video_error,
+            /**
+             * When the video was handed to the video model; null until then.
+             *
+             * @var string|null
+             */
+            'videoSubmittedAt' => $this->video_submitted_at?->toIso8601String(),
+            /**
+             * How long a keyframe image and a video usually take, in seconds, for the progress shown while they are made.
+             *
+             * @var array{keyframe: int, video: int}
+             */
+            'renderSeconds' => [
+                'keyframe' => app(RenderEstimates::class)->keyframeSeconds(),
+                'video' => app(RenderEstimates::class)->videoSeconds(),
+            ],
             /** @var string|null */
             'videoUrl' => $this->mediaUrl($this->video()),
             /** @var string|null */

@@ -10,6 +10,8 @@ use App\Http\Controllers\Public\Auth\ResetPasswordController;
 use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
 use App\Http\Controllers\Public\Notifications\IndexController as NotificationIndexController;
 use App\Http\Controllers\Public\Notifications\ReadController as NotificationReadController;
+use App\Http\Controllers\Public\Projects\Branding\DestroyController as BrandingDestroyController;
+use App\Http\Controllers\Public\Projects\Branding\StoreController as BrandingStoreController;
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CoverController as ProjectCoverController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
@@ -93,6 +95,8 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{project}/rules/{rule}/accept', [ProjectRuleController::class, 'accept'])->scopeBindings()->name('rules.accept');
             Route::post('{project}/rules/{rule}/dismiss', [ProjectRuleController::class, 'dismiss'])->scopeBindings()->name('rules.dismiss');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
+            Route::post('{project}/branding', [BrandingStoreController::class, 'store'])->name('branding.store');
+            Route::delete('{project}/branding/{logo}', [BrandingDestroyController::class, 'destroy'])->name('branding.destroy');
         });
 
     Route::prefix('projects/{project}/elements')

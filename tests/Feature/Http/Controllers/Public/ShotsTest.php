@@ -117,6 +117,30 @@ describe('create', function () {
         expect($shot->fresh()->takeaway)->toBe('Wear your badge visibly on site');
     });
 
+    it('keeps the framing size the plan chat agreed, and asks for coverage and a story', function () {
+        Queue::fake();
+        PlanDirector::fake([
+            directorReply(['proposal' => agreedPlan(['framing' => 'medium'])]),
+            directorReply(['proposal' => agreedPlan(['storyline' => 'Shorter.', 'framing' => 'zoomed'])]),
+        ]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'yes, write it');
+
+        expect($shot->fresh()->storylineFraming()['size'])->toBe('medium')
+            ->and($shot->fresh()->shotSize())->toBe(App\Enums\ShotSize::MEDIUM);
+
+        $shot->fresh()->forceFill(['status' => ShotStatus::STORYLINE_READY])->save();
+        talkTo($this, $shot, 'make it shorter');
+
+        expect($shot->fresh()->storylineFraming()['size'])->toBe('medium');
+
+        PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Coverage: a takeaway may be told in up to three shots')
+            && str_contains((string) $prompt->agent->instructions(), 'Give it a turn')
+            && str_contains((string) $prompt->agent->instructions(), 'A strong plan for the same takeaway')
+            && str_contains((string) $prompt->agent->instructions(), 'The idea is already a small story'));
+    });
+
     it('talks first, then puts the agreed plan into the shot and draws it', function () {
         Queue::fake();
         $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
@@ -312,7 +336,7 @@ describe('create', function () {
         expect($shot->fresh())
             ->durationInSeconds()->toBe(5)
             ->voice_over->toBeNull()
-            ->and($shot->fresh()->storylineFraming())->toBe(['spot' => 'The counter.', 'seconds' => 5]);
+            ->and($shot->fresh()->storylineFraming())->toBe(['spot' => 'The counter.', 'size' => null, 'seconds' => 5]);
         Queue::assertPushed(App\Jobs\GenerateVoiceOver::class);
     });
 
@@ -425,7 +449,8 @@ describe('reorder and destroy', function () {
             ->delete(route('public.shots.destroy', [$this->project, $second]))
             ->assertRedirect(route('public.shots.view', [$this->project, $third]));
 
-        $this->assertModelMissing($second);
+        // Kept, with what the system can learn from it, but no longer in the film.
+        $this->assertSoftDeleted($second);
         expect($first->fresh()->position)->toBe(1)
             ->and($third->fresh()->position)->toBe(2);
     });

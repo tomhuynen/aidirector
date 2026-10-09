@@ -80,7 +80,7 @@ class ProjectCoverPainter
             'Draw every person, place and object exactly as in its attached image: same faces, clothes, shapes and colours.',
             $listing,
             $styleSheet !== null ? 'The last attached image is the project\'s style reference sheet. Match its rendering style exactly; do not copy its subjects or layout.' : null,
-            'No text, captions, logos or watermarks in the image.',
+            'No text, captions or watermarks in the image, and no logos or brand names except those already on the people and things in their pictures, kept exactly as they are.',
         ]));
 
         $model = Config::get('pipeline.models.image');

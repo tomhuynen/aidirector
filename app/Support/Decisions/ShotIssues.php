@@ -8,6 +8,7 @@ use App\Ai\KeyframePainter;
 use App\Jobs\GenerateKeyframeImage;
 use App\Jobs\TweakKeyframeImage;
 use App\Models\Keyframe;
+use App\Models\ReviewerVerdict;
 use App\Models\Shot;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -89,14 +90,14 @@ class ShotIssues
             $base !== null && $this->painter->isPlace($base)
                 ? TweakKeyframeImage::dispatch($keyframe, 'Nothing else: the people, their poses, where they look, their gestures and what they hold stay exactly as in the current version; only the background is the place\'s own again.' . ($others !== '' ? " Also solve this: {$others}" : ''), fromCheck: true)
                 : GenerateKeyframeImage::dispatch($keyframe);
-            $this->resolve($shot, $keyframes, $found);
+            $this->resolve($shot, $keyframes, $found, ReviewerVerdict::FIXED);
 
             return;
         }
 
         TweakKeyframeImage::dispatch($keyframe, "This is keyframe {$keyframe->position}. A check found these problems with it:\n{$problems}\nChange only what this keyframe needs to solve them.", fromCheck: true, rewrite: true);
 
-        $this->resolve($shot, $keyframes, $found);
+        $this->resolve($shot, $keyframes, $found, ReviewerVerdict::FIXED);
     }
 
     /**
@@ -132,20 +133,69 @@ class ShotIssues
     }
 
     /**
-     * The review's notes and the place check's findings that are not fixed or dismissed yet, in their order.
+     * Every finding that is not fixed or dismissed yet: the review's notes,
+     * the keyframe checks' findings and a background that moved.
      *
      * @param  Collection<int, Keyframe>  $keyframes
-     * @return list<string>
+     * @return list<array{id: string, text: string, problem: string, keyframes: list<int>}>
      */
-    public function openNotes(Shot $shot, Collection $keyframes): array
+    public function open(Shot $shot, Collection $keyframes): array
     {
-        $reviewIds = collect($this->reviewNotes($shot, $keyframes))->map(fn(array $note) => $this->reviewId($note['text']))->all();
+        return array_values(array_filter($this->issues($shot, $keyframes), fn(array $issue) => $issue['id'] !== 'video'));
+    }
 
-        return collect($this->issues($shot, $keyframes))
-            ->filter(fn(array $issue) => in_array($issue['id'], $reviewIds, true) || str_starts_with($issue['id'], 'place-') || str_starts_with($issue['id'], 'found-'))
-            ->map(fn(array $issue) => str_starts_with($issue['id'], 'place-') || str_starts_with($issue['id'], 'found-') ? __('Keyframe :n: :text', ['n' => $issue['keyframes'][0] ?? '', 'text' => $issue['text']]) : $issue['text'])
-            ->values()
-            ->all();
+    /**
+     * Has the keyframes of findings the director agreed with in the chat
+     * redrawn, each once with all of its findings, and takes those findings
+     * off the list. A keyframe that is still being drawn keeps its findings.
+     * Returns the keyframes that are redrawn and those that are busy.
+     *
+     * @param  Collection<int, Keyframe>  $keyframes
+     * @param  list<string>  $ids
+     * @return array{fixed: list<int>, busy: list<int>}
+     */
+    public function fixInChat(Shot $shot, Collection $keyframes, array $ids): array
+    {
+        $issues = collect($this->open($shot, $keyframes))->filter(fn(array $issue) => in_array($issue['id'], $ids, true));
+        $fixed = [];
+        $busy = [];
+
+        foreach ($issues->flatMap(fn(array $issue) => $issue['keyframes'])->unique()->sort() as $position) {
+            $keyframe = $keyframes->firstWhere('position', $position);
+
+            if ($keyframe === null || $keyframe->rendering || $keyframe->render() === null) {
+                $busy[] = $position;
+
+                continue;
+            }
+
+            $problems = $issues->filter(fn(array $issue) => in_array($position, $issue['keyframes'], true))->map(fn(array $issue) => '- ' . $issue['problem'])->join("\n");
+            $keyframe->forceFill(['rendering' => true, 'render_error' => null])->save();
+            TweakKeyframeImage::dispatch($keyframe, "This is keyframe {$position}. A check found these problems with it:\n{$problems}\nChange only what this keyframe needs to solve them.", fromCheck: true, rewrite: true);
+            $fixed[] = $position;
+        }
+
+        // Findings of a busy keyframe stay open; the rest are done.
+        $done = $issues->reject(fn(array $issue) => array_intersect($issue['keyframes'], $busy) !== [])->pluck('id')->all();
+        $this->resolveIds($shot, $keyframes, $done, ReviewerVerdict::FIXED, ReviewerVerdict::VIA_CHAT);
+
+        return ['fixed' => $fixed, 'busy' => $busy];
+    }
+
+    /**
+     * Takes findings off the list by their id, with what the director decided about them.
+     *
+     * @param  Collection<int, Keyframe>  $keyframes
+     * @param  list<string>  $ids
+     */
+    public function resolveIds(Shot $shot, Collection $keyframes, array $ids, string $verdict, string $via): void
+    {
+        foreach (collect($this->open($shot, $keyframes))->filter(fn(array $issue) => in_array($issue['id'], $ids, true)) as $issue) {
+            // One verdict per finding, also when it is about several keyframes.
+            foreach ($issue['keyframes'] === [] ? [null] : $issue['keyframes'] as $index => $position) {
+                $this->resolve($shot->fresh() ?? $shot, $keyframes, ['key' => '', 'position' => $position, 'issues' => [], 'fixable' => false], $verdict, $via, $issue['id'], record: $index === 0);
+            }
+        }
     }
 
     /**
@@ -165,7 +215,7 @@ class ShotIssues
     {
         $keyframes = $shot->keyframes()->with('media')->get();
 
-        $this->resolve($shot, $keyframes, $this->find($shot, $keyframes, $group));
+        $this->resolve($shot, $keyframes, $this->find($shot, $keyframes, $group), ReviewerVerdict::DISMISSED);
     }
 
     /**
@@ -202,17 +252,6 @@ class ShotIssues
                 ];
             }
 
-            $place = array_values(array_filter((array) $keyframe->render()?->getCustomProperty(Keyframe::PLACE_ISSUES, [])));
-
-            if ($place !== []) {
-                $issues[] = [
-                    'id' => "place-{$keyframe->position}",
-                    'text' => __('The place differs from keyframe 1: :what', ['what' => implode(' ', $place)]),
-                    'problem' => 'The place must look exactly like in keyframe 1, and it does not yet: ' . implode(' ', $place),
-                    'keyframes' => [$keyframe->position],
-                ];
-            }
-
             $found = array_values(array_filter((array) $keyframe->render()?->getCustomProperty(Keyframe::CHECK_ISSUES, [])));
 
             if ($found !== []) {
@@ -235,8 +274,10 @@ class ShotIssues
     /**
      * @param  Collection<int, Keyframe>  $keyframes
      * @param  array{key: string, position: int|null, issues: list<string>, fixable: bool}  $group
+     * @param  string|null  $only  only this finding, instead of all of the group's
+     * @param  bool  $record  whether to keep the director's verdict; once per finding
      */
-    private function resolve(Shot $shot, Collection $keyframes, array $group): void
+    private function resolve(Shot $shot, Collection $keyframes, array $group, string $verdict, string $via = ReviewerVerdict::VIA_DECISIONS, ?string $only = null, bool $record = true): void
     {
         $position = $group['position'];
         $resolved = [];
@@ -244,8 +285,24 @@ class ShotIssues
         foreach ($this->issues($shot, $keyframes) as $issue) {
             $belongs = $position === null ? $issue['keyframes'] === [] : in_array($position, $issue['keyframes'], true);
 
-            if (! $belongs) {
+            if (! $belongs || ($only !== null && $issue['id'] !== $only)) {
                 continue;
+            }
+
+            // What the director decided, per reviewer, so it can be measured how often each one is right.
+            if ($record && $issue['id'] !== 'video') {
+                ReviewerVerdict::query()->create([
+                    'shot_id' => $shot->id,
+                    'keyframe' => $position,
+                    'reviewer' => match (true) {
+                        str_starts_with($issue['id'], 'found-') => ReviewerVerdict::CHECK,
+                        str_starts_with($issue['id'], 'moved-') => ReviewerVerdict::DRIFT,
+                        default => ReviewerVerdict::REVIEW,
+                    },
+                    'note' => $issue['text'],
+                    'verdict' => $verdict,
+                    'via' => $via,
+                ]);
             }
 
             if ($issue['id'] === 'video') {
@@ -254,8 +311,6 @@ class ShotIssues
                 $keyframes->firstWhere('position', $position)?->render()?->forgetCustomProperty(Keyframe::CHECK_ISSUES)->save();
             } elseif (str_starts_with($issue['id'], 'moved-')) {
                 $keyframes->firstWhere('position', $position)?->render()?->forgetCustomProperty(Keyframe::BACKGROUND_MOVED)->save();
-            } elseif (str_starts_with($issue['id'], 'place-')) {
-                $keyframes->firstWhere('position', $position)?->render()?->forgetCustomProperty(Keyframe::PLACE_ISSUES)->save();
             } else {
                 $resolved[$issue['id']] = $position ?? 0;
             }

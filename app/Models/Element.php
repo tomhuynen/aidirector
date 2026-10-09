@@ -53,11 +53,22 @@ class Element extends Model implements HasMedia
         'deleting' => ElementDeleting::class,
     ];
 
+    protected static function booted(): void
+    {
+        // The detection words are written from the description, so a new description needs new ones.
+        static::saving(function (Element $element) {
+            if ($element->isDirty('description') && ! $element->isDirty('detection_words')) {
+                $element->detection_words = null;
+            }
+        });
+    }
+
     /**
      * @return array{
      *  type: 'App\Enums\ElementType',
      *  rendering: 'boolean',
      *  settings: 'App\Support\Elements\ElementSettings',
+     *  detection_words: 'array',
      * }
      */
     protected function casts(): array
@@ -66,6 +77,7 @@ class Element extends Model implements HasMedia
             'type' => ElementType::class,
             'rendering' => 'boolean',
             'settings' => ElementSettings::class,
+            'detection_words' => 'array',
         ];
     }
 

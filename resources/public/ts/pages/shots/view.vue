@@ -67,6 +67,7 @@
               elements,
               newElements: shot.newElements,
               elementsUrl: shot.links?.planElements,
+              waitingFor: shot.waitingFor,
             }"
             :keyframes="panelKeyframes"
             :aspect-ratio="aspectRatio"
@@ -87,7 +88,6 @@
               optionCount: usesPlates ? shot.plateOptionCount : shot.firstKeyframeOptions,
               plates: usesPlates ? shot.plateOptions : null,
               chooseUrl: (usesPlates ? shot.links?.plateChoose : shot.links?.firstKeyframeChoose) ?? '#',
-              moreUrl: shot.links?.firstKeyframeMore ?? '#',
               adjustUrl: usesPlates ? shot.links?.plateAdjust : shot.links?.firstKeyframeAdjust,
               adjusting: shot.status === 'first-keyframe-ready' && Boolean(keyframes[0]?.rendering),
               resetUrl: shot.plateChosen ? shot.links?.plateReset : null,
@@ -107,8 +107,10 @@
               resolutions: shot.videoResolutions,
               pending: shot.status === 'video-pending',
               generateUrl: shot.links?.videoGenerate ?? '#',
+              submittedAt: shot.videoSubmittedAt,
               languages: shot.languageVideos,
             }"
+            :render-seconds="shot.renderSeconds"
           />
         </template>
       </div>
@@ -154,8 +156,12 @@ const usesPlates = computed(
 )
 
 /** Nothing drawn yet: the plan is worked out in the plan chat. */
+// A plan that waits to be drawn, such as for a picture still being made, already shows its keyframes, so the layout does not flip.
 const planEditable = computed(
-  () => (props.shot.status === 'storyline-ready' || props.shot.status === 'draft') && props.keyframes.length === 0,
+  () =>
+    (props.shot.status === 'storyline-ready' || props.shot.status === 'draft') &&
+    props.keyframes.length === 0 &&
+    !props.shot.waitingFor,
 )
 
 const panelKeyframes = computed<PanelKeyframe[]>(() =>

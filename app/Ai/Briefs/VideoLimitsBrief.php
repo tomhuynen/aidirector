@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Ai\Briefs;
 
 /**
- * What the image and video models cannot do within one shot, each with why it
- * fails and what to do instead. The planner avoids these; the plan director
+ * The director rules: what the image and video models cannot do within one
+ * shot, each with why it fails and what to do instead. The planner avoids these; the plan director
  * spots them in a story, tells the director in plain words why it will not
  * work, and proposes the alternative.
  */
@@ -67,6 +67,36 @@ class VideoLimitsBrief
                 'risk' => 'Text, numbers, screens or lettering carry the message',
                 'why' => 'the models cannot write',
                 'instead' => 'show it with shapes, colours and what people do',
+            ],
+            [
+                'risk' => 'One person does two things with their hands at the same time, such as holding a phone to the ear while writing or ticking a list',
+                'why' => 'the arms cross in front of the body and the image model draws them at strange angles or loses one',
+                'instead' => 'one action per shot, such as the call in a scene and the ticking in a close-up of the hand; the voice-over can carry the rest',
+            ],
+            [
+                'risk' => 'A hand reaches across the body or behind another person to the object',
+                'why' => 'crossed arms and hidden shoulders come out wrong',
+                'instead' => 'stage it so the hand on the side of the object does the action, with the object beside the person, and name hands by the side of the frame, never as the person\'s own left or right',
+            ],
+            [
+                'risk' => 'The face matters but is seen side-on, under a helmet brim, or with something in front of it, such as a handset or a hand',
+                'why' => 'the image model loses the eyes and the expression',
+                'instead' => 'a three-quarter view towards the camera with nothing in front of the face, or leave the face out and show the hands',
+            ],
+            [
+                'risk' => 'A small change counted step by step over several keyframes, such as one more tick, one more bolt or a rising level each time',
+                'why' => 'the models cannot count or keep the rest exactly the same, and the video model cannot animate small strokes',
+                'instead' => 'only before and after: nothing ticked, then all ticked; the voice-over names the steps',
+            ],
+            [
+                'risk' => 'In a close-up, something is taken out of a holder that stays in view, such as a handset off its cradle or a tool off a wall',
+                'why' => 'the image model keeps the old one in the holder as well and draws it twice',
+                'instead' => 'frame the close-up so the holder is out of view, or show the taking in a scene, where the place keeps the holder right',
+            ],
+            [
+                'risk' => 'Two people who look alike, such as the same helmet and similar clothes, while it matters who does what',
+                'why' => 'the image model mixes them up and swaps their places or actions',
+                'instead' => 'people who clearly differ, such as a hi-vis vest against a striped shirt, and each on their own side of the frame throughout the shot',
             ],
         ];
     }

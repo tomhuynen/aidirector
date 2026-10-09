@@ -51,18 +51,26 @@ function furnishedProject(Project $project, Director $director): void
     $project->update(['conversation_id' => $conversationId]);
 }
 
-it('removes every relation and every file when a project is deleted', function () {
+it('keeps a deleted project with everything it owns, and removes every relation and file when it is deleted for good', function () {
     furnishedProject($this->project, $this->director);
     $other = Project::factory()->ownedBy($this->director)->create();
     $other->addMedia(UploadedFile::fake()->image('keep.jpg'))->toMediaCollection(Project::CONTENT_REFERENCES);
+    $files = Storage::disk(Disk::TENANT->value)->allFiles();
 
-    expect(Storage::disk(Disk::TENANT->value)->allFiles())->not->toBeEmpty();
+    expect($files)->not->toBeEmpty();
 
     actingAs($this->director, 'director')
         ->delete(route('public.projects.destroy', $this->project))
         ->assertRedirect(route('public.projects.index'));
 
+    // Deleted: out of sight, but everything stays, so what the system can learn from it stays.
     expect(Project::query()->whereKey($this->project->id)->exists())->toBeFalse()
+        ->and(Shot::query()->where('project_id', $this->project->id)->exists())->toBeTrue()
+        ->and(Storage::disk(Disk::TENANT->value)->allFiles())->toBe($files);
+
+    Project::withTrashed()->findOrFail($this->project->id)->forceDelete();
+
+    expect(Project::withTrashed()->whereKey($this->project->id)->exists())->toBeFalse()
         ->and(Shot::query()->count())->toBe(0)
         ->and(Keyframe::query()->count())->toBe(0)
         ->and(StyleOption::query()->count())->toBe(0)
@@ -77,17 +85,24 @@ it('removes every relation and every file when a project is deleted', function (
         ->and(collect($files)->every(fn(string $file) => str_contains($file, 'keep')))->toBeTrue();
 });
 
-it('removes a shot\'s keyframes and their renders when the shot is deleted', function () {
-    $shot = Shot::factory()->for($this->project)->create();
+it('keeps a deleted shot with its keyframes and renders, and removes them when it is deleted for good', function () {
+    $shot = Shot::factory()->for($this->project)->create(['plan_chat' => [['role' => 'director', 'text' => 'Closer to the crane.']]]);
     $keyframe = Keyframe::factory()->for($shot)->create();
     $keyframe->addMedia(UploadedFile::fake()->image('render.png'))->toMediaCollection(Keyframe::RENDERS);
     $path = $keyframe->getFirstMedia(Keyframe::RENDERS)->getPathRelativeToRoot();
 
     $shot->delete();
 
+    expect($this->project->shots()->count())->toBe(0)
+        ->and(Shot::withTrashed()->findOrFail($shot->id)->plan_chat)->toBe([['role' => 'director', 'text' => 'Closer to the crane.']])
+        ->and(Keyframe::query()->count())->toBe(1)
+        ->and(Media::query()->count())->toBe(1);
+    Storage::disk(Disk::TENANT->value)->assertExists($path);
+
+    $shot->forceDelete();
+
     expect(Keyframe::query()->count())->toBe(0)
         ->and(Media::query()->count())->toBe(0);
-
     Storage::disk(Disk::TENANT->value)->assertMissing($path);
 });
 
@@ -98,4 +113,17 @@ it('keeps branched style options when their parent is deleted', function () {
     $parent->delete();
 
     expect($child->fresh()->parent_id)->toBeNull();
+});
+
+it('removes the deleted shots of a project too, with their keyframes and renders', function () {
+    $shot = Shot::factory()->for($this->project)->create();
+    $keyframe = Keyframe::factory()->for($shot)->create();
+    $keyframe->addMedia(UploadedFile::fake()->image('render.png'))->toMediaCollection(Keyframe::RENDERS);
+    $shot->delete();
+
+    $this->project->forceDelete();
+
+    expect(Shot::withTrashed()->whereKey($shot->id)->exists())->toBeFalse()
+        ->and(Keyframe::query()->count())->toBe(0)
+        ->and(Media::query()->where('model_type', (new Keyframe())->getMorphClass())->count())->toBe(0);
 });

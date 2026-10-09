@@ -7,9 +7,10 @@ namespace App\Ai\Briefs;
 use App\Ai\KeyframeReferences;
 use App\Enums\ElementType;
 use App\Enums\ShotKind;
-use App\Enums\ShotSize;
+use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
+use Illuminate\Support\Str;
 
 /**
  * Composes the prompt the image model gets for one keyframe. Keyframe 1 is
@@ -53,11 +54,11 @@ class KeyframeImageBrief
                     : '- ' . $element->promptLine();
             }
 
-            $lines[] = '';
+            array_push($lines, ...[...self::whoIsWho($references->elements, $pictured), '']);
         }
 
         $framing = $shot->storylineFraming();
-        $lines[] = 'Framing: ' . $shot->kindOrScene()->size()->framing();
+        $lines[] = 'Framing: ' . $shot->shotSize()->framing();
 
         if (filled($framing['spot'] ?? null)) {
             $lines[] = "Spot: {$framing['spot']}";
@@ -76,7 +77,7 @@ class KeyframeImageBrief
             $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';
             $lines[] = 'Staging: the people are inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches a figure: no railings, pillars, poles, barriers or machines directly behind or in front of the people. Any sign or context object sits on that surface beside the people, clearly readable, not touching them. The ground near the feet is plain.';
         }
-        $lines[] = 'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that belong to the place stay exactly as they are.';
+        $lines[] = 'Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that belong to the place stay exactly as they are. Logos and lettering on clothing and helmets stay exactly as in the pictures of the people.';
 
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
         $attached = 0;
@@ -106,6 +107,30 @@ class KeyframeImageBrief
     }
 
     /**
+     * With two or more pictured people, a line per person to tell them apart:
+     * names alone let the image model give one person the other's place and
+     * action. The pictures still decide how they look; the line only ties
+     * each name to its picture.
+     *
+     * @param  array<int, Element>  $elements
+     * @param  array<int, mixed>  $pictured  the keys of the elements with an attached picture
+     * @return list<string>
+     */
+    private static function whoIsWho(array $elements, array $pictured): array
+    {
+        $people = collect($elements)->filter(fn(Element $element) => $element->type === ElementType::PERSON && in_array($element->getKey(), $pictured, true));
+
+        if ($people->count() < 2) {
+            return [];
+        }
+
+        return [
+            'Who is who: tell the people apart by their pictures, and give each one exactly the place, pose and action the description gives that name; never swap them.',
+            ...$people->map(fn(Element $element) => "- {$element->name}: " . Str::of($element->description)->before('. ')->trim()->rtrim('.')->limit(220) . '.')->values()->all(),
+        ];
+    }
+
+    /**
      * The prompt for the still a presenter speaks from: the person exactly
      * like their picture, frontal from the chest up with a large face, in
      * front of the place softly out of focus, so lip sync can read the face.
@@ -120,7 +145,7 @@ class KeyframeImageBrief
             Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null),
             'Framing: a medium close-up from the chest up. The person is centred, faces the camera straight on and looks into the lens, shoulders square, with a friendly, calm expression and the mouth closed. The head and face fill about a third of the frame height, the eyes in the upper third.',
             'Background: the place, softly out of focus, calm and muted, with no readable details and nothing behind the head that draws attention.',
-            'Soft, even light on the face. Only this one person. Do not add text, captions or watermarks; logos on clothing and helmets stay as in the picture.',
+            'Soft, even light on the face. Only this one person. Do not add text, captions, brand names, logos or watermarks; logos on clothing and helmets stay as in the picture.',
         ];
 
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
@@ -188,7 +213,7 @@ class KeyframeImageBrief
                     : '- ' . $element->promptLine();
             }
 
-            $lines[] = '';
+            array_push($lines, ...[...self::whoIsWho($cast->all(), $pictured), '']);
         }
 
         if (($rules = $shot->project->rulesBrief()) !== '') {
@@ -204,10 +229,10 @@ class KeyframeImageBrief
         }
 
         if ($references->previous !== null) {
-            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the people hold, what is in their pockets and what lies in a bin or box, unless this keyframe changes it, and keep the people looking the same as there. Do not copy its pose.';
+            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the people hold, what is in their pockets and what lies in a bin or box, unless this keyframe changes it, and keep the people looking the same as there. Where each person stands, which way they face and what they do comes only from this keyframe\'s description, never from that image.';
         }
 
-        $lines[] = 'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are.';
+        $lines[] = 'Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are. Logos and lettering on clothing and helmets stay exactly as in the pictures of the people.';
 
         return implode("\n", $lines);
     }
@@ -227,7 +252,7 @@ class KeyframeImageBrief
             "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
             '',
             'Draw the place where this shot plays, empty: no people at all. Every keyframe of the shot is drawn on top of this picture later, so the camera, the framing and the place must suit all of them.',
-            'Framing: ' . ShotSize::FULL->framing() . ' Frame it for the people who will stand at the spot: an adult standing there fills about two thirds of the frame height.',
+            'Framing: ' . $shot->shotSize()->framing() . ' Frame it for the people who will stand at the spot: ' . $shot->shotSize()->personScale() . '.',
         ];
 
         if (filled($framing['spot'] ?? null)) {
@@ -240,7 +265,7 @@ class KeyframeImageBrief
             $lines,
             'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later.',
             'Draw everything in its state at step 1, such as a door open or closed as step 1 says; later changes to the place are made on this picture.',
-            'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours.',
+            'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. A logo already on the place in its picture may stay, exactly as it is there.',
             self::plateVariation($variation),
         );
 
@@ -316,7 +341,7 @@ class KeyframeImageBrief
             "Change only this: {$instruction}",
             'Keep everything else exactly as it is: the walls, doors, machines, objects, the floor and every marking or painted line on it, the background, the framing, the camera, the light and the style.',
             'Do not add people.',
-            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the image stay exactly as they are.',
+            'Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the image stay exactly as they are.',
         ]);
     }
 
@@ -331,7 +356,7 @@ class KeyframeImageBrief
             "Change only this, which is how it looks from now on in the shot: {$change}",
             'Everything else stays exactly as it is: the walls, the floor and every line on it, the ceiling, doors, windows, signs, machines, objects and the background, at the same place, size and angle, with the same framing, camera, light and style.',
             'Do not add people.',
-            'Do not add text, captions or watermarks. Signs and markings already in the image stay exactly as they are.',
+            'Do not add text, captions, brand names, logos or watermarks. Signs and markings already in the image stay exactly as they are.',
         ]);
     }
 
@@ -350,7 +375,7 @@ class KeyframeImageBrief
             $withPreviousKeyframe
                 ? 'The third attached image is the keyframe directly before this one in the same shot, for how the people and objects look. Do not copy its pose.'
                 : null,
-            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are.',
+            'Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are. Logos and lettering on clothing and helmets stay exactly as in the pictures of the people.',
         ]));
     }
 
@@ -367,7 +392,7 @@ class KeyframeImageBrief
             $withPreviousKeyframe
                 ? 'The second attached image is the keyframe directly before this one in the same shot. Use it to see how the character and the objects look and where they are, and copy them from it when the change asks for something that is missing. Do not copy its pose or framing.'
                 : null,
-            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that are already in the image stay exactly as they are.',
+            'Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that are already in the image stay exactly as they are. Logos and lettering on clothing and helmets stay exactly as in the pictures of the people.',
         ]));
     }
 }

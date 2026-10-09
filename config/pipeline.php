@@ -36,8 +36,6 @@ return [
         'presenter' => env('AI_PRESENTER_MODEL', 'heygen/avatar-iv'),
         // Checks each drawn keyframe and decides on a redraw: few false alarms (benchmark of 2026-10-04).
         'keyframe_check' => env('AI_KEYFRAME_CHECK_MODEL', 'google/gemini-3.8-flash'),
-        // Checks afterwards whether the place stayed the same; sees shifted floor lines best, its findings become notes.
-        'place_check' => env('AI_PLACE_CHECK_MODEL', 'openai/gpt-5.5'),
     ],
 
     /*
@@ -67,6 +65,8 @@ return [
         'keyframe_checker' => env('AI_KEYFRAME_CHECK_REASONING', 'low'),
         'shot_reviewer' => env('AI_SHOT_REVIEW_REASONING', 'medium'),
         'correction_classifier' => env('AI_CORRECTION_REASONING', 'low'),
+        'detection_words_writer' => 'low',
+        'findings_reporter' => 'low',
         'voice_over_writer' => env('AI_VOICE_OVER_REASONING', 'low'),
         'voice_over_translator' => env('AI_VOICE_OVER_REASONING', 'low'),
         'bench_judge' => 'low',
@@ -102,15 +102,10 @@ return [
     'image_quality' => env('AI_IMAGE_QUALITY', 'low'),
 
     /*
-     * Each drawn keyframe is checked against its plan and references; a clear
-     * mistake gets one redraw with a fix before the director sees it.
+     * Each drawn keyframe is checked against its plan and references after it
+     * is shown; what it finds becomes notes the plan director reports in the chat.
      */
     'keyframe_check' => env('AI_KEYFRAME_CHECK', true),
-
-    /*
-     * After drawing, a second model compares the place with keyframe 1; what it finds becomes notes.
-     */
-    'place_check' => env('AI_PLACE_CHECK', true),
 
     /*
      * Changes and check findings are labelled in the background; a kind of

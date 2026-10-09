@@ -8,12 +8,14 @@ use App\Ai\Agents\TweakInterpreter;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Enums\CorrectionSource;
+use App\Enums\ShotStatus;
 use App\Jobs\Concerns\FollowsPlan;
 use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Corrections\RecordCorrection;
+use App\Support\Shots\FirstKeyframeChoice;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -115,12 +117,18 @@ class TweakKeyframeImage implements ShouldQueue
 
         if ($this->option !== null) {
             $keyframe->forceFill(['rendering' => false, 'render_error' => null])->save();
+            $keyframe->shot->say(__('I added the adjusted version as option :n. Click it or tell me if you want it.', ['n' => $keyframe->renders()->count()]));
         } else {
             ReviewShot::after($keyframe->shot);
         }
 
-        // Kept on the version, so the director can see what was asked and what the image model was told.
-        $render->setCustomProperty(Keyframe::TWEAK_REQUEST, $this->instruction)
+        // Keyframe 1 on the chosen place still waits to be confirmed.
+        if ($this->option === null && $keyframe->position === 1 && $keyframe->shot->status === ShotStatus::FIRST_KEYFRAME_READY) {
+            $keyframe->shot->say(FirstKeyframeChoice::confirmQuestion());
+        }
+
+        // Kept on the version, so the director can see what was asked and what the image model was told; read fresh, so a check that finished meanwhile keeps its findings.
+        $render->refresh()->setCustomProperty(Keyframe::TWEAK_REQUEST, $this->instruction)
             ->setCustomProperty(Keyframe::TWEAK_INSTRUCTION, $instruction)
             ->setCustomProperty(Keyframe::TWEAK_FROM_CHECK, $this->fromCheck)
             ->save();

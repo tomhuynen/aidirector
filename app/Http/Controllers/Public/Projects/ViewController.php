@@ -16,8 +16,10 @@ use App\Support\Decisions\DecisionQueue;
 use App\Support\Video\VideoFormats;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Locale;
+use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 
 class ViewController
 {
@@ -44,6 +46,20 @@ class ViewController
             'videoFormats' => fn() => VideoFormats::catalogue(),
             /** @var array<int, array{value: string, label: string, plural: string}> */
             'elementTypes' => fn() => ElementType::catalogue(),
+            /**
+             * The company's logos: the only text the images may show, named by their brand.
+             *
+             * @var array{storeUrl: string, logos: array<int, array{id: int, name: string, imageUrl: string, destroyUrl: string}>}
+             */
+            'branding' => fn() => [
+                'storeUrl' => route('public.projects.branding.store', $project),
+                'logos' => $project->getMedia(Project::LOGOS)->map(fn(BaseMedia $logo) => [
+                    'id' => $logo->id,
+                    'name' => $logo->name,
+                    'imageUrl' => URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $logo]),
+                    'destroyUrl' => route('public.projects.branding.destroy', [$project, $logo]),
+                ])->values()->all(),
+            ],
             /**
              * The languages a voice-over can be made in, by name.
              *

@@ -82,9 +82,11 @@
       :save-url="project.links?.voiceOver ?? '#'"
     />
 
-    <ProjectRules v-if="rules.length > 0" :rules="rules" />
+    <Branding :logos="branding.logos" :store-url="branding.storeUrl" />
 
     <CastAndSets :elements="elements" :types="elementTypes" :create-url="project.links?.elementsCreate ?? '#'" />
+
+    <ProjectRules v-if="rules.length > 0" :rules="rules" />
   </Page>
 </template>
 <script setup lang="ts">
@@ -92,6 +94,7 @@ import { Link } from '@inertiajs/vue3'
 import AppLayout from '@public/ts/layouts/App.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
+import Branding from '@public:components/Branding.vue'
 import CastAndSets from '@public:components/CastAndSets.vue'
 import FormatPicker from '@public:components/FormatPicker.vue'
 import Page from '@public:components/Page.vue'

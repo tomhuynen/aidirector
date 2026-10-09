@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\DetectionWordsWriter;
 use App\Ai\Agents\StorylineWriter;
 use App\Ai\KeyframePainter;
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
+use App\Jobs\ChangePlace;
 use App\Jobs\GenerateRemainingKeyframes;
 use App\Models\Director;
 use App\Models\Element;
@@ -13,6 +15,7 @@ use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Images\PlaceComposite;
+use App\Support\Images\PlaceObjects;
 use App\Support\Shots\ShotPlan;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Config;
@@ -106,11 +109,13 @@ function fakeReplicate(): void
 
 describe('compositing', function () {
     it('keeps the people, their shadow and the named things from the drawn image, and the place everywhere else', function () {
-        // The drawn image: the place moved by a redraw, a red person, their dark shadow beside the feet, a blue blob far away and a changed green thing.
+        // The drawn image: the place moved by a redraw, a red person, their dark shadow below the feet,
+        // a redrawn wall edge right beside them, a blue blob far away and a changed green thing.
         $drawn = compositePng(function (GdImage $image) {
             imagecopy($image, imagecreatefromstring(stripedPlace(5)), 0, 0, 0, 0, 144, 256);
             imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocate($image, 220, 30, 30));
-            imagefilledrectangle($image, 82, 170, 96, 180, (int) imagecolorallocate($image, 20, 20, 20));
+            imagefilledrectangle($image, 56, 182, 92, 190, (int) imagecolorallocate($image, 20, 20, 20));
+            imagefilledrectangle($image, 88, 100, 94, 160, (int) imagecolorallocate($image, 20, 20, 20));
             imagefilledrectangle($image, 2, 2, 14, 14, (int) imagecolorallocate($image, 30, 30, 220));
             imagefilledrectangle($image, 110, 220, 130, 240, (int) imagecolorallocate($image, 30, 200, 30));
         });
@@ -118,11 +123,33 @@ describe('compositing', function () {
         $composite = (new PlaceComposite())->keyframe(stripedPlace(), $drawn, rectangleMask(60, 100, 80, 180), [rectangleMask(110, 220, 130, 240)]);
 
         expect(colourAt($composite, 70, 140))->toBe([220, 30, 30])
-            ->and(colourAt($composite, 89, 175))->toBe([20, 20, 20])
+            ->and(colourAt($composite, 70, 186))->toBe([20, 20, 20])
             ->and(colourAt($composite, 120, 230))->toBe([30, 200, 30])
-            // Far from the people: the place itself, not the redrawn blob or the moved stripes.
+            // Beside the person and far from them: the place itself, not the redrawn wall edge, the blob or the moved stripes.
+            ->and(colourAt($composite, 92, 120))->toBe(colourAt(stripedPlace(), 92, 120))
             ->and(colourAt($composite, 8, 8))->toBe(colourAt(stripedPlace(), 8, 8))
             ->and(colourAt($composite, 30, 60))->toBe(colourAt(stripedPlace(), 30, 60));
+    });
+
+    it('gives feet without a shadow in the drawing a soft one, but not an arm beside the body', function () {
+        $flat = compositePng(fn(GdImage $image) => imagefill($image, 0, 0, (int) imagecolorallocate($image, 150, 150, 150)));
+        // A person from 100 to 180 high, with an arm hanging down beside the body to 140.
+        $person = compositePng(function (GdImage $image) {
+            $white = (int) imagecolorallocate($image, 255, 255, 255);
+            imagefilledrectangle($image, 60, 100, 80, 180, $white);
+            imagefilledrectangle($image, 81, 110, 86, 140, $white);
+        });
+        $drawn = compositePng(function (GdImage $image) {
+            imagefill($image, 0, 0, (int) imagecolorallocate($image, 150, 150, 150));
+            imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocate($image, 220, 30, 30));
+            imagefilledrectangle($image, 81, 110, 86, 140, (int) imagecolorallocate($image, 220, 30, 30));
+        });
+
+        $composite = (new PlaceComposite())->keyframe($flat, $drawn, $person);
+
+        expect(colourAt($composite, 70, 182)[0])->toBeLessThan(150)
+            ->and(colourAt($composite, 83, 143))->toBe([150, 150, 150])
+            ->and(colourAt($composite, 70, 200))->toBe([150, 150, 150]);
     });
 
     it('takes only the changed thing from an edit of the place', function () {
@@ -136,6 +163,24 @@ describe('compositing', function () {
         expect(colourAt($state, 40, 120))->toBe([40, 60, 120])
             ->and(colourAt($state, 100, 120))->toBe(colourAt(stripedPlace(), 100, 120));
     });
+});
+
+it('takes only the thing that changed when the words also find another one further back', function () {
+    // The door in front is closed now; the edit also redrew the small door further back.
+    $edited = compositePng(function (GdImage $image) {
+        imagecopy($image, imagecreatefromstring(stripedPlace()), 0, 0, 0, 0, 144, 256);
+        imagefilledrectangle($image, 10, 40, 60, 220, (int) imagecolorallocate($image, 40, 60, 120));
+        imagefilledrectangle($image, 100, 80, 120, 130, (int) imagecolorallocate($image, 30, 30, 30));
+    });
+    $doors = compositePng(function (GdImage $image) {
+        imagefilledrectangle($image, 10, 40, 60, 220, (int) imagecolorallocate($image, 255, 255, 255));
+        imagefilledrectangle($image, 100, 80, 120, 130, (int) imagecolorallocate($image, 255, 255, 255));
+    });
+
+    $state = (new PlaceComposite())->state(stripedPlace(), $edited, [$doors]);
+
+    expect(colourAt($state, 35, 130))->toBe([40, 60, 120])
+        ->and(colourAt($state, 110, 105))->toBe(colourAt(stripedPlace(), 110, 105));
 });
 
 describe('painter', function () {
@@ -154,6 +199,7 @@ describe('painter', function () {
 
     it('makes the place with the door closed and draws the later keyframes on it, keeping only the people and named things', function () {
         fakeReplicate();
+        DetectionWordsWriter::fake(fn() => ['words' => ['red wall phone', 'telephone']]);
         Image::fake(fn() => base64_encode(compositePng(fn(GdImage $image) => imagefill($image, 0, 0, (int) imagecolorallocate($image, 250, 200, 0)))));
 
         $shot = Shot::factory()->for($this->project)->create([
@@ -200,7 +246,54 @@ describe('painter', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this, which is how it looks from now on in the shot: The door on the left is closed.'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('He lifts the phone.') && $prompt->attachments->first()->path === $state->getPathRelativeToRoot());
         Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'door');
-        Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'Wall phone');
+        // The phone is looked for once, in the place, by common words; it is touched, so it comes from the drawing.
+        // Each a prediction and its download: the door in the place before and after, the people of keyframes 2 and 3, the phone once.
+        Http::assertSentCount(2 * (2 + 2 + 1));
+        Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'red wall phone');
+        Http::assertNotSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'Wall phone');
+        expect($phone->fresh()->detection_words)->toBe(['red wall phone', 'telephone'])
+            ->and($state->fresh()->getCustomProperty(PlaceObjects::MASKS))->toHaveCount(1);
+    });
+
+    it('changes the place from a keyframe on and puts the people of those keyframes onto it without drawing them again', function () {
+        fakeReplicate();
+        // The edit of the place: everything yellow, of which only the changed part is taken.
+        Image::fake(fn() => base64_encode(compositePng(fn(GdImage $image) => imagefill($image, 0, 0, (int) imagecolorallocate($image, 250, 200, 0)))));
+
+        $shot = Shot::factory()->for($this->project)->create([
+            'status' => ShotStatus::KEYFRAMES_READY,
+            'storyline' => ['keyframes' => [['title' => 'One', 'description' => 'He waits.'], ['title' => 'Two', 'description' => 'He waves.']]],
+        ]);
+        $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+        $renders = [];
+
+        foreach ([1, 2] as $position) {
+            $keyframe = Keyframe::factory()->for($shot)->create(['position' => $position]);
+            // A composite: a red person on the place.
+            $render = $keyframe->addMediaFromString(compositePng(function (GdImage $image) {
+                imagecopy($image, imagecreatefromstring(stripedPlace()), 0, 0, 0, 0, 144, 256);
+                imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocate($image, 220, 30, 30));
+            }))->usingFileName('k.png')->withCustomProperties([Keyframe::COMPOSITED => true])->toMediaCollection(Keyframe::RENDERS);
+            $keyframe->forceFill(['render_id' => $render->id])->save();
+            $renders[$position] = $render->id;
+        }
+
+        $shot->addPlaceEdit(2, 'The door has no handle.', 'door handle');
+        (new ChangePlace($shot, 2))->handle(app(KeyframePainter::class));
+
+        $keyframes = $shot->keyframes()->with('media')->get();
+        $second = $keyframes->firstWhere('position', 2)->render();
+        $image = Storage::disk($second->disk)->get($second->getPathRelativeToRoot());
+
+        // Keyframe 1 is untouched; keyframe 2 keeps its person and gets the changed part of the place.
+        expect($keyframes->firstWhere('position', 1)->render()->id)->toBe($renders[1])
+            ->and($second->id)->not->toBe($renders[2])
+            ->and($second->getCustomProperty(Keyframe::COMPOSITED))->toBeTrue()
+            ->and(colourAt($image, 70, 140))->toBe([220, 30, 30])
+            ->and(colourAt($image, 40, 120))->toBe([250, 200, 0])
+            ->and(colourAt($image, 120, 20))->toBe(colourAt(stripedPlace(), 120, 20))
+            ->and($keyframes->every(fn(Keyframe $keyframe) => ! $keyframe->rendering))->toBeTrue();
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this, which is how it looks from now on in the shot: The door has no handle.'));
     });
 
     it('keeps the drawn keyframe when the cut-out fails', function () {
@@ -222,6 +315,52 @@ describe('painter', function () {
 
         expect($render)->not->toBeNull()
             ->and($render->getCustomProperty(Keyframe::COMPOSITED))->toBeNull();
+    });
+});
+
+describe('objects', function () {
+    beforeEach(function () {
+        Config::set('pipeline.keyframes.composite.enabled', true);
+        Config::set('services.replicate.token', 'test-token');
+    });
+
+    it('takes an object from the drawing only when the people touch it', function () {
+        $composite = new PlaceComposite();
+        $person = rectangleMask(60, 100, 80, 180);
+
+        expect($composite->touches(rectangleMask(82, 120, 100, 140), $person))->toBeTrue()
+            ->and($composite->touches(rectangleMask(110, 20, 130, 40), $person))->toBeFalse();
+    });
+
+    it('keeps the keyframe as drawn when one of its objects cannot be found in the place', function () {
+        $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+        Http::fake([
+            'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => $request['version'] === $people
+                ? Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/people.png'])
+                : Http::response(['status' => 'failed', 'error' => 'list index out of range']),
+            'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+        ]);
+        DetectionWordsWriter::fake(fn() => ['words' => ['red wall phone', 'telephone']]);
+        Image::fake(fn() => base64_encode(stripedPlace(3)));
+
+        $shot = Shot::factory()->for($this->project)->create([
+            'status' => ShotStatus::KEYFRAMES_PENDING,
+            'storyline' => ['keyframes' => [['title' => 'One', 'description' => 'He waits.'], ['title' => 'Two', 'description' => 'He calls.']]],
+        ]);
+        $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+        Keyframe::factory()->for($shot)->create(['position' => 1]);
+        $second = Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'He calls.']);
+        $second->elements()->attach(Element::factory()->object()->for($this->project)->create(['name' => 'Emergency call station']));
+
+        (new GenerateRemainingKeyframes($shot, elementsDrawn: true))->handle(app(KeyframePainter::class));
+
+        $render = $second->fresh()->render();
+
+        // Both wordings were tried on the place; what was not found is remembered there.
+        expect($render->getCustomProperty(Keyframe::COMPOSITED))->toBeNull()
+            ->and($render->getCustomProperty(Keyframe::NOT_COMPOSITED))->toBe('Emergency call station could not be found in the place, so the keyframe is kept as it was drawn.')
+            ->and(array_values($shot->getFirstMedia(Shot::PLATE)->getCustomProperty(PlaceObjects::MASKS)))->toBe([false]);
+        Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'telephone');
     });
 });
 

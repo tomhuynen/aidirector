@@ -4,12 +4,15 @@
     <!-- One row at full height; options beyond the width scroll sideways. -->
     <div ref="row" class="flex min-h-0 flex-1 gap-2 overflow-x-auto pb-2">
       <div v-for="(option, i) in options" :key="option.id" class="relative flex h-full min-h-0 shrink-0">
+        <!-- Clicking a picture chooses it; the chat can choose by number too. -->
         <button
           type="button"
-          class="group flex h-full min-h-0 shrink-0 items-center justify-center"
-          :aria-pressed="option.id === selectedId"
-          :disabled="pending || adjusting"
-          @click="selectedId = option.id"
+          class="group flex h-full min-h-0 shrink-0 cursor-pointer items-center justify-center disabled:cursor-default"
+          :disabled="pending || adjusting || choice.processing"
+          :aria-label="
+            field === 'plate' ? $t('Use place :n', { n: String(i + 1) }) : $t('Use option :n', { n: String(i + 1) })
+          "
+          @click="choose(option.id)"
         >
           <!-- Sized like the placeholders: one side fills the cell and the ratio sets the other, so the frame hugs the image. -->
           <span class="relative inline-flex max-h-full max-w-full" :style="tileSize">
@@ -19,40 +22,20 @@
               :class="
                 cn(
                   'size-full rounded-xl border border-border bg-card object-cover transition',
-                  option.id === selectedId
+                  option.id === chosenId
                     ? 'border-signal ring-4 ring-signal/40'
-                    : 'group-hover:border-muted-foreground/60',
+                    : 'group-enabled:group-hover:border-signal group-enabled:group-hover:ring-4 group-enabled:group-hover:ring-signal/30',
                 )
               "
             />
             <span
-              :class="
-                cn(
-                  'absolute top-3 left-3 flex size-8 items-center justify-center rounded-full bg-background/80 text-sm font-semibold tabular-nums backdrop-blur-sm',
-                  option.id === selectedId && 'bg-signal text-primary-foreground',
-                )
-              "
+              class="absolute top-3 left-3 flex size-8 items-center justify-center rounded-full bg-background/80 text-sm font-semibold tabular-nums backdrop-blur-sm"
             >
-              <Check v-if="option.id === selectedId" class="size-4" />
+              <LoaderCircle v-if="option.id === chosenId" class="size-4 animate-spin" />
               <template v-else>{{ i + 1 }}</template>
             </span>
           </span>
         </button>
-        <!-- Only the selected option can be used, from its own card. -->
-        <div
-          v-if="option.id === selectedId && !pending && !adjusting"
-          class="absolute inset-x-0 bottom-5 flex flex-col items-center gap-2 px-4"
-        >
-          <Button type="button" class="shadow-lg" :disabled="choice.processing" @click="choose">
-            <LoaderCircle v-if="choice.processing" class="size-4 animate-spin" />
-            {{ field === 'plate' ? $t('Use this place') : $t('Use this keyframe') }}
-            <ArrowRight v-if="!choice.processing" class="size-4" />
-          </Button>
-          <InputError
-            class="rounded bg-background/90 px-2 py-1"
-            :message="choice.errors.render ?? choice.errors.plate"
-          />
-        </div>
       </div>
 
       <div
@@ -66,15 +49,7 @@
       </div>
     </div>
 
-    <FirstKeyframeActions
-      :selected="selectedId"
-      :choose-url="chooseUrl"
-      :more-url="moreUrl"
-      :field="field"
-      :reset-url="resetUrl"
-      :disabled="pending || adjusting"
-      hide-choose
-    />
+    <InputError :message="choice.errors.render ?? choice.errors.plate" />
   </div>
 </template>
 <script setup lang="ts">
@@ -82,11 +57,9 @@ import { useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
-import { Button } from '@shared:ui/button'
-import { ArrowRight, Check, LoaderCircle } from 'lucide-vue-next'
-import { computed, nextTick, useTemplateRef, watch } from 'vue'
+import { LoaderCircle } from 'lucide-vue-next'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 
-import FirstKeyframeActions from './FirstKeyframeActions.vue'
 import Placeholder from './Placeholder.vue'
 
 const props = defineProps<{
@@ -95,17 +68,11 @@ const props = defineProps<{
   aspectRatio: string
   pending: boolean
   chooseUrl: string
-  moreUrl: string
   /** An adjusted option is being drawn. */
   adjusting?: boolean
   /** What the choice is sent as: an option of keyframe 1, or an empty place. */
   field?: 'render' | 'plate'
-  /** Keyframe 1 is drawn on a chosen place; this goes back to the places. */
-  resetUrl?: string | null
 }>()
-
-/** The option the director selected; shared with the column on the right, which adjusts it. */
-const selectedId = defineModel<number | null>('selected', { default: null })
 
 /**
  * While options are being drawn, the batch that is still missing shows as spinners.
@@ -127,12 +94,15 @@ const tileSize = computed(() => ({
 
 const choice = useForm<{ render?: number | null; plate?: number | null }>({})
 
-const choose = () => {
-  if (selectedId.value === null) return
+/** The option clicked, shown with a loader while it is sent. */
+const chosenId = ref<number | null>(null)
+
+const choose = (id: number) => {
+  chosenId.value = id
 
   choice
-    .transform(() => ({ [props.field ?? 'render']: selectedId.value }))
-    .post(props.chooseUrl, { preserveScroll: true })
+    .transform(() => ({ [props.field ?? 'render']: id }))
+    .post(props.chooseUrl, { preserveScroll: true, onFinish: () => (chosenId.value = null) })
 }
 
 const row = useTemplateRef<HTMLElement>('row')
@@ -150,26 +120,11 @@ watch(
   },
 )
 
-// A single option, such as keyframe 1 drawn on the chosen place, is selected straight away so it can be adjusted or used.
-watch(
-  () => props.options.map((option) => option.id),
-  (ids) => {
-    if (ids.length === 1 && (selectedId.value === null || !ids.includes(selectedId.value))) selectedId.value = ids[0]
-  },
-  { immediate: true },
-)
-
-// When an adjusted option arrives, select it and scroll it into view, so it can be compared and used straight away.
+// When an adjusted option arrives, scroll it into view, so it can be compared straight away.
 watch(
   () => props.options.length,
   async (length, previous) => {
-    if (previous === undefined || length <= previous) return
-
-    if (length === previous + 1 && !props.pending) {
-      selectedId.value = props.options[length - 1]?.id ?? selectedId.value
-    }
-
-    await scrollToEnd()
+    if (previous !== undefined && length > previous) await scrollToEnd()
   },
 )
 </script>

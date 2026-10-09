@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ai;
 
+use App\Ai\Briefs\TextRules;
 use App\Enums\ElementType;
 use App\Models\Element;
 use App\Models\ElementSuggestion;
@@ -28,8 +29,11 @@ class ElementPainter
 {
     /**
      * Elements never carry text: a description is about how it looks, not words to print on it.
+     * The one exception is a logo of the branding, attached as a picture when the element names it.
      */
-    public const NO_TEXT = 'Never write any text on it or in the image: no letters, words, slogans, numbers, labels or logos, not even words from the description. Markings are plain shapes and colours.';
+    public const NO_TEXT = TextRules::NO_TEXT;
+
+    private const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'];
 
     public function __construct(
         private readonly KeyframePainter $keyframes,
@@ -52,11 +56,11 @@ class ElementPainter
                 "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
                 $element->type->referenceStaging(),
                 $element->promptLine(),
-                "The attached image is a keyframe in which {$element->name} appears. Draw {$element->name} exactly as it looks there: same shape, proportions, colours and details. Leave out everything else in that image.",
-                self::NO_TEXT,
+                "The first attached image is a keyframe in which {$element->name} appears. Draw {$element->name} exactly as it looks there: same shape, proportions, colours and details. Leave out everything else in that image.",
             ]);
+            [$logoLines, $logoImages, $textRule] = $this->branding($project, "{$element->name} {$element->description}", 1);
 
-            $this->generate($element, $prompt, [$this->keyframes->referenceFor($render)], (string) Config::get('pipeline.models.image_edit'));
+            $this->generate($element, implode("\n", [$prompt, ...$logoLines, $textRule]), [$this->keyframes->referenceFor($render), ...$logoImages], (string) Config::get('pipeline.models.image_edit'));
 
             return;
         }
@@ -107,7 +111,10 @@ class ElementPainter
             }
         }
 
-        $lines[] = self::NO_TEXT;
+        [$logoLines, $logoImages, $textRule] = $this->branding($project, "{$element->name} {$element->description}", count($attachments));
+        array_push($lines, ...$logoLines);
+        array_push($attachments, ...$logoImages);
+        $lines[] = $textRule;
 
         $this->generate($element, implode("\n", $lines), $attachments, (string) Config::get('pipeline.models.image'));
     }
@@ -160,6 +167,33 @@ class ElementPainter
     }
 
     /**
+     * The logos of the branding that the text names, each attached with a
+     * line saying which brand it is, and the text rule that goes with them:
+     * no text at all when none is named.
+     *
+     * @param  int  $attached  how many images are attached before the logos
+     * @return array{0: list<string>, 1: list<StoredImage>, 2: string}
+     */
+    private function branding(Project $project, string $text, int $attached): array
+    {
+        $logos = $project->logosFor($text);
+
+        if ($logos->isEmpty()) {
+            return [[], [], TextRules::NO_TEXT];
+        }
+
+        $lines = [];
+        $images = [];
+
+        foreach ($logos as $logo) {
+            $lines[] = 'The ' . (self::ORDINALS[$attached + count($images)] ?? 'next') . " attached image is the {$logo->name} logo.";
+            $images[] = ImageFile::fromStorage($logo->getPathRelativeToRoot(), $logo->disk);
+        }
+
+        return [$lines, $images, TextRules::withLogos($logos->pluck('name')->map(fn(mixed $name) => (string) $name)->all())];
+    }
+
+    /**
      * An element already drawn for the project to match the style of, the
      * earliest of the same type, or of any type when there is none. Chosen
      * automatically, so the cast keeps one look.
@@ -203,7 +237,10 @@ class ElementPainter
         }
 
         $lines[] = 'Keep everything else exactly as it is: the shapes, colours, style, framing and the plain background.';
-        $lines[] = self::NO_TEXT;
+        [$logoLines, $logoImages, $textRule] = $this->branding($element->project, "{$element->name} {$element->description} {$instruction}", count($attachments));
+        array_push($lines, ...$logoLines);
+        array_push($attachments, ...$logoImages);
+        $lines[] = $textRule;
 
         $this->generate($element, implode("\n", $lines), $attachments, (string) Config::get('pipeline.models.image_edit'), $instruction);
     }
@@ -292,6 +329,9 @@ class ElementPainter
             $styleSheet,
         ]));
 
+        [$logoLines, $logoImages, $textRule] = $this->branding($project, "{$suggestion->name} {$suggestion->description}", count($attachments));
+        array_push($attachments, ...$logoImages);
+
         $prompt = implode("\n", array_filter([
             'Visual style: ' . ($style['look'] ?? '') . '. Medium: ' . ($style['medium'] ?? '') . '. Mood: ' . ($style['mood'] ?? '') . '. Palette: ' . ($style['palette'] ?? '') . '.',
             $round->type->referenceStaging(),
@@ -302,7 +342,8 @@ class ElementPainter
                 $styleSheet !== null => 'The attached image is the project\'s style reference sheet. Match its rendering style exactly; do not copy its subjects or layout.',
                 default => null,
             },
-            self::NO_TEXT,
+            ...$logoLines,
+            $textRule,
         ]));
 
         $started = hrtime(true);

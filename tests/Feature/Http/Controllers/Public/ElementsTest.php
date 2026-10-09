@@ -721,7 +721,7 @@ describe('cleanup', function () {
         $mark = withReference(Element::factory()->for($this->project)->create());
         Keyframe::factory()->for(castShot($this->project))->create()->elements()->attach($mark);
 
-        $this->project->delete();
+        $this->project->forceDelete();
 
         expect(Element::query()->whereKey($mark->id)->exists())->toBeFalse();
     });

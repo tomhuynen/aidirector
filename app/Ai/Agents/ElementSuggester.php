@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Briefs\TextRules;
 use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Element;
 use App\Models\ElementRound;
@@ -55,7 +56,7 @@ class ElementSuggester implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Write exactly {$count} suggestions. For each give:
             - "name": two to four words the director will see under the image, such as "Security guard" or "Visitor in hi-vis".
-            - "description": one or two sentences on how it looks, concrete enough to draw it the same way every time: build, age range, clothing and colours for people; layout, materials and landmarks for places; shape, size, colours and markings for objects.
+            - "description": one or two sentences on how it looks, concrete enough to draw it the same way every time: build, age range, clothing and colours for people; layout, materials and landmarks for places; shape, size, colours and markings for objects. Text: {$this->textRule()}
             - "photo": the number of the uploaded photo it is taken from, when it is something visible in that photo; otherwise null.
             Rules:
             - Follow the director's brief closely. Cover its variety first, then add useful alternatives.
@@ -94,5 +95,13 @@ class ElementSuggester implements Agent, HasReasoningEffort, HasStructuredOutput
     public function count(): int
     {
         return (int) Config::get('pipeline.element_suggestions_count');
+    }
+
+    /**
+     * No text on anything, except the logos of the project's branding.
+     */
+    private function textRule(): string
+    {
+        return TextRules::forPlanning($this->round->project);
     }
 }

@@ -7,7 +7,9 @@ namespace App\Jobs;
 use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
 use App\Jobs\Concerns\FollowsPlan;
+use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Support\Decisions\FindingsReport;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -35,8 +37,13 @@ class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
     /** The statuses in which every keyframe is drawn and the shot was reviewed before. */
     private const REVIEWED = [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_PENDING, ShotStatus::VIDEO_READY];
 
+    /** How often the review waits for keyframe checks that are still running, about three minutes in all. */
+    private const MAX_WAITS = 12;
+
     public function __construct(
         public readonly Shot $shot,
+        /** How often it waited for keyframe checks already. */
+        public readonly int $waited = 0,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
         $this->followPlan($this->shot);
@@ -62,6 +69,14 @@ class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
     {
         $shot = $this->shot->load('project');
         $keyframes = $shot->keyframes()->with('media')->get()->each->setRelation('shot', $shot);
+
+        // The keyframe checks run after drawing; the review waits for them, so their findings are reported with it.
+        if ($this->waited < self::MAX_WAITS && $keyframes->contains(fn(Keyframe $keyframe) => $keyframe->render_stage === Keyframe::STAGE_CHECKING)) {
+            self::dispatch($shot, $this->waited + 1)->delay(now()->addSeconds(15));
+
+            return;
+        }
+
         $review = $painter->review($shot, $keyframes);
 
         if ($review === null || $this->planReplaced()) {
@@ -76,6 +91,9 @@ class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
             return $resolved === null ? $review : [...$review, 'resolved' => $resolved];
         });
+
+        // What the checks and the review found is told in the chat, before the editor stops showing the review as running.
+        app(FindingsReport::class)->report($shot->fresh() ?? $shot);
 
         $shot->forceFill(['reviewing' => false])->save();
     }

@@ -103,37 +103,25 @@
             </li>
           </ul>
 
-          <!-- The cast and sets it suggests: tick the ones to use. -->
-          <div v-if="turnOf(message)?.cast?.length" class="space-y-2">
-            <ul class="grid grid-cols-3 gap-2">
-              <li v-for="id in turnOf(message)?.cast ?? []" :key="id">
-                <label
-                  class="relative flex cursor-pointer flex-col gap-1 rounded-lg border border-border bg-card p-1.5 has-checked:border-signal has-checked:ring-2 has-checked:ring-signal/40"
-                >
-                  <input v-model="picked[message.id]" type="checkbox" class="sr-only" :value="id" />
-                  <img
-                    v-if="elementOf(id)?.imageUrl"
-                    :src="elementOf(id)?.imageUrl ?? undefined"
-                    :alt="elementOf(id)?.name"
-                    class="aspect-square w-full rounded-md object-cover"
-                  />
-                  <span v-else class="flex aspect-square w-full items-center justify-center rounded-md bg-muted">
-                    <LoaderCircle v-if="elementOf(id)?.rendering" class="size-5 animate-spin text-muted-foreground" />
-                  </span>
-                  <span class="truncate text-xs font-medium">{{ elementOf(id)?.name }}</span>
-                </label>
-              </li>
-            </ul>
-            <Button
-              type="button"
-              size="sm"
-              :disabled="busy || (picked[message.id] ?? []).length === 0"
-              @click="useCast(message.id)"
+          <!-- The cast and sets it uses, shown with their pictures; the director says so in the chat to use others. -->
+          <ul v-if="turnOf(message)?.cast?.length" class="grid grid-cols-3 gap-2">
+            <li
+              v-for="id in turnOf(message)?.cast ?? []"
+              :key="id"
+              class="flex flex-col gap-1 rounded-lg border border-border bg-card p-1.5"
             >
-              <Check class="size-3.5" />
-              {{ $t('Use these') }}
-            </Button>
-          </div>
+              <img
+                v-if="elementOf(id)?.imageUrl"
+                :src="elementOf(id)?.imageUrl ?? undefined"
+                :alt="elementOf(id)?.name"
+                class="aspect-square w-full rounded-md object-cover"
+              />
+              <span v-else class="flex aspect-square w-full items-center justify-center rounded-md bg-muted">
+                <LoaderCircle v-if="elementOf(id)?.rendering" class="size-5 animate-spin text-muted-foreground" />
+              </span>
+              <span class="truncate text-xs font-medium">{{ elementOf(id)?.name }}</span>
+            </li>
+          </ul>
 
           <!-- Agreed in the chat: written into the shot and drawn. -->
           <p v-if="turnOf(message)?.proposal" class="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -158,7 +146,7 @@ import type { ChatMessage } from '@public:components/chat/types'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Check, ChevronRight, LoaderCircle, Wand2 } from 'lucide-vue-next'
-import { computed, reactive, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 /** What the chat shows of a plan it wrote into the shot. */
 export type PlanProposal = { kind: string; settingFrom?: string | null }
@@ -177,12 +165,8 @@ export type PlanChatTurn = {
   changes?: string[]
 }
 
-/** What the director has selected among the drawn images: a place to choose, an option for keyframe 1, or a keyframe. */
-export type ChatTarget =
-  | { kind: 'place'; option: number; label: string }
-  | { kind: 'option'; option: number; label: string }
-  | { kind: 'keyframe'; keyframe: string; label: string }
-  | null
+/** The drawn keyframe the director has selected; while choosing a place or keyframe 1 the chat sees what is on screen instead. */
+export type ChatTarget = { kind: 'keyframe'; keyframe: string; label: string } | null
 
 const props = defineProps<{
   chatUrl?: string
@@ -202,13 +186,19 @@ const props = defineProps<{
 
 const turns = ref<PlanChatTurn[]>([...(props.conversation ?? [])])
 
+// Messages added while the images are drawn, such as that the places are ready, come in with the shot.
+watch(
+  () => props.conversation,
+  (conversation) => {
+    if (!busy.value && conversation && conversation.length > turns.value.length) turns.value = [...conversation]
+  },
+)
+
 const { account } = usePage()
 const userInitial = computed(() => account.value?.name.trim().charAt(0).toUpperCase() ?? '')
 
 const busy = ref(false)
 const error = ref<string | null>(null)
-/** The cast and sets ticked per message, starting with all it suggested. */
-const picked = reactive<Record<string, string[]>>({})
 
 const adding = useForm<{ elements?: string }>({})
 /** Added or left out, the conversation goes on from there. */
@@ -306,12 +296,7 @@ const send = async (text: string, extra: { made?: string[] } = {}) => {
   error.value = null
   turns.value = [...turns.value, { role: 'director', text: message, about: props.target?.label, ...extra }]
 
-  const target = props.target
-  const selection = !target
-    ? {}
-    : target.kind === 'keyframe'
-      ? { target: 'keyframe', keyframe: target.keyframe }
-      : { target: target.kind, option: target.option }
+  const selection = props.target ? { target: 'keyframe', keyframe: props.target.keyframe } : {}
 
   try {
     const { messages: saved, reload } = await postJson<{ messages: PlanChatTurn[]; reload: boolean }>(props.chatUrl, {
@@ -323,10 +308,6 @@ const send = async (text: string, extra: { made?: string[] } = {}) => {
 
     // The reply changed the shot: a plan written and drawn, cast and sets offered or redrawn, or shots added.
     if (reload) router.reload({ only: ['shot', 'keyframes', 'siblings', 'elements'] })
-
-    saved.forEach((turn, i) => {
-      if (turn.cast?.length && picked[`turn-${i}`] === undefined) picked[`turn-${i}`] = [...turn.cast]
-    })
   } catch {
     turns.value = turns.value.slice(0, -1)
     error.value = $t('The plan director could not answer. Please try again.')
@@ -334,14 +315,4 @@ const send = async (text: string, extra: { made?: string[] } = {}) => {
     busy.value = false
   }
 }
-
-const useCast = (id: string) => {
-  const names = (picked[id] ?? []).map((element) => elementOf(element)?.name).filter(Boolean)
-  void send($t('Use these: :names.', { names: names.join(', ') }))
-}
-
-// Suggestions from before a refresh start ticked as well.
-turns.value.forEach((turn, i) => {
-  if (turn.cast?.length) picked[`turn-${i}`] = [...turn.cast]
-})
 </script>

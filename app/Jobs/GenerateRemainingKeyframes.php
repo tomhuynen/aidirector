@@ -11,6 +11,7 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
+use App\Support\Shots\FirstKeyframeChoice;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -128,6 +129,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
             'storyline_error' => null,
             'status' => ShotStatus::FIRST_KEYFRAME_READY,
         ])->save();
+        $shot->say(FirstKeyframeChoice::confirmQuestion());
 
         GenerationFinished::ready(__('The first keyframe of “:shot” is ready to confirm', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $first->refresh()->render(), Keyframe::THUMBNAIL)
             ->sendTo($shot->project);

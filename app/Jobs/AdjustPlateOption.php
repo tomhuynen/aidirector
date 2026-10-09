@@ -46,6 +46,7 @@ class AdjustPlateOption implements ShouldQueue
         $painter->adjustPlateOption($shot, $option, $this->instruction);
 
         $shot->keyframes()->where('position', 1)->update(['rendering' => false, 'render_error' => null]);
+        $shot->say(__('I added the adjusted place as place :n. Click it or tell me if you want it.', ['n' => $shot->getMedia(Shot::PLATE_OPTIONS)->count()]));
     }
 
     public function failed(?Throwable $exception): void

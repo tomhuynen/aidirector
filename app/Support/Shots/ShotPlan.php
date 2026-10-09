@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Shots;
 
 use App\Enums\ShotKind;
+use App\Enums\ShotSize;
 use App\Jobs\GenerateVoiceOver;
 use App\Models\Shot;
 use Illuminate\Support\Str;
@@ -56,8 +57,12 @@ class ShotPlan
             'duration' => null,
             'chosen_storyline' => ['title' => (string) ($takeaway !== '' ? Str::limit($takeaway, 80) : $shot->title), 'storyline' => $storyline],
             'storyline' => [
-                ...array_diff_key($shot->storyline ?? [], ['setting_from' => true, 'keyframes' => true, 'framing' => true]),
-                'framing' => ['spot' => (string) ($shot->storyline['framing']['spot'] ?? ''), 'seconds' => $seconds],
+                ...array_diff_key($shot->storyline ?? [], ['setting_from' => true, 'keyframes' => true, 'framing' => true, 'place_edits' => true]),
+                'framing' => [
+                    'spot' => (string) ($shot->storyline['framing']['spot'] ?? ''),
+                    'size' => in_array($proposal['framing'] ?? null, ShotSize::sceneValues(), true) ? $proposal['framing'] : ($shot->storylineFraming()['size'] ?? null),
+                    'seconds' => $seconds,
+                ],
                 ...($source !== null ? ['setting_from' => ['shot_id' => $source->id, 'keyframe' => $keyframe]] : []),
                 'keyframes' => $keyframes,
             ],
@@ -79,6 +84,23 @@ class ShotPlan
      *
      * @phpstan-assert-if-true array<string, mixed> $proposal
      */
+    /**
+     * Whether a proposal is the plan the shot already has: the same kind,
+     * storyline and keyframes. Giving it again draws nothing new.
+     */
+    public static function isCurrent(Shot $shot, mixed $proposal): bool
+    {
+        if (! self::isPlan($proposal)) {
+            return false;
+        }
+
+        $descriptions = collect($proposal['keyframes'])->map(fn(mixed $keyframe) => trim((string) (is_array($keyframe) ? ($keyframe['description'] ?? '') : '')))->all();
+
+        return trim((string) ($proposal['storyline'] ?? '')) === trim((string) ($shot->chosen_storyline['storyline'] ?? ''))
+            && $descriptions === array_map(fn(array $keyframe) => trim((string) $keyframe['description']), $shot->storylineKeyframes())
+            && (string) ($proposal['kind'] ?? '') === (string) $shot->kind?->value;
+    }
+
     public static function isPlan(mixed $proposal): bool
     {
         return is_array($proposal) && is_array($proposal['keyframes'] ?? null) && $proposal['keyframes'] !== [];

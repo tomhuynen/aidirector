@@ -52,7 +52,8 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Look at the image and rewrite the director's request as an edit instruction:
             - Say where things are and where they move from the camera's point of view: left or right in the frame, nearer to or further from the camera, into or out of the place. Never write "forward", "backward", "in front of him" or "behind her": they depend on which way a person faces and get turned around.
-            - Use the character's own point of view only for their body: which shoulder, which hand, which way the head or body turns, and how far.
+            - Name hands, arms and shoulders by the side of the frame they are on, such as "the hand on the left of the frame", never as "his left hand": with someone who faces away those are the other way round, and the image model reads them wrong. Use the character's own point of view only for which way the head or body turns, and how far.
+            - Each hand stays on its own side of the body. When the request would make a hand reach across to the other side or the arms cross, have the hand on that side do it instead.
             - Say what the viewer should see afterwards, for example the back of the head, an empty hand, a closed door.
             - Name what must stay exactly the same: the feet and stance unless the change needs them, the other hand, the props, the camera, the framing, the background, the lighting and the style.
             - Never ask for text: no letters, words, numbers, labels or ID details on anything, also not to make an object recognisable. An object is recognisable by its shape, colour, size and where it is; say that instead. Lettering that is already in the picture stays as it is.

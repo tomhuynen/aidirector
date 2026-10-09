@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Enums\AspectRatio;
 use App\Enums\ProjectPurpose;
 use App\Enums\ShotKind;
+use App\Enums\ShotSize;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
 use App\Events\ShotDeleting;
@@ -20,6 +21,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Config;
 use RedExplosion\Sqids\Concerns\HasSqids;
@@ -34,6 +36,7 @@ class Shot extends Model implements HasMedia
     use HasFactory;
     use HasSqids;
     use InteractsWithMedia;
+    use SoftDeletes;
     use UsesTenantConnection;
 
     public const VIDEO = 'video';
@@ -207,6 +210,37 @@ class Shot extends Model implements HasMedia
             ...($tracks ?? []),
             $locale => array_filter(['status' => $status, 'error' => $error]),
         ]);
+    }
+
+    /**
+     * The changes the director made to the empty place through the chat, each
+     * from a keyframe on, such as a door handle taken away for the whole shot.
+     *
+     * @return list<array{from: int, change: string, part: string}>
+     */
+    public function placeEdits(): array
+    {
+        return array_values($this->storyline['place_edits'] ?? []);
+    }
+
+    /**
+     * Adds a change to the empty place, from a keyframe on.
+     */
+    public function addPlaceEdit(int $from, string $change, string $part): void
+    {
+        $this->updateStoredJson('storyline', fn(?array $storyline) => [
+            ...($storyline ?? []),
+            'place_edits' => [...array_values($storyline['place_edits'] ?? []), ['from' => max(1, $from), 'change' => $change, 'part' => $part]],
+        ]);
+    }
+
+    /**
+     * Adds a message from the plan director to the conversation about the
+     * shot, such as that the places are ready to choose from.
+     */
+    public function say(string $text): void
+    {
+        $this->updateStoredJson('plan_chat', fn(?array $chat) => [...array_values($chat ?? []), ['role' => 'assistant', 'text' => $text]]);
     }
 
     /**
@@ -480,10 +514,10 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Where in the place the shot plays and how long it lasts. The camera
-     * follows the kind of shot and the light is always the visual style's.
+     * Where in the place the shot plays, how close the camera is and how
+     * long it lasts. The light is always the visual style's.
      *
-     * @return array{spot: string, seconds: int|null}|null
+     * @return array{spot: string, size: string|null, seconds: int|null}|null
      */
     public function storylineFraming(): ?array
     {
@@ -495,8 +529,22 @@ class Shot extends Model implements HasMedia
 
         return [
             'spot' => (string) ($framing['spot'] ?? ''),
+            'size' => in_array($framing['size'] ?? null, ShotSize::sceneValues(), true) ? $framing['size'] : null,
             'seconds' => is_numeric($framing['seconds'] ?? null) ? self::clampSeconds((int) $framing['seconds']) : null,
         ];
+    }
+
+    /**
+     * How close the camera is: a close-up for a close-up, the planned size
+     * for a scene, a full shot otherwise.
+     */
+    public function shotSize(): ShotSize
+    {
+        if ($this->kindOrScene() !== ShotKind::SCENE) {
+            return $this->kindOrScene()->size();
+        }
+
+        return ShotSize::tryFrom((string) ($this->storylineFraming()['size'] ?? '')) ?? ShotSize::FULL;
     }
 
     /**

@@ -658,7 +658,7 @@ it('deletes rounds, suggestions and their renders with the project', function ()
     $suggestion = ElementSuggestion::factory()->for($round, 'round')->ready()->create();
     $suggestion->addMedia(UploadedFile::fake()->image('s.png'))->toMediaCollection(ElementSuggestion::RENDER);
 
-    $this->project->delete();
+    $this->project->forceDelete();
 
     expect(ElementRound::query()->count())->toBe(0)
         ->and(ElementSuggestion::query()->count())->toBe(0)

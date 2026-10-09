@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Models\Conversation;
@@ -34,6 +35,7 @@ class Project extends Model implements HasMedia
     use HasFactory;
     use HasSqids;
     use InteractsWithMedia;
+    use SoftDeletes;
     use UsesTenantConnection;
 
     /**
@@ -55,6 +57,15 @@ class Project extends Model implements HasMedia
 
     /** The cover, gently animated as a seamless loop for the header. */
     public const COVER_LOOP = 'cover_loop';
+
+    /**
+     * The company's logos, named by the brand they show, such as "Damen".
+     * The only text an image may show, and only drawn from these pictures.
+     */
+    public const LOGOS = 'logos';
+
+    /** How many logos are attached to one image at most, so the references stay few. */
+    public const MAX_LOGOS_PER_IMAGE = 2;
 
     /**
      * The size every reference is sent to the models at, whatever arrived.
@@ -328,6 +339,41 @@ class Project extends Model implements HasMedia
         $this->addMediaCollection(self::STYLE_REFERENCES)->acceptsMimeTypes(self::REFERENCE_MIME_TYPES);
         $this->addMediaCollection(self::COVER)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::COVER_LOOP)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
+        $this->addMediaCollection(self::LOGOS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+    }
+
+    /**
+     * The logos an image of something should carry: those whose brand the
+     * text names, or every logo when it only says "logo". None when the text
+     * names no brand, so nothing gets a logo by default.
+     *
+     * @return Collection<int, BaseMedia>
+     */
+    public function logosFor(string $text): Collection
+    {
+        $logos = $this->getMedia(self::LOGOS);
+
+        if ($logos->isEmpty() || trim($text) === '') {
+            return collect();
+        }
+
+        $named = $logos->filter(fn(BaseMedia $logo) => trim($logo->name) !== '' && preg_match('/\b' . preg_quote(trim($logo->name), '/') . '\b/iu', $text) === 1);
+
+        if ($named->isEmpty() && preg_match('/\b(logo|branding|branded)\b/iu', $text) === 1) {
+            $named = $logos;
+        }
+
+        return $named->values()->take(self::MAX_LOGOS_PER_IMAGE);
+    }
+
+    /**
+     * The brands the logos show, for the planners: the only text the images may carry.
+     *
+     * @return list<string>
+     */
+    public function brandNames(): array
+    {
+        return $this->getMedia(self::LOGOS)->pluck('name')->map(fn(string $name) => trim($name))->filter()->unique()->values()->all();
     }
 
     /**

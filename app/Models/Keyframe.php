@@ -46,9 +46,6 @@ class Keyframe extends Model implements HasMedia
     /** While rendering: the drawn image is being checked. */
     public const STAGE_CHECKING = 'checking';
 
-    /** On a render: how the place differs from keyframe 1, found after drawing. */
-    public const PLACE_ISSUES = 'place_issues';
-
     /** On a render: after a move, why the image no longer fits the keyframe's point in the story. */
     public const MOVE_WARNING = 'move_warning';
 
@@ -58,8 +55,11 @@ class Keyframe extends Model implements HasMedia
     /** On a render: its background moved compared with the image it was drawn on, even after drawing it again. */
     public const BACKGROUND_MOVED = 'background_moved';
 
-    /** On a render drawn on a place: only its people and the things named in it were kept, the rest is the place itself. */
+    /** On a render drawn on a place: only its people and the objects they touch were kept, the rest is the place itself. */
     public const COMPOSITED = 'composited';
+
+    /** On a render drawn on a place: why it was kept as it was drawn instead of put onto the place. */
+    public const NOT_COMPOSITED = 'not_composited';
 
     /** On a render: what the automatic check found wrong with it, kept as notes; nothing is redrawn by itself. */
     public const CHECK_ISSUES = 'check_issues';

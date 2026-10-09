@@ -4,18 +4,16 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
-use App\Enums\ShotStatus;
 use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Http\Requests\Public\FirstKeyframeAdjustRequest;
 use App\Http\Requests\Public\KeyframeRenderRequest;
-use App\Jobs\GenerateKeyframes;
-use App\Jobs\GenerateRemainingKeyframes;
-use App\Jobs\TweakKeyframeImage;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Shots\FirstKeyframeChoice;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 /**
  * The step between planning and rendering: the director picks one of the
@@ -28,23 +26,12 @@ class FirstController
     /**
      * Choose an option for keyframe 1 and render the other keyframes from it.
      */
-    public function choose(KeyframeRenderRequest $request, Project $project, Shot $shot)
+    public function choose(KeyframeRenderRequest $request, Project $project, Shot $shot, FirstKeyframeChoice $choice)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
-        $this->ensureChoosing($shot, 'render');
-
-        $first = $shot->keyframes()->with('media')->firstOrFail();
-        $render = $first->renders()->firstWhere('id', $request->integer('render'))
-            ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the first keyframe.')]);
-
-        if ($first->rendering) {
-            throw ValidationException::withMessages(['render' => __('Wait until the adjusted option is drawn.')]);
-        }
-
-        $first->forceFill(['render_id' => $render->id])->save();
-
-        GenerateRemainingKeyframes::startFor($shot);
+        $choice->ensureChoosing($shot, 'render');
+        $choice->useFirst($shot, $this->render($shot, $request->integer('render')));
 
         return $this->afterAction($project, $shot);
     }
@@ -52,27 +39,11 @@ class FirstController
     /**
      * Draw another batch of options for keyframe 1.
      */
-    public function more(Project $project, Shot $shot)
+    public function more(Project $project, Shot $shot, FirstKeyframeChoice $choice)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
-        $this->ensureChoosing($shot, 'keyframes');
-
-        if ($shot->keyframes()->where('position', 1)->where('rendering', true)->exists()) {
-            throw ValidationException::withMessages(['keyframes' => __('Wait until the adjusted option is drawn.')]);
-        }
-
-        $shot->keyframes()->where('position', 1)->update(['rendering' => true, 'render_error' => null]);
-
-        $shot->forceFill([
-            'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
-            'storyline_error' => null,
-        ])->save();
-
-        // On a chosen place another version of keyframe 1 is drawn on it; otherwise another round of options.
-        $shot->hasChosenPlate()
-            ? GenerateRemainingKeyframes::dispatch($shot, onlyFirst: true)
-            : GenerateKeyframes::dispatch($shot, more: true);
+        $choice->more($shot);
 
         return $this->afterAction($project, $shot);
     }
@@ -81,31 +52,19 @@ class FirstController
      * Adjust one option for keyframe 1 before choosing it. The adjusted
      * version is added as a new option, so the original stays available.
      */
-    public function adjust(FirstKeyframeAdjustRequest $request, Project $project, Shot $shot)
+    public function adjust(FirstKeyframeAdjustRequest $request, Project $project, Shot $shot, FirstKeyframeChoice $choice)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
-        $this->ensureChoosing($shot, 'instruction');
-
-        $first = $shot->keyframes()->with('media')->firstOrFail();
-        $render = $first->renders()->firstWhere('id', $request->integer('render'))
-            ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the first keyframe.')]);
-
-        if ($first->rendering) {
-            throw ValidationException::withMessages(['instruction' => __('Wait until the current adjustment is done.')]);
-        }
-
-        $first->forceFill(['rendering' => true, 'render_error' => null])->save();
-
-        TweakKeyframeImage::dispatch($first, $request->validated('instruction'), $render->id, rewrite: $request->boolean('rewrite'));
+        $choice->ensureChoosing($shot, 'instruction');
+        $choice->adjust($shot, $this->render($shot, $request->integer('render')), (string) $request->validated('instruction'), $request->boolean('rewrite'));
 
         return $this->afterAction($project, $shot);
     }
 
-    private function ensureChoosing(Shot $shot, string $field): void
+    private function render(Shot $shot, int $id): Media
     {
-        if ($shot->status !== ShotStatus::FIRST_KEYFRAME_READY) {
-            throw ValidationException::withMessages([$field => __('The first keyframe is not waiting for a choice.')]);
-        }
+        return $shot->keyframes()->with('media')->firstOrFail()->renders()->firstWhere('id', $id)
+            ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the first keyframe.')]);
     }
 }

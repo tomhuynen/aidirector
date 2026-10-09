@@ -179,7 +179,8 @@ describe('view and destroy', function () {
             ->delete(route('public.projects.destroy', $project))
             ->assertRedirect(route('public.projects.index'));
 
-        $this->assertModelMissing($project);
+        // Kept, with what the system can learn from it, but no longer in the list.
+        $this->assertSoftDeleted($project);
     });
 });
 
