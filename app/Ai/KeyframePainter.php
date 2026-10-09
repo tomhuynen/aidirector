@@ -1014,6 +1014,33 @@ class KeyframePainter
             ->toMediaCollection(Shot::PLACE_STATES);
     }
 
+    /**
+     * The presenter's keyframe without the presenter, so their video can be
+     * put on a background that never moves: the edit model takes them out,
+     * and only around them its result is used. Made once per render.
+     *
+     * @throws Throwable when the image model or the cut-out fails
+     */
+    public function presenterBackground(Keyframe $keyframe, Media $render): Media
+    {
+        $made = $keyframe->getFirstMedia(Keyframe::PRESENTER_BACKGROUND);
+
+        if ($made !== null && (int) $made->getCustomProperty(Keyframe::FROM_RENDER) === $render->id) {
+            return $made;
+        }
+
+        $still = $this->bytes($render);
+        $prompt = KeyframeImageBrief::withoutPeople();
+        $emptied = $this->drawForShot($keyframe->shot, $prompt, [$this->referenceFor($render)], (string) Config::get('pipeline.models.keyframe_edit'));
+        $background = $this->composite->withoutPeople($still, $emptied['content'], $this->cutout->people($still));
+
+        return $keyframe
+            ->addMediaFromString($background)
+            ->usingFileName("presenter-background-{$keyframe->position}.png")
+            ->withCustomProperties([Keyframe::FROM_RENDER => $render->id, Keyframe::SENT => ['model' => $emptied['model'], 'prompt' => $prompt, 'images' => ['The keyframe, the image that is edited']]])
+            ->toMediaCollection(Keyframe::PRESENTER_BACKGROUND);
+    }
+
     private function bytes(Media $media): string
     {
         return (string) Storage::disk($media->disk)->get($media->getPathRelativeToRoot());

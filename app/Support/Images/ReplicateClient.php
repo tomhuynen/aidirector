@@ -29,8 +29,9 @@ class ReplicateClient
      * Run one prediction and return its output: a URL, or a list of them.
      *
      * @param  array<string, mixed>  $input
+     * @param  int  $waitSeconds  how long to keep polling, longer for a model that works through a video
      */
-    public function run(string $version, array $input): mixed
+    public function run(string $version, array $input, int $waitSeconds = self::WAIT_SECONDS): mixed
     {
         $prediction = $this->request()
             ->withHeaders(['Prefer' => 'wait=60'])
@@ -38,7 +39,7 @@ class ReplicateClient
             ->throw()
             ->json();
 
-        $deadline = time() + self::WAIT_SECONDS;
+        $deadline = time() + $waitSeconds;
 
         while (in_array($prediction['status'] ?? null, ['starting', 'processing'], true) && time() < $deadline) {
             Sleep::for(1500)->milliseconds();
@@ -50,6 +51,32 @@ class ReplicateClient
         }
 
         return $prediction['output'];
+    }
+
+    /**
+     * Uploads a file too large for a data URL, such as a video, and returns
+     * its id and the URL a model takes as input.
+     *
+     * @return array{id: string, url: string}
+     */
+    public function upload(string $bytes, string $fileName, string $mime): array
+    {
+        $file = $this->request()
+            ->timeout(180)
+            ->attach('content', $bytes, $fileName, ['Content-Type' => $mime])
+            ->post('files')
+            ->throw()
+            ->json();
+
+        return ['id' => (string) $file['id'], 'url' => (string) $file['urls']['get']];
+    }
+
+    /**
+     * Removes an uploaded file once the model is done with it.
+     */
+    public function forget(string $fileId): void
+    {
+        $this->request()->delete("files/{$fileId}");
     }
 
     /**

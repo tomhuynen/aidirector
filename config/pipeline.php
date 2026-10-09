@@ -216,6 +216,12 @@ return [
         'resolution' => '720p',
         // How the presenter moves while speaking: gestures with empty hands, a background that stands still.
         'motion' => 'Natural, calm hand gestures while speaking, with empty hands that look exactly as in the picture: no gloves, nothing held, nothing appears in the hands. The background stays completely still and does not move or change; only the person moves.',
+        // The presenter is cut out of their video and put on their keyframe without them, so nothing behind them can move.
+        'steady_background' => [
+            'enabled' => (bool) env('AI_COMPOSITE', true),
+            // arielreplicate/robust_video_matting
+            'matting_model' => env('AI_PRESENTER_MATTING_MODEL', '73d2128a371922d5d1abf0712a1d974be0e4e2358cc1218e4e34714767232bac'),
+        ],
         'voices' => [
             'male' => ['en' => '6be73833ef9a4eb0aeee399b8fe9d62b', 'es' => '707365599f8545d5b6ce7a32a20e9c93', 'fr' => '29b464727cc249f3bdf42f82562409f8', 'de' => '0971fe1493314d1f9a43602cf4a3b210', 'ja' => '662e1397965c484e8f65fa58c77effde', '*' => '3097f9a8fd3b4340b6bbe913177b378f'],
             'female' => ['en' => '16a09e4706f74997ba4ed05ea11470f6', 'es' => '246cdbf530954380a62109f3107fce0d', 'fr' => '4b1de1582d2c477485ad2e0c2717f0ff', 'de' => '5d25200b1d4442d6b7265a9ff5fad582', 'ja' => '926a3d25100b4687a80fc76ec8f2bf38', '*' => '80441555167a467e967ab9487d844a30'],

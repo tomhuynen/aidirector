@@ -32,6 +32,12 @@ class Keyframe extends Model implements HasMedia
 
     public const THUMBNAIL = 'thumbnail';
 
+    /** A presenter's keyframe without the presenter: the still background their video is put on, with the render it was made from. */
+    public const PRESENTER_BACKGROUND = 'presenter_background';
+
+    /** On the presenter background: the id of the render it was made from. */
+    public const FROM_RENDER = 'from_render';
+
     /**
      * Custom properties on a render made by an adjustment: what the director
      * asked, and the instruction the image model actually received.
@@ -160,6 +166,7 @@ class Keyframe extends Model implements HasMedia
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection(self::RENDERS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::PRESENTER_BACKGROUND)->singleFile()->acceptsMimeTypes(['image/png']);
     }
 
     public function registerMediaConversions(?Media $media = null): void

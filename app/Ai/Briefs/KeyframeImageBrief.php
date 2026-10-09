@@ -343,6 +343,21 @@ class KeyframeImageBrief
     }
 
     /**
+     * The prompt for the background of a presenter shot: the keyframe with
+     * the presenter taken out, so the moving presenter can be put on a
+     * background that never moves.
+     */
+    public static function withoutPeople(): string
+    {
+        return implode("\n", [
+            'Edit the attached image. Remove the person completely and show what is behind them, as the place would look if they had never been there.',
+            'Keep everything else exactly as it is: the place, the framing, the camera, the blur, the light, the colours and the style.',
+            'Do not add people or anything else in their spot.',
+            'Do not add text, captions, brand names, logos or watermarks.',
+        ]);
+    }
+
+    /**
      * The prompt for a later state of the empty place, such as a door that is
      * closed by now: only the change is made, the place stays without people.
      */

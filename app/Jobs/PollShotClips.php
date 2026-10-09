@@ -13,6 +13,7 @@ use App\Support\Shots\MergeShots;
 use App\Support\Video\ClipJoiner;
 use App\Support\Video\OpenRouterVideoClient;
 use App\Support\Video\SilentVideo;
+use App\Support\Video\SteadyPresenter;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -30,7 +31,8 @@ use Throwable;
  * per language. A montage's clips are cut to their share of the shot length
  * and joined with crossfades into the shot's video once all are in; a
  * presenter's clips keep their sound and are stored per language, the first
- * one also as the shot's video. While clips still render, the job queues
+ * one also as the shot's video, with the presenter put on a background that
+ * never moves. While clips still render, the job queues
  * itself for the next round.
  */
 #[DeleteWhenMissingModels]
@@ -94,6 +96,11 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
             }
 
             $bytes = $videos->download((string) $clip['job_id']);
+
+            // Only the presenter moves: whatever the video model made behind them is replaced by their still background.
+            if ($shot->isPresenter()) {
+                $bytes = app(SteadyPresenter::class)->steady($shot, $bytes);
+            }
 
             // A presenter speaks: the clip keeps its sound.
             $shot->addMediaFromString($shot->isPresenter() ? $bytes : app(SilentVideo::class)->strip($bytes))

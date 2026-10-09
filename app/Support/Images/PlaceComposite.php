@@ -46,6 +46,9 @@ class PlaceComposite
     /** How much wider than an object in the place its area is taken from the drawing, as a share of the image width, so its new shape fits too. */
     private const float AREA_MARGIN = 0.025;
 
+    /** How far around the people, as a share of the image width, the picture without them takes the edit, so no edge or halo of them is left. */
+    private const float EMPTIED_MARGIN = 0.04;
+
     /** How close to an object, as a share of the image width, a person counts as touching it, such as by a cord or a hand just in front of it. */
     private const float TOUCH_MARGIN = 0.02;
 
@@ -116,6 +119,24 @@ class PlaceComposite
         $keep->gaussianBlurImage(0, 1.5);
 
         return $this->paste($placeImage, $editedImage, $keep);
+    }
+
+    /**
+     * The picture without its people: where the people are, and well around
+     * them, the edit that took them out; the rest is the picture itself, so
+     * the background is exactly the one they were drawn in front of.
+     *
+     * @param  string  $people  the mask of the people in the picture
+     */
+    public function withoutPeople(string $picture, string $emptied, string $people): string
+    {
+        [$pictureImage, $emptiedImage] = $this->pair($picture, $emptied);
+        $keep = $this->read($people, $pictureImage);
+        $margin = (string) max(1, (int) round(self::EMPTIED_MARGIN * $pictureImage->getImageWidth()));
+        $keep->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, $margin));
+        $keep->gaussianBlurImage(0, 6);
+
+        return $this->paste($pictureImage, $emptiedImage, $keep);
     }
 
     /**

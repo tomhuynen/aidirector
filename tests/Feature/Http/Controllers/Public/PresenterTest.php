@@ -33,6 +33,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Ai\Image;
 use Laravel\Ai\Prompts\ImagePrompt;
 
@@ -188,6 +189,119 @@ it('keeps every language with its sound and shows them on the shot', function ()
     actingAs($this->director, 'director')
         ->get(route('public.shots.view', [$this->project, $shot]))
         ->assertInertia(fn($page) => $page->where('shot.languageVideos.1.locale', 'nl-NL')->where('shot.languageVideos.1.name', 'Dutch (Netherlands)'));
+})->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
+
+/**
+ * The cut-out model's result: the presenter opaque in the middle, the rest transparent.
+ */
+function presenterCutout(): string
+{
+    $image = imagecreatetruecolor(90, 160);
+    imagesavealpha($image, true);
+    imagefill($image, 0, 0, (int) imagecolorallocatealpha($image, 0, 0, 0, 127));
+    imagefilledrectangle($image, 35, 40, 55, 160, (int) imagecolorallocatealpha($image, 255, 255, 255, 0));
+
+    ob_start();
+    imagepng($image);
+
+    return (string) ob_get_clean();
+}
+
+/**
+ * A short clip with sound, or a grey matte of the same size: black is background.
+ */
+function presenterClip(string $source): string
+{
+    $directory = storage_path('tmp/presenter-test-' . Str::uuid());
+    File::ensureDirectoryExists($directory);
+    Process::run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', "{$source}size=160x284:rate=24:duration=1", '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-shortest', '-pix_fmt', 'yuv420p', "{$directory}/clip.mp4"])->throw();
+    $clip = File::get("{$directory}/clip.mp4");
+    File::deleteDirectory($directory);
+
+    return $clip;
+}
+
+/**
+ * The colour in the middle of the first frame of a video.
+ *
+ * @return array{0: int, 1: int, 2: int}
+ */
+function presenterFrameColour(string $video): array
+{
+    $directory = storage_path('tmp/presenter-test-' . Str::uuid());
+    File::ensureDirectoryExists($directory);
+    File::put("{$directory}/video.mp4", $video);
+    Process::run(['ffmpeg', '-y', '-v', 'error', '-i', "{$directory}/video.mp4", '-frames:v', '1', "{$directory}/frame.png"])->throw();
+    $frame = imagecreatefrompng("{$directory}/frame.png");
+    $colour = imagecolorsforindex($frame, imagecolorat($frame, 80, 142));
+    File::deleteDirectory($directory);
+
+    return [$colour['red'], $colour['green'], $colour['blue']];
+}
+
+describe('steady background', function () {
+    beforeEach(function () {
+        Queue::fake();
+        Config::set('pipeline.presenter.steady_background.enabled', true);
+        Config::set('services.replicate.token', 'test-token');
+        Config::set('pipeline.models.keyframe_edit', 'google/gemini-3.1-flash-image-preview');
+        Image::fake(fn() => base64_encode(presenterPng()));
+
+        $this->clip = presenterClip('testsrc=');
+        $this->shot = presenterShot($this->project, ['status' => ShotStatus::VIDEO_PENDING, 'video_submitted_at' => now(), 'montage_clips' => [
+            ['locale' => 'en-GB', 'job_id' => 'avatar_en', 'status' => 'pending'],
+        ]]);
+        $this->still = Keyframe::factory()->for($this->shot)->create(['position' => 1]);
+        $this->still->addMediaFromString(presenterPng())->usingFileName('still.png')->toMediaCollection(Keyframe::RENDERS);
+    });
+
+    it('puts the presenter on their keyframe without them, so nothing behind them moves', function () {
+        $matting = (string) Config::get('pipeline.presenter.steady_background.matting_model');
+        Http::fake([
+            'openrouter.ai/api/v1/videos/*/content*' => Http::response($this->clip),
+            'openrouter.ai/api/v1/videos/*' => Http::response(['status' => 'completed', 'usage' => ['cost' => 0.3]]),
+            'api.replicate.com/v1/files/*' => Http::response(null, 204),
+            'api.replicate.com/v1/files' => Http::response(['id' => 'file_1', 'urls' => ['get' => 'https://api.replicate.com/v1/files/file_1']]),
+            'api.replicate.com/v1/predictions' => fn(Request $request) => Http::response([
+                'status' => 'succeeded',
+                'output' => $request['version'] === $matting ? 'https://replicate.delivery/matte.mp4' : 'https://replicate.delivery/people.png',
+            ]),
+            // Nobody in the matte: every frame is the still background.
+            'replicate.delivery/matte.mp4' => Http::response(presenterClip('color=c=black:')),
+            'replicate.delivery/people.png' => Http::response(presenterCutout()),
+        ]);
+
+        (new PollShotClips($this->shot))->handle(app(OpenRouterVideoClient::class), app(ClipJoiner::class));
+
+        $video = $this->shot->refresh()->getFirstMedia(Shot::PRESENTER_VIDEOS);
+        [$red, $green, $blue] = presenterFrameColour((string) Storage::disk($video->disk)->get($video->getPathRelativeToRoot()));
+        $background = $this->still->refresh()->getFirstMedia(Keyframe::PRESENTER_BACKGROUND);
+
+        // The colour of the still, not the test pattern of the clip.
+        expect([$red, $green, $blue])->each->toBeGreaterThan(150)
+            ->and(abs($red - 200) + abs($green - 180) + abs($blue - 160))->toBeLessThan(30)
+            ->and($background->getCustomProperty(Keyframe::FROM_RENDER))->toBe($this->still->render()->id);
+        Http::assertSent(fn(Request $request) => $request->url() === 'https://api.replicate.com/v1/predictions'
+            && $request['version'] === $matting
+            && $request['input'] === ['input_video' => 'https://api.replicate.com/v1/files/file_1', 'output_type' => 'alpha-mask']);
+        Http::assertSent(fn(Request $request) => $request->method() === 'DELETE' && $request->url() === 'https://api.replicate.com/v1/files/file_1');
+        Image::assertGenerated(fn(ImagePrompt $prompt) => str_contains($prompt->prompt, 'Remove the person completely'));
+    });
+
+    it('keeps the video as it came when the presenter cannot be cut out', function () {
+        Http::fake([
+            'openrouter.ai/api/v1/videos/*/content*' => Http::response($this->clip),
+            'openrouter.ai/api/v1/videos/*' => Http::response(['status' => 'completed', 'usage' => ['cost' => 0.3]]),
+            'api.replicate.com/*' => Http::response(['detail' => 'Invalid version'], 422),
+        ]);
+
+        (new PollShotClips($this->shot))->handle(app(OpenRouterVideoClient::class), app(ClipJoiner::class));
+
+        $video = $this->shot->refresh()->getFirstMedia(Shot::PRESENTER_VIDEOS);
+
+        expect($this->shot->status)->toBe(ShotStatus::VIDEO_READY)
+            ->and(Storage::disk($video->disk)->get($video->getPathRelativeToRoot()))->toBe($this->clip);
+    });
 })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
 
 it('switches to a presenter when the plan agreed in the chat says so', function () {
