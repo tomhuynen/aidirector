@@ -45,7 +45,8 @@ class RetimeShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $shot = $this->shot->load('project');
         $current = $shot->storylineFraming()['seconds'] ?? null;
 
-        if ($shot->duration !== null || $current === null || $shot->storylineKeyframes() === []) {
+        // A presenter lasts as long as their text; there is no motion to time.
+        if ($shot->duration !== null || $current === null || $shot->storylineKeyframes() === [] || $shot->isPresenter()) {
             return;
         }
 

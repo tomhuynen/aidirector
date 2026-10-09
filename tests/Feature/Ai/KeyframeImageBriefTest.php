@@ -228,3 +228,43 @@ it('gives the plan director and the planner the documents shared at the project 
         ->and((new App\Ai\Agents\StorylineWriter($shot))->promptFor())
         ->toContain('Takeaway: Your safety is our highest priority.');
 });
+
+it('names the setting among the attached images of an empty place, in the order they are attached', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the counter.']);
+
+    expect(KeyframeImageBrief::plate($shot, new KeyframeReferences(style: new StoredImage('style.png'), setting: new StoredImage('place.png'), settingLabel: 'the place of SH010'), 0))
+        ->toContain('The first attached image is the project\'s style reference sheet.')
+        ->toContain('The second attached image is the place of SH010. Draw this same place, without its people');
+});
+
+it('tells the checks, the review and the video about a change to the place the plan makes at a keyframe', function () {
+    $shot = Shot::factory()->for(Project::factory())->create(['storyline' => ['keyframes' => [
+        ['title' => 'Open', 'description' => 'She stands by the open door.'],
+        ['title' => 'Closed', 'description' => 'She has closed the door.', 'place_change' => 'The door on the left is closed.'],
+    ]]]);
+    $second = App\Models\Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'She has closed the door.']);
+
+    expect($second->setRelation('shot', $shot)->fullDescription())->toBe('She has closed the door. The place changes here: The door on the left is closed.');
+});
+
+it('only asks the check to compare with the keyframe before when it is attached', function () {
+    $keyframe = App\Models\Keyframe::factory()->for(framedShot(null))->create();
+
+    expect((string) (new App\Ai\Agents\KeyframeChecker($keyframe, ['the place', 'the keyframe to check'], placeIsFixed: true))->instructions())
+        ->toContain('compared with its references')
+        ->not->toContain('between the keyframe directly before and this one')
+        ->toContain('category (person, object, state, lettering)')
+        ->and((string) (new App\Ai\Agents\KeyframeChecker($keyframe, ['the place', 'the keyframe directly before: the reference for the state of objects', 'the keyframe to check']))->instructions())
+        ->toContain('between the keyframe directly before and this one');
+});
+
+it('times every kind of shot by its own rule and plans keyframes per kind', function () {
+    $shot = framedShot(null);
+    $shot->forceFill(['kind' => App\Enums\ShotKind::MONTAGE])->save();
+
+    expect((string) (new App\Ai\Agents\ShotTimer($shot))->instructions())->toContain('A montage: about 2 to 3 seconds per still.')
+        ->and((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain('a close-up 2 or 3; a montage 3 to 5 stills')
+        ->and((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
+        ->toContain('For a close-up:')
+        ->toContain('always in English, whatever language the director writes in');
+});

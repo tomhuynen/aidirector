@@ -28,7 +28,7 @@ class ShotTimer implements Agent, HasReasoningEffort, HasStructuredOutput
 
     public function instructions(): Stringable|string
     {
-        $rules = StorylineWriter::timingRules();
+        $rules = StorylineWriter::timingRulesFor($this->shot->kindOrScene());
 
         return <<<INSTRUCTIONS
             You time one shot of an animated e-learning film from its keyframes: how long the animation takes to go from the first keyframe to the last.

@@ -6,6 +6,7 @@ namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Contracts\HasReasoningEffort;
+use App\Enums\ShotKind;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -106,6 +107,14 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             ? "\n\nThis shot is a montage: every keyframe is a separate still with its own place and camera, joined with crossfades. Ignore the checks on the place staying still and on one continuous moment. Judge instead whether each still shows its own part of the takeaway at a glance, without text, boards or pictograms, whether the stills in order say the takeaway, and whether the people stay recognisable as the same people."
             : '';
 
-        return "The shot teaches: {$this->shot->takeaway}\nStoryline: {$storyline}{$montage}\n\nKeyframes:\n{$lines}\n\n{$images}";
+        // A close-up shows hands and one object on purpose; asking for faces or bigger people would undo it.
+        $closeUp = $this->shot->kindOrScene() === ShotKind::CLOSE_UP
+            ? "\n\nThis shot is a close-up: the hands and one object fill the frame, and faces and whole people are left out on purpose. Judge whether the object and what the hands do with it are large, clear and readable, and whether the hands and sleeves stay the same person's; never ask for faces, whole people or a wider view."
+            : '';
+
+        $rules = $this->shot->project->rulesBrief();
+        $rules = $rules === '' ? '' : "\n\nRules the director confirmed for this project; a keyframe that breaks one is an issue:\n{$rules}";
+
+        return "The shot teaches: {$this->shot->takeaway}\nStoryline: {$storyline}{$montage}{$closeUp}{$rules}\n\nKeyframes:\n{$lines}\n\n{$images}";
     }
 }

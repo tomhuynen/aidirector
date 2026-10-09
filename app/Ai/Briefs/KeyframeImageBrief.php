@@ -34,10 +34,8 @@ class KeyframeImageBrief
             return self::onFirstKeyframe($shot, $keyframe, $references);
         }
 
-        $style = $shot->project->style;
-
         $lines = [
-            "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
+            $shot->project->styleBrief(),
             '',
         ];
 
@@ -139,9 +137,8 @@ class KeyframeImageBrief
      */
     private static function presenter(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
-        $style = $shot->project->style;
         $lines = [
-            "A presenter shot for an e-learning film. Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
+            'A presenter shot for an e-learning film. ' . $shot->project->styleBrief(),
             Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null),
             'Framing: a medium close-up from the chest up. The person is centred, faces the camera straight on and looks into the lens, shoulders square, with a friendly, calm expression and the mouth closed. The head and face fill about a third of the frame height, the eyes in the upper third.',
             'Background: the place, softly out of focus, calm and muted, with no readable details and nothing behind the head that draws attention.',
@@ -153,10 +150,6 @@ class KeyframeImageBrief
 
         if ($references->style !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly. Do not copy its subjects or layout.';
-        }
-
-        if ($references->setting !== null) {
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. Draw this same place: the same walls, floor, furniture, objects, colours and light, without its people. The camera for this option decides where it stands.";
         }
 
         foreach ($references->elementImages as $entry) {
@@ -244,15 +237,14 @@ class KeyframeImageBrief
      */
     public static function plate(Shot $shot, KeyframeReferences $references, int $variation): string
     {
-        $style = $shot->project->style;
         $framing = $shot->storylineFraming();
         $steps = collect($shot->storylineKeyframes())->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null))->join("\n");
 
         $lines = [
-            "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
+            $shot->project->styleBrief(),
             '',
             'Draw the place where this shot plays, empty: no people at all. Every keyframe of the shot is drawn on top of this picture later, so the camera, the framing and the place must suit all of them.',
-            'Framing: ' . $shot->shotSize()->framing() . ' Frame it for the people who will stand at the spot: ' . $shot->shotSize()->personScale() . '.',
+            'Framing: ' . $shot->shotSize()->framing() . ' The people are added later, so do not draw them, but leave room for them at the spot at this size: ' . $shot->shotSize()->personScale() . '.',
         ];
 
         if (filled($framing['spot'] ?? null)) {
@@ -269,11 +261,16 @@ class KeyframeImageBrief
             self::plateVariation($variation),
         );
 
-        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth'];
+        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
         $attached = 0;
 
         if ($references->style !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly. Do not copy its subjects or layout.';
+        }
+
+        // In the order the images are attached: the setting comes right after the style sheet.
+        if ($references->setting !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. Draw this same place, without its people: the same walls, floor, furniture, objects, colours and light. The camera for this option decides where it stands.";
         }
 
         foreach ($references->elementImages as $entry) {
@@ -308,7 +305,7 @@ class KeyframeImageBrief
     {
         $directions = [
             'Stage it as described.',
-            'Choose a different calm part of the same place for the spot than an obvious first choice, for example another side of the building, keeping the same framing.',
+            'Keep the spot; place the camera a little closer and lower, so the people and the object they act on are larger in the frame.',
             'Choose different lighting or time of day for the same spot and framing.',
         ];
 
@@ -323,7 +320,7 @@ class KeyframeImageBrief
     {
         $directions = [
             'The camera faces the spot straight on, at eye level, as described.',
-            'The camera is turned around: it stands at the other end of the place and looks back at the spot, so the background behind the spot is another part of the place, and what stood left now stands right.',
+            'The camera stands further to one side of the spot, at a clear angle, so another part of the place is behind it; what the plan puts on the left of the frame stays on the left.',
             'The camera stands side-on across the place, close and a little lower: the spot and the object the story turns on are large in the foreground, and the far side of the place fills the back.',
         ];
 

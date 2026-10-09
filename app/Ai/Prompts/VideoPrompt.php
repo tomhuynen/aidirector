@@ -42,7 +42,7 @@ class VideoPrompt
 
             $parts['details'],
 
-            'Keep the camera stationary and maintain the same framing whenever possible. No cuts, camera transitions, scene changes, morphing, duplicated body parts, disappearing objects, unexplained object movement or changes to the character\'s appearance. No text, captions, numbers or logos. No sound.',
+            'The camera never moves: the same position, angle and framing from the first frame to the last. No cuts, camera transitions, scene changes, morphing, duplicated body parts, disappearing objects, unexplained object movement or changes to the character\'s appearance. No text, captions, numbers or logos. No sound.',
 
             "Primary objective: faithfully animate the supplied storyboard rather than reinterpret it. Preserve what is shown in the keyframes; invent only the intermediate motion necessary to connect them naturally. Remember: the first frame is keyframe 1 exactly and the last frame is keyframe {$count} exactly.",
         ]);

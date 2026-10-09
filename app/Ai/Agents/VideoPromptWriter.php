@@ -70,7 +70,6 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
     public function promptFor(iterable $keyframes, int $duration): string
     {
         $shot = $this->shot;
-        $style = $shot->project->style;
 
         $frames = collect($keyframes)
             ->map(fn(Keyframe $keyframe) => "{$keyframe->position}. {$keyframe->title}: {$keyframe->fullDescription()}")
@@ -80,7 +79,8 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
 
         return implode("\n\n", array_filter([
             "Write the video prompt for this shot of about {$duration} seconds.",
-            "Visual style of the project: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
+            $shot->project->styleBrief() === '' ? null : 'Of the project: ' . $shot->project->styleBrief(),
+            $shot->project->rulesBrief() === '' ? null : "Rules the director confirmed for this project, keep to them in the video:\n{$shot->project->rulesBrief()}",
             "Shot: {$shot->title}. Takeaway: {$shot->takeaway}.",
             $storyline ? "Storyline the keyframes were planned from: {$storyline['storyline']}" : null,
             "Keyframes, in order:\n{$frames}",

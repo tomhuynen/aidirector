@@ -174,3 +174,15 @@ it('says which language has no voice instead of sending an empty one', function 
         ->toThrow(RuntimeException::class, 'No voice is set up for en-GB.');
     Http::assertNothingSent();
 });
+
+it('says a much too long English track shorter too', function () {
+    Http::fake(['openrouter.ai/api/v1/audio/speech' => Http::response(fakeMp3(), 200, ['Content-Type' => 'audio/mpeg'])]);
+    $length = fakeAudioLength(8.0);
+    VoiceOverTranslator::fake([['text' => 'Shorter.']]);
+    $shot = spokenShot($this->project);
+
+    (new GenerateVoiceOverAudio($shot, 'en-GB'))->handle(app(OpenRouterSpeechClient::class), $length);
+
+    expect($shot->fresh()->getFirstMedia(Shot::VOICE_OVERS)->getCustomProperty('text'))->toBe('Shorter.');
+    VoiceOverTranslator::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Say the same in fewer words'));
+});

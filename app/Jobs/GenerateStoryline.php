@@ -80,7 +80,8 @@ class GenerateStoryline implements ShouldQueue
             'storyline' => [
                 // Places and objects the plan needs that the cast and sets do not have yet, for the director to add.
                 ...(($new = self::newElementsFrom($shot, $response['new_elements'] ?? null)) !== [] ? ['new_elements' => $new] : []),
-                'framing' => $response['framing'],
+                // Within what the video model renders, so the voice-over is written for the length the video gets.
+                'framing' => [...(array) $response['framing'], 'seconds' => Shot::clampSeconds((int) ($response['framing']['seconds'] ?? $shot->durationInSeconds()))],
                 'keyframes' => array_values($response['keyframes']),
             ],
             'storyline_error' => null,

@@ -36,9 +36,6 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     public function instructions(): Stringable|string
     {
         $project = $this->shot->project;
-        $style = $project->style;
-        $min = Config::get('pipeline.keyframes.min');
-        $max = Config::get('pipeline.keyframes.max');
         $limits = VideoLimitsBrief::brief();
 
         return <<<INSTRUCTIONS
@@ -51,7 +48,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Project: {$project->title}
             Project description: {$project->description}
-            Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.
+            {$project->styleBrief()}
             Aspect ratio: {$this->shot->aspectRatio()->value}.
             {$this->lengthRule()}
 
@@ -67,7 +64,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             What the image and video models cannot do in one shot, each with why it fails and what to do instead. Plan every shot around these:
             {$limits}
 
-            The silent story, the most important rule: the shot plays without words, voice-over, sound or text, so the pictures alone must carry the takeaway.
+            The silent story, the most important rule: the pictures alone must carry the takeaway, as if the shot played without words, sound or text. A voice-over is added later; it only names and reinforces what the pictures show, never what they leave out.
             - Talking, explaining, welcoming, smiling, nodding, listening, agreeing, signalling or acknowledging never carry the takeaway; they may only go with the act.
             - Test every keyframe: someone who sees only this image, with the sound off, can say what happens in it. Test the row: someone who sees only the images in order can say the takeaway. When they cannot, change the act or add a keyframe for the missing step.
 
@@ -76,13 +73,13 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             Rules for every shot:
             - Shot title: two to four words naming the scene, such as the place, the person or the moment.
             - Storyline: two to four sentences, in present tense, from beginning to end, that land the takeaway with one clear, visible action a viewer can follow in the shot length, not a still moment; a montage has its own rule below. Refer to the cast and sets by their names, used as a noun with "the". When the director names people, places or objects they want in the shot, use all of them.
-            - Produce between {$min} and {$max} keyframes, except for a presenter shot. Use as many as the silent story above needs and no more: every step a viewer must see to understand it without words gets its own keyframe.
+            - Keyframes per kind: a scene 3 or 4, and 5 only when the story clearly needs a fifth step; a close-up 2 or 3; a montage 3 to 5 stills; a presenter shot exactly 1. Use as many as the silent story above needs and no more: every step a viewer must see to understand it without words gets its own keyframe.
             - Title: two to four words naming the moment.
             - Description: exactly what is visible in this keyframe, two to four sentences, 30 to 70 words, in present tense. It goes to the image model as written and the check judges the image by it. Call the cast and sets by their exact names and never describe their appearance, such as age, build, hair, clothing or colours; their pictures decide that. Describe the spot with the context objects on it and where they are, and any object that is not in the cast and sets (use the same wording for these in every keyframe), then each person's pose, gaze and expression, which hand holds what (named by the side of the frame it is on, such as "the hand on the left of the frame", never as "his left hand" or "her right hand": with someone who faces away those are the other way round, and the image model reads them wrong), and the state of the key objects. When someone picks something up or takes it out, also say that the spot it came from is now empty, such as "the cradle on the wall is empty". In a scene, say which way each person faces from the camera's point of view: face to the camera, back to the camera, or side-on facing left or right in the frame, and whether they move towards or away from the camera or to the left or right of the frame. Never write "forward", "looking forward", "ahead" or "angled into": the image model then draws them facing the viewer. Concrete nouns, no style words: the visual style is added separately.
             - Spatial fact: for a scene, as its rule below says; leave it empty for a montage or a presenter shot.
             - Place change: when something fixed in the place changes state in this keyframe compared with the keyframe before and stays that way, such as a door that is now closed, a valve that is turned or a light that is on, say how it looks now in one short sentence, such as "The meeting-room door on the left is closed, with a faint wisp of smoke at the gap." Only fixed parts of the place, never the people or what they pick up or hold. Leave it empty when nothing fixed changes, always in keyframe 1, and for a montage or a presenter shot.
             - Place part: the changed thing from the place change in one to three plain words an object finder understands, such as "door" or "valve wheel"; empty when there is no place change.
-            - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
+            - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear. At most three people and objects of the cast and sets per keyframe are drawn from their pictures, so keep to the ones the keyframe needs.
             - Props: use as few hand-held objects as the story needs, ideally one per character. Leave out anything that does not change what the viewer learns, such as a lighter when the point is putting the cigarette away.
             - Readable props, because the video model can only animate what it can read and turns an unclear object into a copy of the main one: every object the story needs is large enough to recognise at a glance and has a colour that stands out from the clothing and the surface behind it. Hold it away from the body, clear of other objects. When a character holds two objects, keep the hands apart and make the objects clearly different in shape and colour. Say in the description which hand holds which object, by the side of the frame it is on, and keep it in that hand in every keyframe unless the story moves it. Each hand stays on its own side of the body: a hand never reaches across to the other side, and arms never cross.
             {$this->sceneRules()}{$this->closeUpRules()}{$this->montageRules()}{$this->presenterRules()}
@@ -296,6 +293,23 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         }
 
         return 'Shot length: choose it yourself as the seconds. ' . self::timingRules();
+    }
+
+    /**
+     * How long a shot of a kind lasts: per step for a scene, per step for a
+     * close-up, per still for a montage.
+     */
+    public static function timingRulesFor(ShotKind $kind): string
+    {
+        $min = (int) Config::get('pipeline.video.min_duration');
+        $max = (int) Config::get('pipeline.video.max_duration');
+
+        return match ($kind) {
+            ShotKind::CLOSE_UP => "A close-up: about 2 seconds per step from one keyframe to the next. Round to whole seconds, between {$min} and {$max}.",
+            ShotKind::MONTAGE => "A montage: about 2 to 3 seconds per still. Round to whole seconds, between {$min} and {$max}.",
+            ShotKind::PRESENTER => "A presenter shot: the time the voice-over takes to say. Round to whole seconds, between {$min} and {$max}.",
+            default => self::timingRules(),
+        };
     }
 
     /**

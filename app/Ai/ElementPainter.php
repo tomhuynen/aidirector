@@ -48,12 +48,11 @@ class ElementPainter
     public function paint(Element $element, ?Keyframe $source = null, array $includes = []): void
     {
         $project = $element->project;
-        $style = $project->style;
         $render = $source?->render();
 
         if ($render !== null) {
             $prompt = implode("\n", [
-                "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
+                $project->styleBrief(),
                 $element->type->referenceStaging(),
                 $element->promptLine(),
                 "The first attached image is a keyframe in which {$element->name} appears. Draw {$element->name} exactly as it looks there: same shape, proportions, colours and details. Leave out everything else in that image.",
@@ -73,7 +72,7 @@ class ElementPainter
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
         $attachments = [];
         $lines = [
-            "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
+            $project->styleBrief(),
             $element->type->referenceStaging(),
             $element->promptLine(),
         ];
@@ -84,7 +83,7 @@ class ElementPainter
         }
 
         if ($anchor !== null) {
-            $lines[] = 'The ' . $ordinals[count($attachments)] . " attached image is {$anchor->name}, already drawn for this project. Draw {$element->name} in exactly the same style: the same proportions and head-to-body ratio, line work, shading and level of detail, so they look like they belong in the same film. Do not copy {$anchor->name}'s face, clothing or pose.";
+            $lines[] = 'The ' . $ordinals[count($attachments)] . " attached image is {$anchor->name}, already drawn for this project. Draw {$element->name} in exactly the same style: " . ($anchor->type === ElementType::PERSON && $element->type === ElementType::PERSON ? 'the same proportions and head-to-body ratio, ' : '') . "the same line work, shading, colours and level of detail, so they look like they belong in the same film. Do not copy {$anchor->name}'s " . ($anchor->type === ElementType::PERSON ? 'face, clothing or pose.' : 'shape or layout.');
             $attachments[] = $this->keyframes->referenceFor($anchor->reference());
         }
 
@@ -92,7 +91,7 @@ class ElementPainter
             // The image model often refuses photos of real people, so a drawing of the person is made first.
             $drawing = $this->drawPerson($element, ImageFile::fromStorage($photo->getPathRelativeToRoot(), $photo->disk));
             $lines[] = 'The ' . $ordinals[count($attachments)] . " attached image is a drawing of {$element->name}. Take only who they are from it: face, hair, build and clothing. "
-                . ($anchor !== null ? "Take the proportions, head size and body shape from {$anchor->name}, so {$element->name} stands like the rest of the cast," : 'Give them realistic adult proportions,')
+                . ($anchor?->type === ElementType::PERSON ? "Take the proportions, head size and body shape from {$anchor->name}, so {$element->name} stands like the rest of the cast," : 'Give them adult proportions the way the visual style draws people,')
                 . ' and redraw them in the project style.';
             $attachments[] = $drawing;
         } elseif ($photo !== null) {
@@ -316,7 +315,6 @@ class ElementPainter
     {
         $round = $suggestion->round;
         $project = $round->project;
-        $style = $project->style ?? [];
         $model = Config::get('pipeline.models.image');
         $photo = $suggestion->sourcePhoto;
         $styleSheet = $this->keyframes->styleReferenceFor($project);
@@ -333,7 +331,7 @@ class ElementPainter
         array_push($attachments, ...$logoImages);
 
         $prompt = implode("\n", array_filter([
-            'Visual style: ' . ($style['look'] ?? '') . '. Medium: ' . ($style['medium'] ?? '') . '. Mood: ' . ($style['mood'] ?? '') . '. Palette: ' . ($style['palette'] ?? '') . '.',
+            $project->styleBrief(),
             $round->type->referenceStaging(),
             "{$suggestion->name} ({$round->type->value}): {$suggestion->description}",
             match (true) {

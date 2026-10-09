@@ -1,0 +1,48 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Ai\Agents\ShotReviewer;
+use App\Ai\Agents\TweakInterpreter;
+use App\Ai\Agents\VideoPromptWriter;
+use App\Ai\Briefs\KeyframeImageBrief;
+use App\Enums\ProjectRuleStatus;
+use App\Enums\ShotKind;
+use App\Models\Keyframe;
+use App\Models\Project;
+use App\Models\Shot;
+
+beforeEach(function () {
+    $this->project = Project::factory()->create();
+    $this->project->rules()->create(['category' => 'distance to hazard', 'text' => 'People stand within two steps of the hazard.', 'status' => ProjectRuleStatus::ACTIVE]);
+});
+
+it('leaves out what the visual style does not fill in', function () {
+    $this->project->forceFill(['style' => ['look' => 'Soft 3D', 'medium' => '', 'mood' => 'calm.', 'palette' => null]])->save();
+
+    expect($this->project->styleBrief())->toBe('Visual style: Soft 3D. Mood: calm.')
+        ->and(tap($this->project)->forceFill(['style' => []])->styleBrief())->toBe('');
+});
+
+it('gives the learned project rules to the tweaks, the shot review and the video prompt', function () {
+    $shot = Shot::factory()->for($this->project)->create()->load('project');
+    $keyframe = Keyframe::factory()->for($shot)->create()->setRelation('shot', $shot);
+
+    expect((string) (new TweakInterpreter($keyframe, []))->instructions())->toContain('People stand within two steps of the hazard.')
+        ->and((new ShotReviewer($shot, collect([$keyframe])))->promptFor())->toContain('People stand within two steps of the hazard.')
+        ->and((new VideoPromptWriter($shot))->promptFor([$keyframe], 4))->toContain('People stand within two steps of the hazard.');
+});
+
+it('does not ask the review of a close-up for faces or whole people', function () {
+    $shot = Shot::factory()->for($this->project)->create(['kind' => ShotKind::CLOSE_UP])->load('project');
+
+    expect((new ShotReviewer($shot, collect()))->promptFor())->toContain('never ask for faces, whole people or a wider view');
+});
+
+it('keeps left and right and the planned spot in the options of a place and of keyframe 1', function () {
+    expect(collect(range(0, 2))->map(fn(int $index) => KeyframeImageBrief::plateVariation($index))->join(' '))
+        ->not->toContain('what stood left now stands right')
+        ->toContain('what the plan puts on the left of the frame stays on the left')
+        ->and(collect(range(0, 2))->map(fn(int $index) => KeyframeImageBrief::variation($index))->join(' '))
+        ->not->toContain('different calm part of the same place for the spot');
+});

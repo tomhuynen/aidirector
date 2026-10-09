@@ -59,7 +59,8 @@ class ShotPlan
             'storyline' => [
                 ...array_diff_key($shot->storyline ?? [], ['setting_from' => true, 'keyframes' => true, 'framing' => true, 'place_edits' => true]),
                 'framing' => [
-                    'spot' => (string) ($shot->storyline['framing']['spot'] ?? ''),
+                    // The spot agreed in the chat; a proposal without one keeps the plan's.
+                    'spot' => trim((string) ($proposal['spot'] ?? '')) !== '' ? trim((string) $proposal['spot']) : (string) ($shot->storyline['framing']['spot'] ?? ''),
                     'size' => in_array($proposal['framing'] ?? null, ShotSize::sceneValues(), true) ? $proposal['framing'] : ($shot->storylineFraming()['size'] ?? null),
                     'seconds' => $seconds,
                 ],

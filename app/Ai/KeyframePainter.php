@@ -514,6 +514,8 @@ class KeyframePainter
         // Drawn on top of keyframe 1, the place and the style come from it; only who and what is pictured stays.
         $elementImages = $elements
             ->filter(fn(Element $element) => $element->reference() !== null && ($first === null || $element->type !== ElementType::PLACE))
+            // A presenter is one person, in front of their place.
+            ->when($keyframe->shot->isPresenter(), fn(Collection $pictured) => $pictured->filter(fn(Element $element) => $element->type === ElementType::PLACE || $element->is($pictured->first(fn(Element $person) => $person->type === ElementType::PERSON))))
             ->take((int) Config::get('pipeline.keyframes.max_element_references', 3))
             ->map(fn(Element $element) => ['element' => $element, 'image' => $this->referenceFor($element->reference())])
             ->values()

@@ -118,9 +118,8 @@ return [
     ],
 
     'keyframes' => [
-        'min' => 3,
-        // The most the planner plans; the director may add more by hand, up to max_manual.
-        'max' => 6,
+        // The most the planner plans (a scene with a clear fifth step); per kind it plans fewer. The director may add more by hand, up to max_manual.
+        'max' => 5,
         'max_manual' => 10,
         // Variations of keyframe 1 the director chooses from before the rest renders; with 1 the rest follows straight away.
         'first_options' => (int) env('AI_FIRST_KEYFRAME_OPTIONS', 1),

@@ -124,7 +124,12 @@ class Keyframe extends Model implements HasMedia
      */
     public function fullDescription(): string
     {
-        return self::joined((string) $this->description, $this->spatial);
+        $text = self::joined((string) $this->description, $this->spatial);
+
+        // A change the plan makes to the place at this keyframe, such as a door that closes now, so the checks, the review and the video expect it.
+        $change = $this->relationLoaded('shot') ? trim((string) ($this->shot->storylineKeyframes()[$this->position - 1]['place_change'] ?? '')) : '';
+
+        return $change === '' ? $text : "{$text} The place changes here: {$change}";
     }
 
     /**

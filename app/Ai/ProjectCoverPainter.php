@@ -57,7 +57,6 @@ class ProjectCoverPainter
         /** @var Collection<int, Element> $cast */
         $cast = $people->concat(array_filter([$place]))->concat($objects)->values();
         $styleSheet = $this->keyframes->styleReferenceFor($project);
-        $style = $project->style ?? [];
 
         $attachments = $cast->map(fn(Element $element): StoredImage => ImageFile::fromStorage($element->reference()->getPathRelativeToRoot(), $element->reference()->disk))
             ->when($styleSheet !== null, fn(Collection $images) => $images->push($styleSheet))
@@ -66,16 +65,19 @@ class ProjectCoverPainter
 
         $listing = $cast->values()->map(fn(Element $element, int $index) => 'Attached image ' . ($index + 1) . ": {$element->promptLine()}")->join("\n");
 
+        // Without people the objects are the heroes of the picture.
+        $subject = $people->isNotEmpty() ? 'the group' : 'the objects';
+
         $prompt = implode("\n", array_filter([
-            'Visual style: ' . ($style['look'] ?? '') . '. Medium: ' . ($style['medium'] ?? '') . '. Mood: ' . ($style['mood'] ?? '') . '. Palette: ' . ($style['palette'] ?? '') . '.',
-            "Key art for the project \"{$project->title}\" as a very wide panoramic banner, the way a poster for an animated film presents its cast: the characters together as one lively group in the centre of a wide landscape. Keep the group in the middle third so it survives when the sides are cropped, and keep everyone's head well inside the frame.",
+            $project->styleBrief(),
+            "Key art for the project \"{$project->title}\" as a very wide panoramic banner, the way a poster for an animated film presents its cast: " . ($people->isNotEmpty() ? 'the characters together as one lively group' : 'the objects together') . " in the centre of a wide landscape. Keep {$subject} in the middle third so it survives when the sides are cropped" . ($people->isNotEmpty() ? ", and keep everyone's head well inside the frame." : '.'),
             $people->isNotEmpty()
                 ? 'The people form one tight, overlapping group in the centre of the picture, at different depths: some in front, some behind, some leaning in. Each has a pose and expression that shows who they are, such as waving, pointing or holding their tools, and each stays fully recognisable. Never a row of people standing side by side.'
                 : 'There are no people in this picture; the objects are the heroes in front of the landscape.',
             $place !== null
-                ? "Behind and around the group stretches {$place->name} as a wide landscape with depth: a foreground, a middle ground and a far horizon with open sky, seen from a slightly low angle."
-                : 'Behind the group stretches a wide landscape that fits the project, with depth and an open sky.',
-            $objects->isNotEmpty() ? 'The objects belong to the scene around the group; some are held or used by the characters.' : null,
+                ? "Behind and around {$subject} stretches {$place->name} as a wide landscape with depth: a foreground, a middle ground and a far horizon with open sky, seen from a slightly low angle."
+                : "Behind {$subject} stretches a wide landscape that fits the project, with depth and an open sky.",
+            $objects->isNotEmpty() && $people->isNotEmpty() ? 'The objects belong to the scene around the group; some are held or used by the characters.' : null,
             'Let the composition, energy and light follow the visual style and mood: playful and bouncy for a cartoon look, calm and grounded for a serious one.',
             'Draw every person, place and object exactly as in its attached image: same faces, clothes, shapes and colours.',
             $listing,

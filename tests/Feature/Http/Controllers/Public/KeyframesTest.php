@@ -731,7 +731,7 @@ describe('first keyframe', function () {
 
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Stage it as described.'));
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose a different calm part of the same place'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Keep the spot; place the camera a little closer and lower'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Choose different lighting'));
     });
 

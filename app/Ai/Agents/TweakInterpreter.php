@@ -69,6 +69,7 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
             - description: when the change alters what the keyframe shows, rewrite "What the keyframe should show" in the same style so it describes the edited image. That includes a person or object removed or added, someone in another place, a different action, and also where someone looks, a gesture such as a thumbs up or a wave, and a pose: the keyframe may be drawn again from its description later, and the change must survive that. Leave it empty only for a fix that does not change what a viewer sees happening, such as a colour, a line on the floor or a sign.
             - The description never asks for text, labels or ID details either.
             - absent: the names from the cast and sets that are no longer in the picture after the change, such as a person who is removed. Empty when everyone stays.
+            {$this->projectRules()}
             INSTRUCTIONS;
     }
 
@@ -99,6 +100,12 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
     }
 
     /**
-     * The rules the director set for this shot; the instruction never asks for something that breaks one.
+     * The rules the director confirmed for this project; the instruction never asks for something that breaks one.
      */
+    private function projectRules(): string
+    {
+        $rules = $this->keyframe->shot->project->rulesBrief();
+
+        return $rules === '' ? '' : "The instruction and the description never break the rules the director confirmed for this project:\n{$rules}";
+    }
 }

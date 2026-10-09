@@ -51,7 +51,7 @@ class GenerateVoiceOverAudio implements ShouldQueue
         $text = $this->translate($script, $seconds);
         [$audio, $spoken] = $this->speak($speech, $length, $text);
 
-        if ($spoken > $seconds && $spoken / $seconds > (float) Config::get('pipeline.voice_over.max_speed') && ! $this->isEnglish()) {
+        if ($spoken > $seconds && $spoken / $seconds > (float) Config::get('pipeline.voice_over.max_speed')) {
             $text = $this->translate($text, $seconds, shorter: true);
             [$audio, $spoken] = $this->speak($speech, $length, $text);
         }

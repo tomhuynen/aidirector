@@ -64,7 +64,8 @@ class PoseMovedPerson implements ShouldQueue
         $plate = $painter->baseFor($keyframe, $shot->keyframes()->with('media')->get()->each->setRelation('shot', $shot));
         $moved = $keyframe->render();
 
-        if ($plate === null || $plate->collection_name !== Shot::PLATE || $moved === null) {
+        // The place or a later state of it, such as with the door closed.
+        if ($plate === null || ! $painter->isPlace($plate) || $moved === null) {
             throw new RuntimeException('The keyframe is not drawn on a place.');
         }
 

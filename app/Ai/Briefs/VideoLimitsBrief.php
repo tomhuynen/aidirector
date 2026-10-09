@@ -59,7 +59,7 @@ class VideoLimitsBrief
                 'instead' => 'a cut to a second shot',
             ],
             [
-                'risk' => 'More than about three steps, or several people doing different things at the same time',
+                'risk' => 'More than about four steps, or several people doing different things at the same time',
                 'why' => 'it is too much for one short clip and the model mixes it up',
                 'instead' => 'split it into shots, one action each',
             ],
@@ -71,7 +71,7 @@ class VideoLimitsBrief
             [
                 'risk' => 'One person does two things with their hands at the same time, such as holding a phone to the ear while writing or ticking a list',
                 'why' => 'the arms cross in front of the body and the image model draws them at strange angles or loses one',
-                'instead' => 'one action per shot, such as the call in a scene and the ticking in a close-up of the hand; the voice-over can carry the rest',
+                'instead' => 'one action per shot, such as the call in a scene and the ticking in a close-up of the hand, each shot showing its own step',
             ],
             [
                 'risk' => 'A hand reaches across the body or behind another person to the object',
@@ -86,7 +86,7 @@ class VideoLimitsBrief
             [
                 'risk' => 'A small change counted step by step over several keyframes, such as one more tick, one more bolt or a rising level each time',
                 'why' => 'the models cannot count or keep the rest exactly the same, and the video model cannot animate small strokes',
-                'instead' => 'only before and after: nothing ticked, then all ticked; the voice-over names the steps',
+                'instead' => 'only before and after that a viewer sees at a glance, such as nothing ticked and then all ticked; the voice-over may name the steps, but the images must show the change',
             ],
             [
                 'risk' => 'In a close-up, something is taken out of a holder that stays in view, such as a handset off its cradle or a tool off a wall',

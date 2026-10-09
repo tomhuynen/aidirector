@@ -224,3 +224,21 @@ it('offers no moving, no extra keyframes and no separate audio tracks on a prese
         ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Second', 'description' => 'Another still.'])
         ->assertSessionHasErrors('description');
 });
+
+it('does not time a presenter again by motion, and keeps a first draft within what the video model renders', function () {
+    Queue::fake();
+    App\Ai\Agents\ShotTimer::fake(fn() => ['seconds' => 2]);
+    $presenter = presenterShot($this->project);
+
+    (new App\Jobs\RetimeShot($presenter))->handle();
+
+    expect($presenter->fresh()->storylineFraming()['seconds'])->toBe(5);
+    App\Ai\Agents\ShotTimer::assertNeverPrompted();
+
+    StorylineWriter::fake([['title' => 'Welcome', 'kind' => 'presenter', 'storyline' => 'The host welcomes the viewer.', 'framing' => ['size' => 'medium', 'spot' => '', 'light' => 'as the visual style', 'seconds' => 40], 'keyframes' => presenterPlan()]]);
+    $draft = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_PENDING, 'kind' => ShotKind::PRESENTER]);
+
+    (new GenerateStoryline($draft, keepKind: true))->handle();
+
+    expect($draft->fresh()->storylineFraming()['seconds'])->toBe((int) config('pipeline.video.max_duration'));
+});

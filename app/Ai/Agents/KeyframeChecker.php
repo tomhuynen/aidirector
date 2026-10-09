@@ -102,19 +102,19 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             Work in three steps, using each reference only for what it is the reference for.
             1. Inventory of the references. List what must stay the same: each person (face, hair, headwear and any lettering on it, glasses, clothing and colours), each object and its state (what it holds, what is in it, where it hangs or stands), and the fixed parts of the place with where they are: floor markings and painted lines (their position and angle), doors, signs, windows, machines, vehicles and any lettering on them.
             2. Compare the keyframe to check with that inventory: what disappeared, what changed in look, position, shape, angle or state.
-            3. Look the other way: what is in the keyframe to check that is in none of the references, such as an extra object, person, lettering, logo or numbers. A person who is in the keyframe to check but not in keyframe 1 is fine when the description has them; compare them with their own reference.
+            3. Look the other way: what is in the keyframe to check that is in none of the references, such as an extra object, person, lettering, logo or numbers. A person who is in the keyframe to check but not in the first reference is fine when the description has them; compare them with their own reference.
 
             Allowed changes, never report these: pose, gestures, where a person stands or looks, facial expression, and the change the description asks for. Never report these either, because a viewer never sees them as a mistake:
-            - a detail that differs from keyframe 1 or the place but looks the same as in the keyframe directly before: it does not change between these two keyframes, so it does not jump in the video;
+            {$this->sameAsBefore()}
             - an object of the cast and sets, or one the description names, that now stands where a background object was;
             - small background props that take no part in the story, such as items on a shelf, a counter or a desk.
             - an object without lettering, such as a blank card, paper or badge: objects are known by their shape, colour, size and where they are, never by text, so never ask for text to make one recognisable.
-            Report what makes the story wrong, and what a viewer would see change between the keyframe directly before and this one.
+            Report what makes the story wrong, and what a viewer would see change {$this->comparedWith()}.
 
             Direction: check which way someone faces or moves only when the story depends on it: someone who goes into or out of a place, or who must stand or move relative to a line, a zone, a door or a hazard. Then someone who faces the camera or walks towards it while the description says they go away from it or into the place is a high issue in category state. Otherwise a person who faces another way than the description says is not an issue.
 
             Severity:
-            - high: it makes the story wrong, such as the action, who is there or the spatial fact, or a viewer sees it change at a glance between the keyframe directly before and this one, such as a different helmet, glasses that appear or disappear, an object that is both in a hand and in its box, lettering that appears, or a floor line that runs elsewhere.
+            - high: it makes the story wrong, such as the action, who is there or the spatial fact, or a viewer sees it change at a glance {$this->comparedWith()}, such as a different helmet, glasses that appear or disappear, an object that is both in a hand and in its box, lettering that appears, or a floor line that runs elsewhere.
             - low: everything else you would still mention.
 
             The point of the keyframe: what the description says about where people stand and what they do relative to lines, zones, doors, objects and hazards is what the keyframe is for. When a viewer cannot see that at a glance, add it as a high issue in category state.
@@ -123,9 +123,37 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Output:
             - inventory: short lines from step 1.
-            - issues: each issue with category (person, object, state, place, lettering), what changed in one plain sentence for the director, as you would say it to a colleague, and severity. Empty when nothing changed that should not.
+            - issues: each issue with category ({$this->categoryList()}), what changed in one plain sentence for the director, as you would say it to a colleague, and severity. Empty when nothing changed that should not.
             Write in English.
             INSTRUCTIONS;
+    }
+
+    /**
+     * Whether the keyframe directly before is one of the references; the first keyframe and a still have none.
+     */
+    private function hasKeyframeBefore(): bool
+    {
+        return collect($this->roles)->contains(fn(string $role) => str_contains($role, 'the keyframe directly before'));
+    }
+
+    private function sameAsBefore(): string
+    {
+        return $this->hasKeyframeBefore()
+            ? '- a detail that differs from the first reference but looks the same as in the keyframe directly before: it does not change between these two keyframes, so it does not jump in the video;'
+            : '- small differences from a reference that a viewer would never notice;';
+    }
+
+    private function comparedWith(): string
+    {
+        return $this->hasKeyframeBefore() ? 'between the keyframe directly before and this one' : 'compared with its references';
+    }
+
+    /**
+     * The categories as the schema has them: without the place when the place is pasted in.
+     */
+    private function categoryList(): string
+    {
+        return implode(', ', $this->placeIsFixed ? ['person', 'object', 'state', 'lettering'] : ['person', 'object', 'state', 'place', 'lettering']);
     }
 
     private function projectRules(): string

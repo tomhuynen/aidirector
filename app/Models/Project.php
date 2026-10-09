@@ -164,6 +164,20 @@ class Project extends Model implements HasMedia
     }
 
     /**
+     * The visual style as a line for a prompt, such as "Visual style: … Medium: …",
+     * leaving out what is not filled in; empty when nothing is.
+     */
+    public function styleBrief(): string
+    {
+        $style = (array) ($this->style ?? []);
+
+        return collect(['look' => 'Visual style', 'medium' => 'Medium', 'mood' => 'Mood', 'palette' => 'Palette'])
+            ->map(fn(string $label, string $key) => trim((string) ($style[$key] ?? '')) === '' ? null : "{$label}: " . rtrim(trim((string) $style[$key]), '.') . '.')
+            ->filter()
+            ->join(' ');
+    }
+
+    /**
      * The shared documents as a section for a prompt: what they are and their
      * text, cut off when they are very long. Empty without documents.
      */
