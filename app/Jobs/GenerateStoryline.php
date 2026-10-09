@@ -8,6 +8,7 @@ use App\Ai\Agents\StorylineWriter;
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Models\Shot;
+use App\Support\Shots\ShotPlan;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -82,7 +83,7 @@ class GenerateStoryline implements ShouldQueue
                 ...(($new = self::newElementsFrom($shot, $response['new_elements'] ?? null)) !== [] ? ['new_elements' => $new] : []),
                 // Within what the video model renders, so the voice-over is written for the length the video gets.
                 'framing' => [...(array) $response['framing'], 'seconds' => Shot::clampSeconds((int) ($response['framing']['seconds'] ?? $shot->durationInSeconds()))],
-                'keyframes' => array_values($response['keyframes']),
+                'keyframes' => ShotPlan::withNamedPeople($shot, array_values($response['keyframes'])),
             ],
             'storyline_error' => null,
             // The plan chat starts from the draft.

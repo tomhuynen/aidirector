@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Shots;
 
+use App\Enums\ElementType;
 use App\Enums\ShotKind;
 use App\Enums\ShotSize;
 use App\Jobs\GenerateVoiceOver;
@@ -39,6 +40,7 @@ class ShotPlan
         ]) + [
             'elements' => collect((array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
         ])->all();
+        $keyframes = self::withNamedPeople($shot, $keyframes);
 
         $storyline = trim((string) ($proposal['storyline'] ?? ''));
         $takeaway = trim((string) ($proposal['takeaway'] ?? ''));
@@ -115,5 +117,26 @@ class ShotPlan
         $code = is_array($from) ? str_replace(' ', '', (string) ($from['shot'] ?? '')) : '';
 
         return $code === '' ? null : $shot->project->shots()->get()->first(fn(Shot $other) => strcasecmp($other->code(), $code) === 0 && ! $other->is($shot));
+    }
+
+    /**
+     * Adds to each keyframe the people of the cast its description names but
+     * its cast list leaves out: without their picture the image model makes
+     * them up, often as a copy of someone else in the keyframe.
+     *
+     * @param  list<array<string, mixed>>  $keyframes
+     * @return list<array<string, mixed>>
+     */
+    public static function withNamedPeople(Shot $shot, array $keyframes): array
+    {
+        $people = $shot->project->elements()->where('type', ElementType::PERSON)->pluck('name');
+
+        return array_map(function (array $keyframe) use ($people): array {
+            $named = $people->filter(fn(string $name) => preg_match('/(?<![\pL\pN])' . preg_quote($name, '/') . '(?![\pL\pN])/iu', (string) ($keyframe['description'] ?? '')) === 1);
+            $listed = collect((array) ($keyframe['elements'] ?? []));
+            $missing = $named->reject(fn(string $name) => $listed->contains(fn(mixed $listedName) => mb_strtolower(trim((string) $listedName)) === mb_strtolower($name)));
+
+            return $missing->isEmpty() ? $keyframe : [...$keyframe, 'elements' => $listed->concat($missing)->values()->all()];
+        }, $keyframes);
     }
 }

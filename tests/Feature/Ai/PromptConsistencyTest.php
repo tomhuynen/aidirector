@@ -57,3 +57,11 @@ it('has the checks and the chat that reports them name hands by the side of the 
         ->and((string) (new KeyframeChecker($keyframe, []))->instructions())->toContain('never as "his left hand" or "the left-side hand"')
         ->and((string) (new FindingsReporter([]))->instructions())->toContain('never shorten it to "the left hand" or "the left-side hand"');
 });
+
+it('does not ask for the kind again when the agreed idea already named it', function () {
+    $shot = Shot::factory()->for($this->project)->create()->load('project');
+
+    expect((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
+        ->toContain('When the idea the director agreed to already named the kind')
+        ->toContain('never ask it again, go straight on to the keyframes in the same answer');
+});
