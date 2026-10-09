@@ -52,8 +52,9 @@ class OpenRouterVideoClient
      * with the given voice, and the clip keeps that sound.
      *
      * @param  string  $image  The still as a data URL.
+     * @param  string  $motion  How the person moves while speaking, such as gestures with empty hands and a still background.
      */
-    public function submitPresenter(string $model, string $script, string $image, string $voiceId, string $aspectRatio, string $resolution): string
+    public function submitPresenter(string $model, string $script, string $image, string $voiceId, string $aspectRatio, string $resolution, string $motion = ''): string
     {
         $response = $this->client()->post('videos', [
             'model' => $model,
@@ -61,7 +62,7 @@ class OpenRouterVideoClient
             'aspect_ratio' => $aspectRatio,
             'resolution' => $resolution,
             'input_references' => [['type' => 'image_url', 'image_url' => ['url' => $image]]],
-            'provider' => ['options' => ['heygen' => ['voice_id' => $voiceId]]],
+            'provider' => ['options' => ['heygen' => array_filter(['voice_id' => $voiceId, 'motion_prompt' => $motion])]],
         ])->throw();
 
         return (string) $response->json('id');

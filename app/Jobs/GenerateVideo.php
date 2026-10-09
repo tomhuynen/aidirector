@@ -197,7 +197,7 @@ class GenerateVideo implements ShouldQueue
 
             return [
                 'locale' => $locale,
-                'job_id' => $videos->submitPresenter($model, $this->presenterText($shot, $locale), $image, $voice, $shot->aspectRatio()->value, (string) Config::get('pipeline.presenter.resolution')),
+                'job_id' => $videos->submitPresenter($model, $this->presenterText($shot, $locale), $image, $voice, $shot->aspectRatio()->value, (string) Config::get('pipeline.presenter.resolution'), (string) Config::get('pipeline.presenter.motion')),
                 'status' => 'pending',
             ];
         }, $locales);

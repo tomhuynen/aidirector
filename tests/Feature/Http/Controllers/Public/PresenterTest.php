@@ -145,6 +145,8 @@ it('renders a lip-synced clip per language with the voice of that language', fun
     Http::assertSent(fn(Request $request) => $request['model'] === 'heygen/avatar-iv'
         && $request['prompt'] === 'Your safety comes first at Damen Naval.'
         && $request['provider']['options']['heygen']['voice_id'] === Config::get('pipeline.presenter.voices.female.en')
+        && str_contains($request['provider']['options']['heygen']['motion_prompt'], 'with empty hands')
+        && str_contains($request['provider']['options']['heygen']['motion_prompt'], 'The background stays completely still')
         && $request['input_references'][0]['type'] === 'image_url');
     Http::assertSent(fn(Request $request) => $request['prompt'] === 'Bij Damen Naval staat jouw veiligheid voorop.'
         && $request['provider']['options']['heygen']['voice_id'] === Config::get('pipeline.presenter.voices.female.*'));
