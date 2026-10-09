@@ -65,3 +65,11 @@ it('does not ask for the kind again when the agreed idea already named it', func
         ->toContain('When the idea the director agreed to already named the kind')
         ->toContain('never ask it again, go straight on to the keyframes in the same answer');
 });
+
+it('has the plan director check its own idea for a change of place before pitching it', function () {
+    $shot = Shot::factory()->for($this->project)->create()->load('project');
+
+    expect((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
+        ->toContain('check your own idea against the rules below, first of all that it plays in one place')
+        ->toContain('taking something from where it is found to where it is handed in');
+});

@@ -19,7 +19,7 @@ class VideoLimitsBrief
     {
         return [
             [
-                'risk' => 'The place changes within the shot, such as driving through a gate to the area behind it, or walking into another room',
+                'risk' => 'The place changes within the shot, such as driving through a gate to the area behind it, walking into another room, or taking something from where it is found to where it is handed in, such as from a doorway to the security desk',
                 'why' => 'every keyframe is drawn on one image of the place, so the model has to invent a whole new view and the change is too big',
                 'instead' => 'end the shot on the moment before, such as the barrier opening, and show the new place in a second shot',
             ],
