@@ -37,3 +37,5 @@ pnpm-debug.log
 
 # Generated per worktree by bin/worktree from phpunit.xml.dist (own test database)
 /phpunit.xml
+/storage/media-library
+/storage/tmp
