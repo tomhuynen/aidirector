@@ -334,3 +334,24 @@ it('changes the voice-over when asked, a presenter lasting as long as the new te
         ->and($shot->durationInSeconds())->toBe(11);
     PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Voice-over now: "Welcome to Damen Naval." (about 1.8 seconds spoken'));
 });
+
+it('asks the plan director again when the AI provider answers with a rate limit', function () {
+    Illuminate\Support\Sleep::fake();
+    $shot = drawnShot($this->project);
+    $attempts = 0;
+    PlanDirector::fake(function () use (&$attempts) {
+        if (++$attempts === 1) {
+            throw Laravel\Ai\Exceptions\RateLimitedException::forProvider('openrouter', 429);
+        }
+
+        return imagesReply(['reply' => 'Here I am.']);
+    });
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'how is it going?'])
+        ->assertOk()
+        ->assertJsonPath('messages.3.text', 'Here I am.');
+
+    expect($attempts)->toBe(2);
+    Illuminate\Support\Sleep::assertSleptTimes(1);
+});

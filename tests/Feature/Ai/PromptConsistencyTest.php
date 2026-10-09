@@ -73,3 +73,11 @@ it('has the plan director check its own idea for a change of place before pitchi
         ->toContain('check your own idea against the rules below, first of all that it plays in one place')
         ->toContain('taking something from where it is found to where it is handed in');
 });
+
+it('has the plan director propose a close-up itself when the takeaway turns on a small object', function () {
+    $shot = Shot::factory()->for($this->project)->create()->load('project');
+
+    expect((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
+        ->toContain('Before you propose a kind, check the takeaway against the rules below yourself')
+        ->toContain('never wait for the director to ask whether it can be seen');
+});

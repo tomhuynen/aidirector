@@ -32,6 +32,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Laravel\Ai\Exceptions\RateLimitedException;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
@@ -47,6 +48,12 @@ class DirectorController
 {
     /** The most places or options attached for the plan director to see while the director chooses. */
     private const int MAX_OPTIONS_SHOWN = 8;
+
+    /** How often the plan director is asked when the AI provider answers with a rate limit. */
+    private const int RATE_LIMIT_ATTEMPTS = 3;
+
+    /** How long to wait before asking again after a rate limit, times the attempt, in milliseconds. */
+    private const int RATE_LIMIT_WAIT_MS = 2000;
 
     public function store(PlanDirectorRequest $request, Project $project, Shot $shot, KeyframePainter $painter, FirstKeyframeChoice $choice, FindingsReport $report, ShotIssues $issues): JsonResponse
     {
@@ -74,8 +81,10 @@ class DirectorController
         $model = (string) Config::get('pipeline.models.text');
 
         try {
+            $attachments = array_map(fn(Media $media) => $painter->referenceFor($media), array_values($images));
+            // A rate limit passes within seconds: asked again a little later, before the director sees an error.
             /** @var StructuredAgentResponse $response */
-            $response = $director->prompt($prompt, attachments: array_map(fn(Media $media) => $painter->referenceFor($media), array_values($images)), provider: 'openrouter', model: $model);
+            $response = retry(self::RATE_LIMIT_ATTEMPTS, fn() => $director->prompt($prompt, attachments: $attachments, provider: 'openrouter', model: $model), fn(int $attempt) => $attempt * self::RATE_LIMIT_WAIT_MS, fn(Throwable $exception) => $exception instanceof RateLimitedException);
         } catch (Throwable $exception) {
             report($exception);
 
