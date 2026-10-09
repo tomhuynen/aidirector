@@ -268,3 +268,20 @@ it('times every kind of shot by its own rule and plans keyframes per kind', func
         ->toContain('For a close-up:')
         ->toContain('always in English, whatever language the director writes in');
 });
+
+it('lets the description take off or put on gear a person wears in their picture, and the checks accept it', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the yard entry point.']);
+    $visitor = Element::factory()->for($shot->project)->create(['type' => 'person', 'name' => 'Helmeted visitor']);
+    $helmet = Element::factory()->for($shot->project)->create(['type' => 'object', 'name' => 'helmet']);
+    $keyframe = App\Models\Keyframe::factory()->for($shot)->create();
+    $references = fn(KeyframeReferences $references) => KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], $references);
+
+    expect($references(new KeyframeReferences(elementImages: [['element' => $visitor, 'image' => new StoredImage('visitor.png')], ['element' => $helmet, 'image' => new StoredImage('helmet.png')]])))
+        ->toContain('Draw Helmeted visitor exactly like it: same shape, proportions, colours and details, same face, hair, build, clothing and headwear. The picture decides how Helmeted visitor looks, whatever any other wording says; the description decides its state, such as open, held or lifted off its hook. ' . KeyframeImageBrief::GEAR_RULE)
+        ->and(substr_count($references(new KeyframeReferences(elementImages: [['element' => $helmet, 'image' => new StoredImage('helmet.png')]])), KeyframeImageBrief::GEAR_RULE))->toBe(0)
+        ->and($references(new KeyframeReferences(elementImages: [['element' => $visitor, 'image' => new StoredImage('visitor.png')]], first: new StoredImage('first.png'))))
+        ->toContain(KeyframeImageBrief::GEAR_RULE)
+        ->and((string) (new App\Ai\Agents\KeyframeChecker($keyframe, []))->instructions())->toContain('then it is not an issue that it differs from their picture')
+        ->and((new App\Ai\Agents\ShotReviewer($shot, collect([$keyframe])))->instructions())->toContain('Gear the plan has them put on or take off, such as a helmet, is not an issue.')
+        ->and((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain('say in every keyframe whether they wear it');
+});

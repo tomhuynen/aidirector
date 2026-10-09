@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\FindingsReporter;
+use App\Ai\Agents\KeyframeChecker;
 use App\Ai\Agents\ShotReviewer;
 use App\Ai\Agents\TweakInterpreter;
 use App\Ai\Agents\VideoPromptWriter;
@@ -45,4 +47,13 @@ it('keeps left and right and the planned spot in the options of a place and of k
         ->toContain('what the plan puts on the left of the frame stays on the left')
         ->and(collect(range(0, 2))->map(fn(int $index) => KeyframeImageBrief::variation($index))->join(' '))
         ->not->toContain('different calm part of the same place for the spot');
+});
+
+it('has the checks and the chat that reports them name hands by the side of the frame', function () {
+    $shot = Shot::factory()->for($this->project)->create()->load('project');
+    $keyframe = Keyframe::factory()->for($shot)->create()->setRelation('shot', $shot);
+
+    expect((string) (new ShotReviewer($shot, collect([$keyframe])))->instructions())->toContain('never as "his left hand" or "the left-side hand"')
+        ->and((string) (new KeyframeChecker($keyframe, []))->instructions())->toContain('never as "his left hand" or "the left-side hand"')
+        ->and((string) (new FindingsReporter([]))->instructions())->toContain('never shorten it to "the left hand" or "the left-side hand"');
 });

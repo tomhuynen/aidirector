@@ -51,7 +51,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             - Does lettering stay the same throughout? Words, logos or numbers that appear or disappear between keyframes, on clothing, helmets, vehicles or walls, are an issue.
 
             Judge whether the keyframes read as one continuous moment, because a break makes a viewer lose the thread:
-            - Every person is recognisable as the same person throughout: face, hair, clothing and colours.
+            - Every person is recognisable as the same person throughout: face, hair, clothing and colours. Gear the plan has them put on or take off, such as a helmet, is not an issue.
             - The place and the camera stay the same unless the keyframes say they change; a sign, vehicle or door does not move, appear or disappear between keyframes.
             - Objects stay where they were left and change state in an order that makes sense: what is picked up is held, what is opened stays open.
             - Positions and distances change in the direction the steps describe.
@@ -62,6 +62,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             - notes: when it does not, one entry per issue; empty when clear.
               - keyframes: the numbers of the keyframes that must change to solve it, such as [3, 4]. Always give them, also for something across the shot: give the keyframes that differ from keyframe 1. Keyframe 1 is the reference, so give it only when the problem is in keyframe 1 itself. Empty only when no keyframe can solve it.
               - note: the issue in one plain sentence for the director, such as "She still stands on the line, so stepping back cannot be seen." or "The yellow floor line runs at another angle than in keyframe 1." It is shown on each of those keyframes, so do not start with their numbers.
+            - Name hands, arms and sides by where they are in the image, such as "the hand on the left of the frame", never as "his left hand" or "the left-side hand": with someone who faces the camera those are the other way round.
             Write in English.
             INSTRUCTIONS;
     }

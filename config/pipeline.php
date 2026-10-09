@@ -215,7 +215,7 @@ return [
     'presenter' => [
         'resolution' => '720p',
         // How the presenter moves while speaking: gestures with empty hands, a background that stands still.
-        'motion' => 'Natural, calm hand gestures while speaking, with empty hands that look exactly as in the picture: no gloves, nothing held, nothing appears in the hands. The background stays completely still and does not move or change; only the person moves.',
+        'motion' => 'Natural, calm hand gestures while speaking, with bare, empty hands: never gloves, nothing held, nothing appears in the hands. The background stays completely still and does not move or change; only the person moves.',
         // The presenter is cut out of their video and put on their keyframe without them, so nothing behind them can move.
         'steady_background' => [
             'enabled' => (bool) env('AI_COMPOSITE', true),

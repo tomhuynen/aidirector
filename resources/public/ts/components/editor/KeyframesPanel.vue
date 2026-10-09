@@ -21,14 +21,11 @@
         </div>
 
         <!-- A presenter speaks in every language of the project: one video each. -->
-        <NativeSelect
-          v-if="showVideo && languages.length > 1 && !video.pending"
-          v-model="language"
-          class="absolute top-4 left-4 z-10 w-44 bg-background/90"
-          :aria-label="$t('Language')"
-        >
-          <option v-for="option in languages" :key="option.locale" :value="option.locale">{{ option.name }}</option>
-        </NativeSelect>
+        <div v-if="showVideo && languages.length > 1 && !video.pending" class="absolute top-4 left-4 z-10">
+          <NativeSelect v-model="language" class="w-44 bg-background/90" :aria-label="$t('Language')">
+            <option v-for="option in languages" :key="option.locale" :value="option.locale">{{ option.name }}</option>
+          </NativeSelect>
+        </div>
         <!-- In the top right corner of the video area. -->
         <VideoActions
           v-if="!choosing.active && showVideo && currentVideo.url && !video.pending"

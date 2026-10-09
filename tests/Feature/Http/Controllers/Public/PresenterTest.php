@@ -123,6 +123,7 @@ it('draws the still frontal and close, with the place only as a blurred backgrou
         ->and($shot->keyframes()->with('media')->first()->render())->not->toBeNull();
     Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A presenter shot for an e-learning film')
         && $prompt->contains('a medium close-up from the chest up')
+        && $prompt->contains('both bare hands, without gloves')
         && $prompt->contains('Draw Damen host exactly like it'));
     KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'This keyframe is the still of a presenter'));
 });
@@ -146,7 +147,7 @@ it('renders a lip-synced clip per language with the voice of that language', fun
     Http::assertSent(fn(Request $request) => $request['model'] === 'heygen/avatar-iv'
         && $request['prompt'] === 'Your safety comes first at Damen Naval.'
         && $request['provider']['options']['heygen']['voice_id'] === Config::get('pipeline.presenter.voices.female.en')
-        && str_contains($request['provider']['options']['heygen']['motion_prompt'], 'with empty hands')
+        && str_contains($request['provider']['options']['heygen']['motion_prompt'], 'with bare, empty hands: never gloves')
         && str_contains($request['provider']['options']['heygen']['motion_prompt'], 'The background stays completely still')
         && $request['input_references'][0]['type'] === 'image_url');
     Http::assertSent(fn(Request $request) => $request['prompt'] === 'Bij Damen Naval staat jouw veiligheid voorop.'

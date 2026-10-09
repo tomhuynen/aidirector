@@ -35,6 +35,7 @@ class FindingsReporter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Merge findings that are about the same problem in the same keyframes into one item, and list which findings it covers in sources.
             - Every other finding is its own item. Never leave one out and never add a problem of your own.
             - note: the problem in one short, plain sentence, the way you would say it to a colleague, such as "The visitor stands on the yellow line instead of beside it." No keyframe numbers in it: they are added for you.
+            - Keep how a finding names sides and hands, such as "the hand on the left of the frame": never shorten it to "the left hand" or "the left-side hand", which reads as the person's own left and is the other way round when they face the camera.
             - intro: one short sentence before the list, such as "I looked at the new keyframes and noticed two things."
             Write in English.
             INSTRUCTIONS;

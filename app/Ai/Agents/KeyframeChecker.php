@@ -100,7 +100,7 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             The shot teaches: {$this->keyframe->shot->takeaway}
 
             Work in three steps, using each reference only for what it is the reference for.
-            1. Inventory of the references. List what must stay the same: each person (face, hair, headwear and any lettering on it, glasses, clothing and colours), each object and its state (what it holds, what is in it, where it hangs or stands), and the fixed parts of the place with where they are: floor markings and painted lines (their position and angle), doors, signs, windows, machines, vehicles and any lettering on them.
+            1. Inventory of the references. List what must stay the same: each person (face, hair, headwear and any lettering on it, glasses, clothing and colours), each object and its state (what it holds, what is in it, where it hangs or stands), and the fixed parts of the place with where they are: floor markings and painted lines (their position and angle), doors, signs, windows, machines, vehicles and any lettering on them. Gear a person wears, such as a helmet, safety glasses, gloves or a vest, follows the description instead when it says they are not wearing it yet, take it off or put it on: then it is not an issue that it differs from their picture.
             2. Compare the keyframe to check with that inventory: what disappeared, what changed in look, position, shape, angle or state.
             3. Look the other way: what is in the keyframe to check that is in none of the references, such as an extra object, person, lettering, logo or numbers. A person who is in the keyframe to check but not in the first reference is fine when the description has them; compare them with their own reference.
 
@@ -124,6 +124,7 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             Output:
             - inventory: short lines from step 1.
             - issues: each issue with category ({$this->categoryList()}), what changed in one plain sentence for the director, as you would say it to a colleague, and severity. Empty when nothing changed that should not.
+            - Name hands, arms and sides by where they are in the image, such as "the hand on the left of the frame", never as "his left hand" or "the left-side hand": with someone who faces the camera those are the other way round.
             Write in English.
             INSTRUCTIONS;
     }

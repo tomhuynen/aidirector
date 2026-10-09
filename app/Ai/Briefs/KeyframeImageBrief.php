@@ -22,6 +22,12 @@ use Illuminate\Support\Str;
 class KeyframeImageBrief
 {
     /**
+     * Gear a person puts on or takes off in the story, such as a helmet: the
+     * picture shows them with it, the description says when they are without.
+     */
+    public const GEAR_RULE = 'Only gear they wear, such as a helmet, safety glasses, gloves or a vest, follows the description when it says they are not wearing it yet, take it off or put it on: then draw them without it, or with it as the description says; everything else stays as in the picture.';
+
+    /**
      * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
      */
     public static function for(Shot $shot, array $keyframe, KeyframeReferences $references): string
@@ -98,7 +104,7 @@ class KeyframeImageBrief
 
             $lines[] = $closeUp && $element->type === ElementType::PERSON
                 ? 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} (person). Use it only for their clothing, skin and hands, exactly as in the picture; draw only the part of {$element->name} this close frame shows. Do not copy its background, pose or framing."
-                : 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says; the description decides its state, such as open, held or lifted off its hook. Do not copy its background or pose.";
+                : 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says; the description decides its state, such as open, held or lifted off its hook." . ($element->type === ElementType::PERSON ? ' ' . self::GEAR_RULE : '') . ' Do not copy its background or pose.';
         }
 
         return implode("\n", $lines);
@@ -141,6 +147,7 @@ class KeyframeImageBrief
             'A presenter shot for an e-learning film. ' . $shot->project->styleBrief(),
             Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null),
             'Framing: a medium close-up from the chest up. The person is centred, faces the camera straight on and looks into the lens, shoulders square, with a friendly, calm expression and the mouth closed. The head and face fill about a third of the frame height, the eyes in the upper third.',
+            'Hands: both bare hands, without gloves, even when the picture shows gloves, are visible at the bottom of the frame, loosely together in front of the body, empty and holding nothing.',
             'Background: the place, softly out of focus, calm and muted, with no readable details and nothing behind the head that draws attention.',
             'Soft, even light on the face. Only this one person. Do not add text, captions, brand names, logos or watermarks; logos on clothing and helmets stay as in the picture.',
         ];
@@ -218,7 +225,7 @@ class KeyframeImageBrief
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the picture of {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . '. It decides how it looks, not its state: open, held or lifted off its hook follows the description. Do not copy its background or pose.';
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the picture of {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . '. It decides how it looks, not its state: open, held or lifted off its hook follows the description.' . ($element->type === ElementType::PERSON ? ' ' . self::GEAR_RULE : '') . ' Do not copy its background or pose.';
         }
 
         if ($references->previous !== null) {

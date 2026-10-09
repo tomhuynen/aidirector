@@ -11,6 +11,9 @@ const CEILING = 0.99
 const STORAGE_KEY = 'render-started'
 const started = new Map<string, number>(readStored())
 
+/** Renders this page saw start, so their first-seen time is exact. */
+const watchedStart = new Set<string>()
+
 function readStored(): [string, number][] {
   try {
     return Object.entries(JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? '{}') as Record<string, number>)
@@ -59,7 +62,10 @@ export function useRenderProgress(
   let timer: ReturnType<typeof setInterval> | null = null
 
   const tick = () => {
-    const from = startedAt?.value ?? started.get(key.value) ?? Date.now()
+    const seen = started.get(key.value) ?? Date.now()
+    const server = startedAt?.value ?? null
+    // A server time from before a render this page saw start belongs to the previous render.
+    const from = server !== null && !(watchedStart.has(key.value) && server < seen) ? server : seen
     progress.value = estimatedProgress((Date.now() - from) / 1000, usualSeconds.value)
   }
 
@@ -72,17 +78,22 @@ export function useRenderProgress(
 
   watch(
     [active, key],
-    ([isActive, name]) => {
+    ([isActive, name], previous) => {
       stop()
 
       if (!isActive) {
+        watchedStart.delete(name)
         if (started.delete(name)) store()
         progress.value = 1
 
         return
       }
 
-      if (!started.has(name)) {
+      if (previous !== undefined && previous[0] === false && previous[1] === name) {
+        watchedStart.add(name)
+        started.set(name, Date.now())
+        store()
+      } else if (!started.has(name)) {
         started.set(name, Date.now())
         store()
       }
