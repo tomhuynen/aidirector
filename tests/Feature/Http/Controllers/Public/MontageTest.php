@@ -233,3 +233,21 @@ describe('video', function () {
             ->and(PollShotClips::clipLength(4, 6))->toBe(1.5);
     });
 });
+
+it('keeps a montage as one shot when the director splits its stills into shots', function () {
+    App\Ai\Agents\PlanDirector::fake([
+        ['reply' => 'Four stills.', 'stage' => 'kind', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'proposal' => null, 'shots' => [
+            ['takeaway' => 'They design vessels.', 'kind' => 'montage', 'idea' => 'A designer over a plan.', 'setting' => 'new_place', 'same_place_as' => 0],
+            ['takeaway' => 'They build vessels.', 'kind' => 'montage', 'idea' => 'A worker at a hull.', 'setting' => 'new_place', 'same_place_as' => 0],
+            ['takeaway' => 'They service vessels.', 'kind' => 'montage', 'idea' => 'A vessel at the quay.', 'setting' => 'new_place', 'same_place_as' => 0],
+        ]],
+    ]);
+    $shot = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => []]]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'ok'])
+        ->assertSuccessful();
+
+    expect($this->project->shots()->count())->toBe(1)
+        ->and($shot->fresh()->group_key)->toBeNull();
+});

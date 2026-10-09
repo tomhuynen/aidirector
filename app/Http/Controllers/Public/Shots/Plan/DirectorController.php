@@ -485,7 +485,8 @@ class DirectorController
             ])
             ->values();
 
-        if ($parts->count() < 2) {
+        // A montage is one shot with its stills as keyframes, never a sequence of shots.
+        if ($parts->count() < 2 || $parts->contains('kind', ShotKind::MONTAGE)) {
             return 0;
         }
 
