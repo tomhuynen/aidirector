@@ -11,6 +11,7 @@ use App\Models\Element;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Support\Facades\Gate;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 class UpdateController
 {
@@ -26,8 +27,11 @@ class UpdateController
         $included = $request->included()->reject(fn(Element $other) => $other->is($element))->values();
         $change = trim((string) $request->validated('change'));
 
-        if ($change === '' && $included->isNotEmpty()) {
-            $change = 'Add ' . $included->pluck('name')->join(', ', ' and ') . ' to it.';
+        // Picked elements and logos become the change; a logo is attached by the brand its sentence names.
+        $added = [...$included->pluck('name')->all(), ...$request->pickedLogos()->map(fn(Media $logo) => "the {$logo->name} logo")->all()];
+
+        if ($added !== []) {
+            $change = trim($change . ' Add ' . collect($added)->join(', ', ' and ') . ' to it.');
         }
         $redraw = $change === '' && trim($request->validated('description')) !== trim($element->description);
 

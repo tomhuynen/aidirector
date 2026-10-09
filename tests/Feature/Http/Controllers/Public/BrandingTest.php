@@ -111,3 +111,30 @@ it('lets the planners ask only for a logo the branding has', function () {
         ->toContain('The only exception is the branding: the logos of Damen')
         ->not->toContain("the company's own logo or name");
 });
+
+it('puts a picked logo on an element as a change that names the brand', function () {
+    Illuminate\Support\Facades\Queue::fake();
+    $logo = withLogo($this->project, 'Damen')->getFirstMedia(Project::LOGOS);
+    $helmet = Element::factory()->for($this->project)->create(['type' => 'object', 'name' => 'Helmet', 'description' => 'A blue helmet.']);
+    $helmet->addMediaFromString(brandingPng())->usingFileName('helmet.png')->toMediaCollection(Element::REFERENCE);
+
+    actingAs($this->director, 'director')
+        ->post(route('public.projects.elements.update', [$this->project, $helmet]), ['name' => 'Helmet', 'description' => 'A blue helmet.', 'logos' => [$logo->id]])
+        ->assertSessionHasNoErrors();
+
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\UpdateElementImage::class, fn($job) => $job->instruction === 'Add the Damen logo to it.');
+    expect($this->project->fresh()->logosFor('Add the Damen logo to it.')->first()->id)->toBe($logo->id);
+});
+
+it('refuses a logo that is not in the branding, and asking for a logo before there is one', function () {
+    $helmet = Element::factory()->for($this->project)->create(['type' => 'object', 'name' => 'Helmet', 'description' => 'A blue helmet.']);
+    $otherLogo = withLogo(Project::factory()->create(), 'Other')->getFirstMedia(Project::LOGOS);
+
+    actingAs($this->director, 'director')
+        ->post(route('public.projects.elements.update', [$this->project, $helmet]), ['name' => 'Helmet', 'description' => 'A blue helmet.', 'change' => 'add the logo on the front'])
+        ->assertSessionHasErrors(['change' => 'There is no logo in the branding yet. Upload one on the project page first.']);
+
+    actingAs($this->director, 'director')
+        ->post(route('public.projects.elements.update', [$this->project, $helmet]), ['name' => 'Helmet', 'description' => 'A blue helmet.', 'logos' => [$otherLogo->id]])
+        ->assertSessionHasErrors('logos');
+});

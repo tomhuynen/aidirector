@@ -156,7 +156,10 @@
             <InputError :message="form.errors.change" />
           </div>
 
-          <fieldset v-if="elements.length > 0 && (!element || element.imageUrl)" class="space-y-3">
+          <fieldset
+            v-if="(elements.length > 0 || logos.length > 0) && (!element || element.imageUrl)"
+            class="space-y-3"
+          >
             <legend class="text-sm font-medium">{{ $t('Add existing elements to it?') }}</legend>
             <div class="flex gap-2">
               <Button
@@ -180,6 +183,45 @@
               <p class="text-sm text-muted-foreground">
                 {{ $t('They are drawn into it, such as an object a person holds. Up to three.') }}
               </p>
+              <div v-if="element && logos.length > 0" class="space-y-2">
+                <h3 class="flex items-center gap-2 text-sm font-semibold">
+                  <Stamp class="size-4 text-muted-foreground" />
+                  {{ $t('Branding') }}
+                </h3>
+                <ul class="grid grid-cols-4 gap-3 sm:grid-cols-6">
+                  <li v-for="logo in logos" :key="logo.id" class="aspect-square">
+                    <button
+                      type="button"
+                      :title="logo.name"
+                      :aria-label="logo.name"
+                      :aria-pressed="form.logos.includes(logo.id)"
+                      :class="
+                        cn(
+                          'relative flex size-full items-center justify-center overflow-hidden rounded-xl border border-border bg-white p-2 transition',
+                          form.logos.includes(logo.id)
+                            ? 'border-signal ring-4 ring-signal/40'
+                            : 'hover:border-muted-foreground/60',
+                        )
+                      "
+                      @click="toggleLogo(logo.id)"
+                    >
+                      <img
+                        :src="logo.imageUrl"
+                        :alt="logo.name"
+                        class="max-h-full max-w-full object-contain"
+                        loading="lazy"
+                      />
+                      <span
+                        v-if="form.logos.includes(logo.id)"
+                        class="absolute top-1.5 left-1.5 flex size-6 items-center justify-center rounded-full bg-signal text-primary-foreground"
+                      >
+                        <Check class="size-3.5" />
+                      </span>
+                    </button>
+                  </li>
+                </ul>
+                <InputError :message="form.errors.logos" />
+              </div>
               <ElementPicker v-model="form.includes" :elements="elements" :types="elementTypes" />
               <InputError :message="form.errors.includes" />
             </template>
@@ -239,7 +281,7 @@ import { Input } from '@shared:ui/input'
 import { Label } from '@shared:ui/label'
 import { NativeSelect } from '@shared:ui/native-select'
 import { Textarea } from '@shared:ui/textarea'
-import { ArrowLeft, ImageUp, LoaderCircle, Trash2, Wand2, X } from 'lucide-vue-next'
+import { ArrowLeft, Check, ImageUp, LoaderCircle, Stamp, Trash2, Wand2, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
 defineOptions({
@@ -259,7 +301,13 @@ const form = useForm({
   change: '',
   photo: null as string | null,
   includes: [] as string[],
+  logos: [] as number[],
 })
+
+/** Up to two logos of the branding, put on it as they are. */
+const toggleLogo = (id: number) => {
+  form.logos = form.logos.includes(id) ? form.logos.filter((picked) => picked !== id) : [...form.logos, id].slice(-2)
+}
 
 const including = ref(false)
 
@@ -329,14 +377,16 @@ const canSave = computed(() => form.name.trim() !== '' && form.description.trim(
 const buttonLabel = computed(() => {
   if (generating.value) return $t('Generating…')
   if (!props.element) return $t('Create and draw')
-  if (form.change.trim() !== '' || (including.value && form.includes.length > 0)) return $t('Apply change')
+  if (form.change.trim() !== '' || (including.value && form.includes.length + form.logos.length > 0))
+    return $t('Apply change')
 
   return $t('Save')
 })
 
 const save = () => {
   rememberEditing(
-    Boolean(props.element?.imageUrl) && (form.change.trim() !== '' || (including.value && form.includes.length > 0)),
+    Boolean(props.element?.imageUrl) &&
+      (form.change.trim() !== '' || (including.value && form.includes.length + form.logos.length > 0)),
   )
 
   form
@@ -344,11 +394,12 @@ const save = () => {
       ...data,
       photo: photo.value?.status === 'ready' ? photo.value.id : null,
       includes: including.value ? data.includes : [],
+      logos: including.value ? data.logos : [],
     }))
     .post(props.saveUrl, {
       preserveScroll: true,
       onSuccess: () => {
-        form.reset('change', 'includes')
+        form.reset('change', 'includes', 'logos')
         including.value = false
       },
     })
