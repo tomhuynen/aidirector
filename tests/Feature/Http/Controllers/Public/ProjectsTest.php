@@ -129,7 +129,7 @@ describe('view and destroy', function () {
     it('shows the project overview with its style and shots', function () {
         Storage::fake(Disk::TENANT->value);
 
-        $project = Project::factory()->ownedBy($this->director)->create(['website' => 'https://damen.com', 'video_resolution' => '480p']);
+        $project = Project::factory()->ownedBy($this->director)->create(['video_resolution' => '480p']);
         $shots = Shot::factory()->for($project)->count(2)->sequence(['position' => 1], ['position' => 2])->create();
         $project->addMediaFromString(pngBytes())->usingFileName('sheet.png')->toMediaCollection(Project::STYLE_REFERENCES);
 
@@ -139,7 +139,6 @@ describe('view and destroy', function () {
             ->assertInertia(fn($page) => $page
                 ->component('projects/view')
                 ->where('project.id', $project->sqid)
-                ->where('project.website', 'https://damen.com')
                 ->where('project.videoResolution', '480p')
                 ->where('project.styleReferenceUrl', fn(string $url) => str_contains($url, 'signature='))
                 ->where('project.links.editor', route('public.shots.view', [$project, $shots->first()]))

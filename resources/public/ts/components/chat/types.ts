@@ -45,6 +45,4 @@ export type ChatMessage = BaseMessage &
     | ({ kind: 'element-options' } & ElementRoundState)
   )
 
-export type ChatMessageKind = ChatMessage['kind']
-
 export type NewChatMessage = ChatMessage extends infer M ? (M extends ChatMessage ? Omit<M, 'id'> : never) : never

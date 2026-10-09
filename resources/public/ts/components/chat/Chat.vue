@@ -9,14 +9,6 @@
     @drop.prevent="onDrop"
   >
     <div ref="thread" class="min-h-0 flex-1 overflow-y-auto" aria-live="polite">
-      <header v-if="title" class="space-y-2 border-b border-border pb-5">
-        <p v-if="eyebrow" class="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
-          {{ eyebrow }}
-        </p>
-        <h2 class="font-display text-2xl leading-tight font-medium text-balance md:text-3xl">{{ title }}</h2>
-        <p v-if="description" class="text-[15px] leading-relaxed text-muted-foreground">{{ description }}</p>
-      </header>
-
       <div class="space-y-5 py-6">
         <div
           v-for="message in messages"
@@ -146,7 +138,15 @@
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <input ref="fileInput" type="file" class="sr-only" multiple :accept="accept" tabindex="-1" @change="onPick" />
+          <input
+            ref="fileInput"
+            type="file"
+            class="sr-only"
+            multiple
+            :accept="ACCEPTED_FILES"
+            tabindex="-1"
+            @change="onPick"
+          />
         </InputGroupAddon>
         <InputGroupTextarea
           v-model="draft"
@@ -201,14 +201,8 @@ const props = withDefaults(
     /** Shown in the user's avatar. */
     userInitial?: string
     label?: string
-    /** Optional heading inside the panel. */
-    eyebrow?: string
-    title?: string
-    description?: string
     /** Where files are staged. Without it the chat is text only. */
     uploadUrl?: string
-    /** What the file picker accepts. */
-    accept?: string
     /** Replaces the keyboard hint under the input, e.g. when the assistant asks for photos. */
     hint?: string | null
   }>(),
@@ -220,14 +214,13 @@ const props = withDefaults(
     disabled: false,
     userInitial: '',
     label: undefined,
-    eyebrow: undefined,
-    title: undefined,
-    description: undefined,
     uploadUrl: undefined,
-    accept: 'image/*,application/pdf,text/plain,text/markdown,text/rtf,application/rtf,.md,.txt,.rtf',
     hint: null,
   },
 )
+
+/** What the file picker accepts: photos and documents. */
+const ACCEPTED_FILES = 'image/*,application/pdf,text/plain,text/markdown,text/rtf,application/rtf,.md,.txt,.rtf'
 
 const emit = defineEmits<{
   send: [text: string, attachments: ChatAttachment[]]

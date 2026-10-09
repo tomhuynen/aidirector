@@ -175,7 +175,6 @@ class ShotResource extends JsonResource
                 'keyframesStore' => route('public.shots.keyframes.store', [$this->project, $this->resource]),
                 'keyframesReorder' => route('public.shots.keyframes.reorder', [$this->project, $this->resource]),
                 'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
-                'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
                 'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
                 'planChat' => route('public.shots.plan.chat', [$this->project, $this->resource]),

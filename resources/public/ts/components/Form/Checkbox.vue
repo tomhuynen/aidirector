@@ -6,18 +6,15 @@
         <span v-if="label">{{ label }}</span>
       </slot>
     </Label>
-    <InputError v-if="error" :message="error" />
   </div>
 </template>
 <script setup lang="ts">
-import InputError from '@public:components/Form/InputError.vue'
 import { Checkbox } from '@shared:ui/checkbox'
 import { Label } from '@shared:ui/label'
 import { useId } from 'vue'
 
 defineProps<{
   label?: string
-  error?: string
 }>()
 
 const model = defineModel<boolean>()

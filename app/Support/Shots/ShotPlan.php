@@ -81,11 +81,6 @@ class ShotPlan
     }
 
     /**
-     * Whether the proposal is a plan to apply: it has keyframes.
-     *
-     * @phpstan-assert-if-true array<string, mixed> $proposal
-     */
-    /**
      * Whether a proposal is the plan the shot already has: the same kind,
      * storyline and keyframes. Giving it again draws nothing new.
      */
@@ -102,6 +97,11 @@ class ShotPlan
             && (string) ($proposal['kind'] ?? '') === (string) $shot->kind?->value;
     }
 
+    /**
+     * Whether the proposal is a plan to apply: it has keyframes.
+     *
+     * @phpstan-assert-if-true array<string, mixed> $proposal
+     */
     public static function isPlan(mixed $proposal): bool
     {
         return is_array($proposal) && is_array($proposal['keyframes'] ?? null) && $proposal['keyframes'] !== [];

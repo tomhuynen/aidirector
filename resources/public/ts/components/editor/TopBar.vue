@@ -37,9 +37,6 @@
       </Button>
       <NotificationsMenu v-if="account" :account="account" />
       <AccountMenu v-if="account" :account="account" />
-      <Button v-if="closeHref" as-child variant="ghost" size="icon-sm" :aria-label="$t('Close')">
-        <Link :href="closeHref"><X class="size-5" /></Link>
-      </Button>
     </div>
   </header>
 </template>
@@ -49,7 +46,7 @@ import { $t } from '@public/ts/shared/i18n'
 import AccountMenu from '@public:components/AccountMenu.vue'
 import NotificationsMenu from '@public:components/NotificationsMenu.vue'
 import { Button } from '@shared:ui/button'
-import { ChevronRight, ListChecks, X } from 'lucide-vue-next'
+import { ChevronRight, ListChecks } from 'lucide-vue-next'
 
 import { usePage } from '../../composables/page'
 
@@ -57,7 +54,6 @@ export type Crumb = { title: string; href?: string }
 
 defineProps<{
   crumbs: Crumb[]
-  closeHref?: string
   /** The project's decision queue and how many decisions wait in it. */
   decisions?: { url: string; count: number }
 }>()

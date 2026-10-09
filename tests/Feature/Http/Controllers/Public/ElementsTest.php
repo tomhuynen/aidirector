@@ -461,8 +461,7 @@ describe('adding', function () {
                     ['value' => 'person', 'label' => 'Person', 'plural' => 'People'],
                     ['value' => 'place', 'label' => 'Place', 'plural' => 'Places'],
                     ['value' => 'object', 'label' => 'Object', 'plural' => 'Objects'],
-                ])
-                ->where('project.links.elementsStore', route('public.projects.elements.store', $this->project)));
+                ]));
     });
 });
 

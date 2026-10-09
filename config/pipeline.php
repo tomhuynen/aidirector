@@ -44,8 +44,6 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'options_count' => 3,
-
     /*
      * Reasoning effort per agent, keyed by its class name in snake case: none,
      * minimal, low, medium or high, or null to leave it to the model. Measure a
@@ -54,7 +52,6 @@ return [
      * 30 (benchmarked 2026-10-02).
      */
     'reasoning_effort' => [
-        'storyline_options_writer' => env('AI_STORYLINE_OPTIONS_REASONING', 'low'),
         'storyline_writer' => null,
         'style_options_writer' => null,
         'element_suggester' => null,

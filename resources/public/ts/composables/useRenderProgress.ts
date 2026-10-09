@@ -31,7 +31,7 @@ function store() {
  * A believable share done from the time passed and the usual time: steady
  * until the usual time, then slower and slower so it never quite arrives.
  */
-export function estimatedProgress(elapsedSeconds: number, usualSeconds: number): number {
+function estimatedProgress(elapsedSeconds: number, usualSeconds: number): number {
   const x = Math.max(0, elapsedSeconds) / Math.max(1, usualSeconds)
 
   if (x <= 1) {

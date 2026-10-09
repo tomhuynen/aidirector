@@ -36,38 +36,24 @@
             </span>
           </button>
         </li>
-        <li v-if="createUrl" class="aspect-square">
-          <Link
-            :href="`${createUrl}?type=${type.value}`"
-            class="flex size-full items-center justify-center rounded-xl border border-dashed border-border bg-card/60 text-muted-foreground transition-colors hover:border-muted-foreground/60 hover:text-foreground"
-            :aria-label="$t('Add :type', { type: type.label.toLowerCase() })"
-            :title="$t('Add :type', { type: type.label.toLowerCase() })"
-          >
-            <Plus class="size-6" />
-          </Link>
-        </li>
       </ul>
     </div>
   </div>
 </template>
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3'
-import { $t } from '@public/ts/shared/i18n'
 import Placeholder from '@public:components/editor/Placeholder.vue'
 import { cn } from '@shared/lib/utils'
-import { Box, Check, MapPin, Plus, User } from 'lucide-vue-next'
+import { Box, Check, MapPin, User } from 'lucide-vue-next'
 
 type PickableElement = { id: string; type: string; name: string; imageUrl: string | null }
 type ElementType = { value: string; label: string; plural: string }
 
 /**
- * Picture tiles of the cast and sets per category to tick; with a create
- * URL every category ends with a plus tile to add one.
+ * Picture tiles of the cast and sets per category to tick.
  */
 const props = defineProps<{
   elements: PickableElement[]
   types: ElementType[]
-  createUrl?: string
 }>()
 
 const picked = defineModel<string[]>({ required: true })

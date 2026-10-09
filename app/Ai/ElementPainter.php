@@ -40,10 +40,9 @@ class ElementPainter
     ) {}
 
     /**
-     * @throws Throwable when the image model fails; the failure is logged on the element first.
-     */
-    /**
      * @param  list<Element>  $includes  elements of the project to draw into this one, such as an object a person holds
+     *
+     * @throws Throwable when the image model fails; the failure is logged on the element first.
      */
     public function paint(Element $element, ?Keyframe $source = null, array $includes = []): void
     {

@@ -56,22 +56,6 @@
           :has-shots="shots.length > 0"
           :save-url="project.links?.format ?? '#'"
         />
-        <dl v-if="project.website" class="border-t border-border pt-4 text-sm">
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">{{ $t('Website') }}</dt>
-            <dd class="truncate font-medium">
-              <a
-                :href="project.website"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex items-center gap-1.5 text-signal hover:underline"
-              >
-                {{ project.website.replace(/^https?:\/\//, '') }}
-                <ExternalLink class="size-3.5" />
-              </a>
-            </dd>
-          </div>
-        </dl>
       </div>
     </section>
 
@@ -101,7 +85,7 @@ import Page from '@public:components/Page.vue'
 import ProjectRules from '@public:components/ProjectRules.vue'
 import VoiceOverSettings from '@public:components/VoiceOverSettings.vue'
 import { Button } from '@shared:ui/button'
-import { ArrowRight, ExternalLink, ListChecks } from 'lucide-vue-next'
+import { ArrowRight, ListChecks } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 defineOptions({

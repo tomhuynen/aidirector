@@ -180,9 +180,6 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
     }
 
     /**
-     * Whether the keyframes are drawn, and what is selected when they are.
-     */
-    /**
      * The documents shared at the project setup, such as the functional design.
      */
     private function documents(): string
@@ -206,6 +203,9 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
             ->join("\n");
     }
 
+    /**
+     * Whether the keyframes are drawn, and what is selected when they are.
+     */
     private function drawn(): string
     {
         if ($this->choosing !== null) {
