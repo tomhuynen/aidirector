@@ -11,6 +11,7 @@ use App\Enums\ShotStatus;
 use App\Http\Requests\Public\PlanDirectorRequest;
 use App\Jobs\ChangePlace;
 use App\Jobs\GenerateStoryline;
+use App\Jobs\GenerateVoiceOver;
 use App\Jobs\TweakKeyframeImage;
 use App\Jobs\UpdateElementImage;
 use App\Models\Element;
@@ -127,7 +128,8 @@ class DirectorController
             default => $this->change($shot, $keyframes, $request, $data['changes'] ?? null, $painter),
         };
         $judged = $plan === null && $findings !== null ? $this->judge($shot, $keyframes, $issues, $findings, $data['verdicts'] ?? null, $conversation) : ['made' => [], 'waiting' => null];
-        $changes = ['made' => [...$chosen['made'], ...$judged['made'], ...$changes['made']], 'waiting' => $chosen['waiting'] ?? $judged['waiting'] ?? $changes['waiting']];
+        $spoken = $plan === null ? $this->changeVoiceOver($shot, $data['voice_over'] ?? null) : [];
+        $changes = ['made' => [...$chosen['made'], ...$judged['made'], ...$spoken, ...$changes['made']], 'waiting' => $chosen['waiting'] ?? $judged['waiting'] ?? $changes['waiting']];
 
         $turns = [
             ...$conversation,
@@ -240,6 +242,39 @@ class DirectorController
             ])),
             'waiting' => $fixed['busy'] === [] ? null : trans_choice('(Keyframe :list is still being drawn; I can fix it once it is ready.)|(Keyframes :list are still being drawn; I can fix them once they are ready.)', count($fixed['busy']), ['list' => collect($fixed['busy'])->join(', ', ' and ')]),
         ];
+    }
+
+    /**
+     * The voice-over as the director asked for it in the chat, with the
+     * length it needs: a presenter lasts as long as their text; another shot
+     * keeps its length unless a new one was agreed, and the text fits it.
+     *
+     * @return list<string>
+     */
+    private function changeVoiceOver(Shot $shot, mixed $said): array
+    {
+        $text = is_array($said) ? trim((string) ($said['text'] ?? '')) : '';
+
+        if ($text === '' || $text === trim((string) $shot->voice_over)) {
+            return [];
+        }
+
+        $needed = (int) ceil(GenerateVoiceOver::words($text) / GenerateVoiceOver::WORDS_PER_SECOND);
+        $asked = is_array($said) ? (int) ($said['seconds'] ?? 0) : 0;
+        $seconds = Shot::clampSeconds(match (true) {
+            $shot->isPresenter() => max($needed, $asked),
+            $asked > 0 => $asked,
+            default => $shot->durationInSeconds(),
+        });
+
+        if ($seconds !== $shot->durationInSeconds()) {
+            $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'framing' => [...(array) ($storyline['framing'] ?? []), 'seconds' => $seconds]]);
+            $shot->forceFill(['duration' => null]);
+        }
+
+        $shot->forceFill(['voice_over' => GenerateVoiceOver::fit($text, max(4, (int) floor($seconds * GenerateVoiceOver::WORDS_PER_SECOND)))])->save();
+
+        return [__('Voice-over, :seconds s: :text', ['seconds' => $seconds, 'text' => $shot->voice_over])];
     }
 
     /**

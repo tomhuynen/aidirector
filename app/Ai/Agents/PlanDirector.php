@@ -8,6 +8,7 @@ use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ShotKind;
 use App\Enums\ShotSize;
+use App\Jobs\GenerateVoiceOver;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Support\Decisions\FindingsReport;
@@ -84,6 +85,7 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
             - In changes, name hands, arms and sides by where they are in the image, such as "the hand on the right of the frame", never by a person's own left or right: with someone who faces away those are the other way round. When the director names a hand by the person's own side, look at the image to see which side of the frame that is.
             - A request that makes the arms cross or a hand reach across to the other side of the body cannot be drawn: say so in one sentence and offer the natural version, the hand on that side doing it, such as "Crossed arms come out wrong; shall the hand on the right of the frame point instead, as now?". Changes stay empty until the director agrees: never quietly do something other than what they asked. When they name a hand by the person's own side, say which hand that is in the image, such as "His left hand is the one on the left of the frame, on the edge of the panel."
             - When documents the director shared at the project setup are listed, such as the functional design, they are the source for the course: the order of the shots, what each shot must teach and why. Take the takeaway, the idea and the context from them before your own, and answer from them when the director asks what a shot is about or what comes first; this shot's place in the film tells you which part is this shot. Never say you have no plan or document when they are listed. What the director says in the chat comes first.
+            - The voice-over is listed under "Voice-over now". When the director asks to change it, such as longer, shorter or other words, give voice_over with the whole new text, spoken in about 2.2 words per second, and the seconds the shot needs for it. A presenter shot lasts as long as its text, so give the seconds that fit the new text. For other shots the images set the length: keep the text within the shot's seconds, unless the director asks for a longer or shorter shot, then give those seconds. The voice-over only names and reinforces what the images show. When the voice-over does not change, the text is empty and the seconds 0.
             - A drawn shot keeps its plan: change the images, not the plan. Only when the plan itself has to change, such as other keyframes, another kind or another place, propose a new plan; once the director agrees with it, the drawn keyframes are thrown away and the new plan is drawn. Say so before they agree.
             - The proposal and changes are never both given; changes are empty while nothing is drawn.
             - The director may go back to an earlier step, skip one or ask for the plan straight away; follow them. Once there is a plan, a change goes straight to a new proposal: the whole plan, changed as far as asked and otherwise exactly as it is now.
@@ -125,6 +127,10 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
                 'finding' => $schema->integer()->min(1)->required(),
                 'verdict' => $schema->string()->enum(['fix', 'ignore'])->required(),
             ]))->max(12)->required(),
+            'voice_over' => $schema->object([
+                'text' => $schema->string()->required(),
+                'seconds' => $schema->integer()->min(0)->required(),
+            ])->required(),
             'choice' => $schema->object([
                 'action' => $schema->string()->enum(['none', 'choose', 'more', 'another_place'])->required(),
                 'option' => $schema->integer()->min(0)->required(),
@@ -224,6 +230,15 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
     private function storyline(): string
     {
         return trim((string) ($this->shot->chosen_storyline['storyline'] ?? '')) ?: '(none yet)';
+    }
+
+    private function voiceOver(): string
+    {
+        $text = trim((string) $this->shot->voice_over);
+
+        return $text === ''
+            ? '(none yet)'
+            : "\"{$text}\" (about " . round(GenerateVoiceOver::words($text) / GenerateVoiceOver::WORDS_PER_SECOND, 1) . " seconds spoken; the shot lasts {$this->shot->durationInSeconds()} seconds)";
     }
 
     private function spot(): string
@@ -340,6 +355,7 @@ class PlanDirector implements Agent, HasReasoningEffort, HasStructuredOutput
             The plan now:
             Storyline: {$this->storyline()}
             Spot: {$this->spot()}
+            Voice-over now: {$this->voiceOver()}
             {$keyframes}
 
             The conversation so far:

@@ -315,3 +315,22 @@ it('changes a finished keyframe while others are still drawn, and says which one
 
     Bus::assertChained([fn(TweakKeyframeImage $job) => $job->keyframe->position === 1]);
 });
+
+it('changes the voice-over when asked, a presenter lasting as long as the new text', function () {
+    $shot = drawnShot($this->project);
+    $shot->forceFill(['kind' => 'presenter', 'voice_over' => 'Welcome to Damen Naval.'])->save();
+    $longer = 'Welcome to Damen Naval. Your safety comes first here, so take a moment to learn how we work and keep each other safe.';
+    PlanDirector::fake([imagesReply(['reply' => 'I made the voice-over longer.', 'voice_over' => ['text' => $longer, 'seconds' => 3]])]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'can we make the voice over a bit longer?'])
+        ->assertOk()
+        ->assertJsonPath('reload', true);
+
+    $shot->refresh();
+
+    // 23 words take about 11 seconds, more than the 3 the reply asked for.
+    expect($shot->voice_over)->toBe($longer)
+        ->and($shot->durationInSeconds())->toBe(11);
+    PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Voice-over now: "Welcome to Damen Naval." (about 1.8 seconds spoken'));
+});
