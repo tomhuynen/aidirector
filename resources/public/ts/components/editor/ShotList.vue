@@ -126,14 +126,39 @@
               v-else
               :class="cn('h-11 w-[72px] bg-background', shot.id === highlightedId && 'border-signal')"
             />
-            <!-- Another shot that is still being generated; the open shot shows its own progress. -->
+            <!-- A shot whose keyframe or video is being made, the open one too. -->
             <span
-              v-if="shot.busy && shot.id !== currentId"
+              v-if="lastRender[shot.id]"
+              class="pointer-events-none absolute inset-0 overflow-hidden rounded-md"
+              :title="shot.statusLabel"
+            >
+              <RenderProgress
+                :progress-key="lastRender[shot.id]!.key"
+                :active="shot.render !== null"
+                :seconds="lastRender[shot.id]!.seconds"
+                :started-at="lastRender[shot.id]!.startedAt"
+                :image-url="shot.thumbnailUrl"
+                compact
+              />
+            </span>
+            <span
+              v-if="shot.busy && !shot.render"
               class="absolute inset-0 flex items-center justify-center rounded-md bg-black/60"
               :title="shot.statusLabel"
             >
               <LoaderCircle class="size-4 animate-spin text-white" />
               <span class="sr-only">{{ shot.statusLabel }}</span>
+            </span>
+            <!-- Finished while another shot was open, and not looked at yet. -->
+            <span
+              v-if="!shot.busy && ready.has(shot.id)"
+              class="absolute inset-0 flex items-center justify-center rounded-md bg-black/20"
+              :title="$t('Ready')"
+            >
+              <span class="flex size-6 items-center justify-center rounded-full bg-signal text-white shadow-sm">
+                <Check class="size-3.5" :stroke-width="3" />
+              </span>
+              <span class="sr-only">{{ $t('Ready') }}</span>
             </span>
           </span>
           <div class="min-w-0">
@@ -187,17 +212,21 @@
 </template>
 <script setup lang="ts">
 import { Link, router } from '@inertiajs/vue3'
+import { useReadyShots } from '@public/ts/composables/useReadyShots'
 import { $t } from '@public/ts/shared/i18n'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Checkbox } from '@shared:ui/checkbox'
-import { ArrowDown, ArrowUp, Clock, Combine, LoaderCircle, Play, Plus } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Check, Clock, Combine, LoaderCircle, Play, Plus } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import MergeShotsDialog from './MergeShotsDialog.vue'
 import Placeholder from './Placeholder.vue'
+import RenderProgress from './RenderProgress.vue'
 import SequencePlayer from './SequencePlayer.vue'
 import type { ShotTransitionOption } from './TransitionPicker.vue'
+
+type ShotRender = { key: string; seconds: number; startedAt: string | null }
 
 export type ShotListItem = {
   id: string
@@ -215,6 +244,8 @@ export type ShotListItem = {
   status: string
   /** Storylines, keyframes or the video are being generated right now. */
   busy: boolean
+  /** The keyframe or video being made right now, for its progress. */
+  render: ShotRender | null
   thumbnailUrl: string | null
   /** The shot's video, for playing the sequence. */
   videoUrl?: string | null
@@ -231,6 +262,24 @@ const props = defineProps<{
   mergeUrl?: string
   transitions?: ShotTransitionOption[]
 }>()
+
+const ready = useReadyShots(
+  computed(() => props.shots),
+  computed(() => props.currentId),
+)
+
+/** The last render seen per shot, kept after it is done so its progress can run to the end and fade. */
+const lastRender = ref<Record<string, ShotRender>>({})
+
+watch(
+  () => props.shots,
+  (shots) => {
+    const next = { ...lastRender.value }
+    for (const shot of shots) if (shot.render) next[shot.id] = shot.render
+    lastRender.value = next
+  },
+  { immediate: true },
+)
 
 /*
  * Play all: the shots with a video play one after another, and the list

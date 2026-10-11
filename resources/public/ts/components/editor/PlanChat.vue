@@ -36,9 +36,60 @@
       @send="(text: string) => send(text)"
     >
       <template #text="{ message }">
+        <!-- A place of the sequence being drawn: shown while it waits, so the director sees something is happening. -->
+        <div
+          v-if="message.id === 'sequence-place-drawing' && sequencePlaceDrawing"
+          class="flex max-w-[85%] flex-col gap-3 py-1 text-[15px] leading-relaxed"
+        >
+          <p>
+            {{
+              $t('Drawing :place, for :shots.', {
+                place: sequencePlaceDrawing.name,
+                shots: sequencePlaceDrawing.shots.join(', '),
+              })
+            }}
+          </p>
+          <ul class="grid grid-cols-3 gap-2">
+            <li
+              v-for="n in sequencePlaceDrawing.count"
+              :key="n"
+              class="flex aspect-[9/16] items-center justify-center rounded-lg border border-border bg-muted"
+            >
+              <LoaderCircle class="size-6 animate-spin text-signal" />
+            </li>
+          </ul>
+        </div>
+        <!-- A place of the sequence to choose first: click one, or say which one in the chat. -->
+        <div
+          v-else-if="message.id === 'sequence-place' && sequencePlace"
+          class="flex max-w-[85%] flex-col gap-3 py-1 text-[15px] leading-relaxed"
+        >
+          <p>
+            {{ $t('Choose :place, for :shots.', { place: sequencePlace.name, shots: sequencePlace.shots.join(', ') }) }}
+          </p>
+          <ul class="grid grid-cols-3 gap-2">
+            <li v-for="(option, o) in sequencePlace.options" :key="option.id">
+              <button
+                type="button"
+                class="group flex w-full flex-col gap-1 rounded-lg border border-border bg-card p-1.5 text-left transition hover:border-signal disabled:opacity-50"
+                :disabled="choosingPlace || !sequencePlaceUrl"
+                @click="choosePlace(option.id)"
+              >
+                <img
+                  :src="option.imageUrl"
+                  :alt="$t('Place :n', { n: String(o + 1) })"
+                  class="w-full rounded-md object-cover"
+                />
+                <span class="text-xs font-medium text-muted-foreground group-hover:text-foreground">{{
+                  $t('Place :n', { n: String(o + 1) })
+                }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
         <!-- Places and objects the plan needs that the cast and sets do not have yet. -->
         <div
-          v-if="message.id === 'new-elements' && newElements?.length"
+          v-else-if="message.id === 'new-elements' && newElements?.length"
           class="flex max-w-[85%] flex-col gap-3 py-1 text-[15px] leading-relaxed"
         >
           <p>
@@ -67,7 +118,23 @@
           :class="message.role === 'user' ? 'rounded-2xl rounded-tr-md bg-signal-soft/70 px-4 py-3' : 'py-1'"
         >
           <p v-if="turnOf(message)?.about" class="text-xs text-muted-foreground">{{ turnOf(message)?.about }}</p>
-          <p class="whitespace-pre-wrap">{{ message.content }}</p>
+          <!-- What the checks found: each finding with the warning the keyframes show. -->
+          <div v-if="turnOf(message)?.findings?.length" class="space-y-1.5">
+            <p
+              v-for="(line, l) in findingLines(message)"
+              :key="l"
+              :class="cn('whitespace-pre-wrap', line.finding && 'flex items-start gap-2')"
+            >
+              <span
+                v-if="line.finding"
+                class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-amber-500 text-black"
+              >
+                <TriangleAlert class="size-3" />
+              </span>
+              <span>{{ line.text }}</span>
+            </p>
+          </div>
+          <p v-else class="whitespace-pre-wrap">{{ message.content }}</p>
 
           <!-- Changes to the drawn images, made one keyframe after the other. -->
           <ul v-if="turnOf(message)?.changes?.length" class="space-y-1 text-sm text-muted-foreground">
@@ -123,6 +190,18 @@
             </li>
           </ul>
 
+          <!-- A place of the sequence chosen here: it stays in the conversation. -->
+          <figure v-if="turnOf(message)?.chosenPlace" class="flex w-1/3 flex-col gap-1">
+            <img
+              :src="turnOf(message)?.chosenPlace?.imageUrl"
+              :alt="turnOf(message)?.chosenPlace?.name"
+              class="w-full rounded-md border border-border object-cover"
+            />
+            <figcaption class="truncate text-xs text-muted-foreground">
+              {{ turnOf(message)?.chosenPlace?.name }}
+            </figcaption>
+          </figure>
+
           <!-- Agreed in the chat: written into the shot and drawn. -->
           <p v-if="turnOf(message)?.proposal" class="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Check class="size-3.5 text-signal" />
@@ -145,7 +224,7 @@ import Chat from '@public:components/chat/Chat.vue'
 import type { ChatMessage } from '@public:components/chat/types'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { Check, ChevronRight, LoaderCircle, Wand2 } from 'lucide-vue-next'
+import { Check, ChevronRight, LoaderCircle, TriangleAlert, Wand2 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
 /** What the chat shows of a plan it wrote into the shot. */
@@ -163,6 +242,10 @@ export type PlanChatTurn = {
   about?: string
   /** The changes made to the drawn images. */
   changes?: string[]
+  /** A place of the sequence chosen in this turn, shown with its picture. */
+  chosenPlace?: { name: string; imageUrl: string }
+  /** What the checks found, reported in this turn, numbered as in its text. */
+  findings?: { n: number }[]
 }
 
 /** The drawn keyframe the director has selected; while choosing a place or keyframe 1 the chat sees what is on screen instead. */
@@ -182,6 +265,11 @@ const props = defineProps<{
   /** Places and objects the plan needs that the cast and sets do not have yet. */
   newElements?: { name: string; type: string; description: string }[]
   elementsUrl?: string
+  /** A place of the sequence waiting to be chosen here, before the shots are planned further. */
+  sequencePlace?: { name: string; shots: string[]; options: { id: number; imageUrl: string }[] } | null
+  sequencePlaceUrl?: string
+  /** A place of the sequence being drawn here, shown with placeholders while it waits. */
+  sequencePlaceDrawing?: { name: string; shots: string[]; count: number } | null
 }>()
 
 const turns = ref<PlanChatTurn[]>([...(props.conversation ?? [])])
@@ -216,6 +304,25 @@ const addElements = () => {
             .map((element) => element.id),
         }),
     })
+}
+const choosingPlace = ref(false)
+/** Clicked: chosen like saying so in the chat; the conversation comes back with the shot. */
+const choosePlace = (id: number) => {
+  if (!props.sequencePlaceUrl) return
+
+  choosingPlace.value = true
+  router.post(
+    props.sequencePlaceUrl,
+    { place: id },
+    {
+      preserveScroll: true,
+      onFinish: () => (choosingPlace.value = false),
+      // The last place is chosen: the plan director goes on with the shot without waiting for a message.
+      onSuccess: () => {
+        if (!props.sequencePlace && !props.sequencePlaceDrawing) send('', { continue: true })
+      },
+    },
+  )
 }
 const leaveOut = () =>
   props.elementsUrl &&
@@ -276,6 +383,12 @@ const messages = computed<ChatMessage[]>(() => [
         },
       ]
     : []),
+  ...(props.sequencePlaceDrawing
+    ? [{ id: 'sequence-place-drawing', role: 'assistant' as const, kind: 'text' as const, content: '' }]
+    : []),
+  ...(props.sequencePlace
+    ? [{ id: 'sequence-place', role: 'assistant' as const, kind: 'text' as const, content: '' }]
+    : []),
   // Offered to make for the cast and sets: it waits below the conversation until added or left out.
   ...(props.newElements?.length
     ? [{ id: 'new-elements', role: 'assistant' as const, kind: 'text' as const, content: '' }]
@@ -285,31 +398,50 @@ const messages = computed<ChatMessage[]>(() => [
 const turnOf = (message: ChatMessage): PlanChatTurn | undefined =>
   message.id.startsWith('turn-') ? turns.value[Number(message.id.slice(5))] : undefined
 
+/** The lines of a report of findings, each numbered finding marked as one. */
+const findingLines = (message: ChatMessage) => {
+  const numbers = (turnOf(message)?.findings ?? []).map((finding) => `${finding.n}. `)
+
+  return message.content
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => ({ text: line, finding: numbers.some((number) => line.startsWith(number)) }))
+}
+
 const drawnHere = (message: ChatMessage) => [...(turnOf(message)?.made ?? []), ...(turnOf(message)?.adjusted ?? [])]
 
-const send = async (text: string, extra: { made?: string[] } = {}) => {
+const send = async (text: string, extra: { made?: string[]; continue?: boolean } = {}) => {
   const message = text.trim()
 
-  if (message === '' || busy.value || !props.chatUrl) return
+  if ((message === '' && !extra.continue) || busy.value || !props.chatUrl) return
 
   busy.value = true
   error.value = null
-  turns.value = [...turns.value, { role: 'director', text: message, about: props.target?.label, ...extra }]
+  // Going on by itself adds nothing the director said.
+  if (!extra.continue)
+    turns.value = [...turns.value, { role: 'director', text: message, about: props.target?.label, ...extra }]
 
   const selection = props.target ? { target: 'keyframe', keyframe: props.target.keyframe } : {}
 
   try {
-    const { messages: saved, reload } = await postJson<{ messages: PlanChatTurn[]; reload: boolean }>(props.chatUrl, {
+    const {
+      messages: saved,
+      reload,
+      visit,
+    } = await postJson<{ messages: PlanChatTurn[]; reload: boolean; visit?: string }>(props.chatUrl, {
       message,
       ...extra,
       ...selection,
     })
     turns.value = saved
 
+    // The director agreed to drop this shot: go on to the shot that took its place.
+    if (visit) return router.visit(visit)
+
     // The reply changed the shot: a plan written and drawn, cast and sets offered or redrawn, or shots added.
     if (reload) router.reload({ only: ['shot', 'keyframes', 'siblings', 'elements'] })
   } catch {
-    turns.value = turns.value.slice(0, -1)
+    if (!extra.continue) turns.value = turns.value.slice(0, -1)
     error.value = $t('The plan director could not answer. Please try again.')
   } finally {
     busy.value = false

@@ -39,6 +39,8 @@ class ShotPlan
             'place_part' => trim((string) ($keyframe['place_part'] ?? '')),
         ]) + [
             'elements' => collect((array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
+            // What someone changes in this keyframe: only those objects are taken from the drawing when it is put onto the place.
+            'handled' => collect((array) ($keyframe['handled'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
         ])->all();
         $keyframes = self::withNamedPeople($shot, $keyframes);
 
@@ -59,14 +61,14 @@ class ShotPlan
             'duration' => null,
             'chosen_storyline' => ['title' => (string) ($takeaway !== '' ? Str::limit($takeaway, 80) : $shot->title), 'storyline' => $storyline],
             'storyline' => [
-                ...array_diff_key($shot->storyline ?? [], ['setting_from' => true, 'keyframes' => true, 'framing' => true, 'place_edits' => true]),
+                ...array_diff_key($shot->storyline ?? [], ['setting_from' => true, 'keyframes' => true, 'framing' => true, 'place_edits' => true, ...(self::leavesSequencePlace($shot, $keyframes) ? ['sequence_place' => true, 'sequence_view' => true] : [])]),
                 'framing' => [
                     // The spot agreed in the chat; a proposal without one keeps the plan's.
                     'spot' => trim((string) ($proposal['spot'] ?? '')) !== '' ? trim((string) $proposal['spot']) : (string) ($shot->storyline['framing']['spot'] ?? ''),
                     'size' => in_array($proposal['framing'] ?? null, ShotSize::sceneValues(), true) ? $proposal['framing'] : ($shot->storylineFraming()['size'] ?? null),
                     'seconds' => $seconds,
                 ],
-                ...($source !== null ? ['setting_from' => ['shot_id' => $source->id, 'keyframe' => $keyframe]] : []),
+                ...($source !== null ? ['setting_from' => ['shot_id' => $source->id, 'keyframe' => $keyframe]] : self::sequenceSetting($shot)),
                 'keyframes' => $keyframes,
             ],
             ...($changed ? ['voice_over' => null] : []),
@@ -112,7 +114,7 @@ class ShotPlan
     /**
      * The shot of the film the plan takes its setting from, by its code; without one, the default applies.
      */
-    private static function settingSource(Shot $shot, mixed $from): ?Shot
+    public static function settingSource(Shot $shot, mixed $from): ?Shot
     {
         $code = is_array($from) ? str_replace(' ', '', (string) ($from['shot'] ?? '')) : '';
 
@@ -120,23 +122,83 @@ class ShotPlan
     }
 
     /**
-     * Adds to each keyframe the people of the cast its description names but
-     * its cast list leaves out: without their picture the image model makes
-     * them up, often as a copy of someone else in the keyframe.
+     * Whether the plan moves the shot to another place than the one chosen
+     * for its sequence: the plan before named a place of the cast and sets,
+     * and the new one names only places that neither it nor the shots of that
+     * place use, such as a plain hallway made instead of the meeting-room
+     * corridor. The chosen place would otherwise still be drawn.
+     *
+     * @param  list<array<string, mixed>>  $keyframes
+     */
+    private static function leavesSequencePlace(Shot $shot, array $keyframes): bool
+    {
+        $place = app(SequencePlaces::class)->of($shot);
+        $owner = $place === null ? null : app(SequencePlaces::class)->ownerOf($shot);
+
+        if ($owner === null) {
+            return false;
+        }
+
+        $places = $shot->project->elements()->where('type', ElementType::PLACE)->pluck('name')->map(fn(string $name) => mb_strtolower($name));
+        $placesIn = fn(array $plan) => collect($plan)->flatMap(fn(array $keyframe) => array_map(fn(mixed $name) => mb_strtolower(trim((string) $name)), (array) ($keyframe['elements'] ?? [])))->unique()->filter(fn(string $name) => $places->contains($name))->values();
+        $before = $placesIn($shot->storylineKeyframes())->all();
+        $used = [...$before, ...array_map(mb_strtolower(...), collect(app(SequencePlaces::class)->places($owner))->firstWhere('key', $shot->sequencePlaceKey())['elements'] ?? [])];
+        $now = $placesIn($keyframes);
+
+        // Only a switch: the plan before named a place, and the new one names none of it.
+        return $before !== [] && $now->isNotEmpty() && $now->every(fn(string $name) => ! in_array($name, $used, true));
+    }
+
+    /**
+     * The setting agreed when the shot's sequence was planned, such as the
+     * place of a later shot, kept when the plan itself names none.
+     *
+     * @return array{setting_from?: array<string, mixed>}
+     */
+    private static function sequenceSetting(Shot $shot): array
+    {
+        $from = $shot->storyline['setting_from'] ?? null;
+
+        return is_array($from) && ($from['sequence'] ?? false) === true ? ['setting_from' => $from] : [];
+    }
+
+    /**
+     * Makes the people of each keyframe the ones its description names: a
+     * person named but left out of its cast list is added, so the image model
+     * gets their picture instead of making them up, often as a copy of someone
+     * else; a person in the list whom the description never names, while it
+     * names someone else, is dropped, because the image model would put them
+     * in the picture anyway, standing there with nothing to do. Places and
+     * objects stay as listed.
      *
      * @param  list<array<string, mixed>>  $keyframes
      * @return list<array<string, mixed>>
      */
     public static function withNamedPeople(Shot $shot, array $keyframes): array
     {
-        $people = $shot->project->elements()->where('type', ElementType::PERSON)->pluck('name');
+        $elements = $shot->project->elements()->get(['name', 'type']);
+        $people = $elements->where('type', ElementType::PERSON)->pluck('name');
+        $isPerson = fn(mixed $name) => $people->contains(fn(string $person) => mb_strtolower($person) === mb_strtolower(trim((string) $name)));
+        $word = fn(string $name) => '/(?<![\pL\pN])' . preg_quote($name, '/') . '(?![\pL\pN])/iu';
 
-        return array_map(function (array $keyframe) use ($people): array {
-            $named = $people->filter(fn(string $name) => preg_match('/(?<![\pL\pN])' . preg_quote($name, '/') . '(?![\pL\pN])/iu', (string) ($keyframe['description'] ?? '')) === 1);
+        return array_map(function (array $keyframe) use ($people, $isPerson, $elements, $word): array {
+            // A name inside a longer one, such as "Reception security" in "Reception Security Desk", does not name that person.
+            $named = $people->filter(function (string $name) use ($keyframe, $elements, $word): bool {
+                $text = (string) ($keyframe['description'] ?? '');
+
+                foreach ($elements->pluck('name')->filter(fn(string $other) => mb_strlen($other) > mb_strlen($name) && preg_match($word($name), $other) === 1) as $longer) {
+                    $text = (string) preg_replace($word($longer), '', $text);
+                }
+
+                return preg_match($word($name), $text) === 1;
+            });
+            $isNamed = fn(mixed $name) => $named->contains(fn(string $person) => mb_strtolower($person) === mb_strtolower(trim((string) $name)));
             $listed = collect((array) ($keyframe['elements'] ?? []));
+            // Only when the description names someone: "she" alone may well be the person listed.
+            $kept = $named->isEmpty() ? $listed : $listed->reject(fn(mixed $name) => $isPerson($name) && ! $isNamed($name));
             $missing = $named->reject(fn(string $name) => $listed->contains(fn(mixed $listedName) => mb_strtolower(trim((string) $listedName)) === mb_strtolower($name)));
 
-            return $missing->isEmpty() ? $keyframe : [...$keyframe, 'elements' => $listed->concat($missing)->values()->all()];
+            return $missing->isEmpty() && $kept->count() === $listed->count() ? $keyframe : [...$keyframe, 'elements' => $kept->concat($missing)->values()->all()];
         }, $keyframes);
     }
 }

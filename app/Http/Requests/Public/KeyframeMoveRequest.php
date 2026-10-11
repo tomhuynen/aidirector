@@ -20,10 +20,8 @@ class KeyframeMoveRequest extends FormRequest
             /** How far the person's feet move, as shares of the image width and height. */
             'dx' => ['required', 'numeric', 'between:-1,1'],
             'dy' => ['required', 'numeric', 'between:-1,1'],
-            /** How much larger or smaller the person becomes, around their feet. */
+            /** How much larger or smaller the person becomes around their feet: from the depth of the place at the old and new spot. */
             'scale' => ['required', 'numeric', 'between:0.3,3'],
-            /** What the person does from the new spot; without it, what the keyframe description says. */
-            'instruction' => ['nullable', 'string', 'max:500'],
         ];
     }
 }

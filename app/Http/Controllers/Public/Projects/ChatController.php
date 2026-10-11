@@ -171,7 +171,7 @@ class ChatController
                 'status' => ShotStatus::STORYLINE_PENDING,
             ]);
 
-            // Planned straight away by the kind chosen for it, drawn once the director starts it from the decisions.
+            // Planned straight away by the kind chosen for it, drawn once the director starts it on the shot.
             GenerateStoryline::dispatch($shot, keepKind: true);
         }
     }

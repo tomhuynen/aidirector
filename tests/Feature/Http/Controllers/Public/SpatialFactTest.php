@@ -25,6 +25,9 @@ beforeEach(function () {
 it('adds the spatial fact as the last sentence of what the models get', function () {
     expect(Keyframe::joined('She stands at the line', 'Both feet are behind it.'))->toBe('She stands at the line. Both feet are behind it.')
         ->and(Keyframe::joined('She stands at the line.', ''))->toBe('She stands at the line.')
+        // A description rewritten from the joined text already ends with the fact: it is not added twice.
+        ->and(Keyframe::joined('She stands at the line. Both feet are  behind it.', 'Both feet are behind it.'))->toBe('She stands at the line. Both feet are  behind it.')
+        ->and(Keyframe::joined('She stands at the line. both feet are behind it', 'Both feet are behind it.'))->toBe('She stands at the line. both feet are behind it')
         ->and((new Keyframe(['description' => 'She waits.', 'spatial' => 'Both feet are outside the shelter.']))->fullDescription())->toBe('She waits. Both feet are outside the shelter.');
 });
 

@@ -9,7 +9,7 @@ use App\Enums\ShotStatus;
 use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Keyframe;
 use App\Models\Shot;
-use App\Support\Decisions\FindingsReport;
+use App\Support\Findings\FindingsReport;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -54,6 +54,11 @@ class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
      */
     public static function after(Shot $shot): void
     {
+        // What a shot in a place of its sequence leaves behind is read once its keyframes change, for the shots after it there.
+        if ($shot->sequencePlaceKey() !== null && in_array($shot->status, self::REVIEWED, true)) {
+            ReadLeftBehind::dispatch($shot);
+        }
+
         if (Config::get('pipeline.keyframe_check') && in_array($shot->status, self::REVIEWED, true)) {
             $shot->forceFill(['reviewing' => true])->save();
             self::dispatch($shot);

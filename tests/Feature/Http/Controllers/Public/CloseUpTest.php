@@ -178,9 +178,9 @@ describe('sequences', function () {
 
         $shots = $this->project->shots()->get();
 
-        expect($shots[1]->storyline['setting_from'])->toBe(['shot_id' => $shot->id, 'keyframe' => Shot::LAST_KEYFRAME])
-            ->and($shots[2]->storyline['setting_from'])->toBe(['shot_id' => $shots[1]->id, 'keyframe' => Shot::LAST_KEYFRAME])
-            ->and($shots[3]->storyline['setting_from'])->toBe(['shot_id' => $shot->id, 'keyframe' => 0])
+        expect($shots[1]->storyline['setting_from'])->toEqual(['shot_id' => $shot->id, 'keyframe' => Shot::LAST_KEYFRAME, 'sequence' => true])
+            ->and($shots[2]->storyline['setting_from'])->toEqual(['shot_id' => $shots[1]->id, 'keyframe' => Shot::LAST_KEYFRAME, 'sequence' => true])
+            ->and($shots[3]->storyline['setting_from'])->toEqual(['shot_id' => $shot->id, 'keyframe' => 0, 'sequence' => true])
             ->and($shots[3]->settingWaitsFor())->toBe('the place of SH010');
     });
 

@@ -1,9 +1,10 @@
 <template>
-  <!-- Lies over the keyframe image: click the person, then drag them. The controls are in the column on the right. -->
+  <!-- Lies over the keyframe image: click a person to pick them, drag them, let go to put them down. -->
   <div
     ref="surface"
     class="absolute inset-0 overflow-hidden rounded-xl"
-    :class="mover.state.picked ? 'cursor-default' : 'cursor-crosshair'"
+    :class="mover.state.picked ? 'cursor-default' : 'cursor-pointer'"
+    :title="mover.state.picked ? undefined : $t('Click a person to move them')"
     @click="click"
   >
     <template v-if="mover.state.picked">
@@ -26,21 +27,33 @@
       />
     </template>
     <span
-      v-else-if="mover.state.selecting"
+      v-if="mover.state.selecting || mover.state.applying"
       class="absolute inset-0 flex items-center justify-center bg-background/30 text-signal"
     >
       <LoaderCircle class="size-6 animate-spin" />
     </span>
+    <p
+      v-if="mover.state.picked && !mover.state.applying"
+      class="pointer-events-none absolute inset-x-4 bottom-4 rounded-lg border border-border bg-background/90 px-4 py-2 text-center text-sm"
+    >
+      {{ $t('Drag them to the new spot and let go. Esc cancels.') }}
+    </p>
+    <p
+      v-else-if="mover.state.error"
+      class="absolute inset-x-4 bottom-4 rounded-lg border border-destructive/50 bg-background/90 px-4 py-2 text-center text-sm text-destructive"
+    >
+      {{ mover.state.error }}
+    </p>
   </div>
 </template>
 <script setup lang="ts">
 import { $t } from '@public/ts/shared/i18n'
 import { LoaderCircle } from 'lucide-vue-next'
-import { useTemplateRef } from 'vue'
+import { onBeforeUnmount, onMounted, useTemplateRef } from 'vue'
 
 import type { KeyframeMoverState, MoverBox } from './keyframeMover'
 
-const props = defineProps<{ mover: KeyframeMoverState }>()
+const props = defineProps<{ mover: KeyframeMoverState; selectUrl: string; moveUrl: string }>()
 
 const surface = useTemplateRef<HTMLElement>('surface')
 
@@ -71,7 +84,9 @@ const share = (event: PointerEvent | MouseEvent) => {
   }
 }
 
-const click = (event: MouseEvent) => void props.mover.pick(share(event))
+/** A click picks the person there, or another one when someone is picked already. */
+const click = (event: MouseEvent) =>
+  void props.mover.pick({ selectUrl: props.selectUrl, moveUrl: props.moveUrl }, share(event))
 
 let start = { x: 0, y: 0, dx: 0, dy: 0 }
 
@@ -83,6 +98,20 @@ const drag = (event: PointerEvent) => {
 const grab = (event: PointerEvent) => {
   start = { ...share(event), dx: props.mover.state.offset.dx, dy: props.mover.state.offset.dy }
   window.addEventListener('pointermove', drag)
-  window.addEventListener('pointerup', () => window.removeEventListener('pointermove', drag), { once: true })
+  window.addEventListener(
+    'pointerup',
+    () => {
+      window.removeEventListener('pointermove', drag)
+      props.mover.drop()
+    },
+    { once: true },
+  )
 }
+
+const escape = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && props.mover.state.picked && !props.mover.state.applying) props.mover.cancel()
+}
+
+onMounted(() => window.addEventListener('keydown', escape))
+onBeforeUnmount(() => window.removeEventListener('keydown', escape))
 </script>

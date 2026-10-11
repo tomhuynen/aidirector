@@ -19,6 +19,17 @@ use Throwable;
 class OpenRouterImageClient
 {
     /**
+     * How long one attempt at an image may take, in seconds: 99 in 100 are
+     * done within 100. The endpoint now and then accepts a call and never
+     * answers; such a call is tried once more, and both attempts together
+     * stay well under the 300 seconds of the jobs that make images.
+     */
+    public const int TIMEOUT = 120;
+
+    /** How often a call that got no answer in time is tried in all. */
+    public const int ATTEMPTS_AFTER_TIMEOUT = 2;
+
+    /**
      * Whether the model has to be called through this endpoint.
      */
     public static function serves(string $model): bool
@@ -44,12 +55,21 @@ class OpenRouterImageClient
             ], array_values($references)) ?: null,
         ]);
 
+        $timeouts = 0;
+
         // Slashes stay unescaped: the endpoint misreads the mime type of an escaped data URL.
         $response = Http::baseUrl(Config::get('pipeline.video.url'))
             ->withToken((string) Config::get('ai.providers.openrouter.key'))
             ->acceptJson()
-            ->timeout(300)
-            ->retry(TransientHttpFailure::ATTEMPTS, TransientHttpFailure::WAIT_MS, fn(Throwable $exception) => TransientHttpFailure::retryable($exception))
+            ->timeout(self::TIMEOUT)
+            // A call that hangs is tried once more, not as often as a quick failure: more waits would outlast the job.
+            ->retry(TransientHttpFailure::ATTEMPTS, TransientHttpFailure::WAIT_MS, function (Throwable $exception) use (&$timeouts) {
+                if (TransientHttpFailure::timedOut($exception)) {
+                    return ++$timeouts < self::ATTEMPTS_AFTER_TIMEOUT;
+                }
+
+                return TransientHttpFailure::retryable($exception);
+            })
             ->withBody((string) json_encode($body, JSON_UNESCAPED_SLASHES), 'application/json')
             ->post('images')
             ->throw();

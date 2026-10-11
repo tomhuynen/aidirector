@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\FindingsReporter;
 use App\Ai\Agents\KeyframeChecker;
 use App\Ai\Agents\ShotReviewer;
 use App\Ai\Agents\TweakInterpreter;
@@ -25,9 +26,11 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Support\Decisions\ShotIssues;
+use App\Support\Findings\FindingsReport;
+use App\Support\Findings\ShotIssues;
 use App\Support\Images\OpenRouterImageClient;
 use Illuminate\Bus\PendingBatch;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\UploadedFile;
@@ -311,12 +314,40 @@ describe('job', function () {
             ['category' => 'object', 'change' => 'The cup is a little smaller.', 'severity' => 'low'],
         ]]);
 
-        (new CheckKeyframe($second, $second->render()->id))->handle(app(KeyframePainter::class));
+        (new CheckKeyframe($second, $second->render()->id))->handle(app(KeyframePainter::class), app(FindingsReport::class));
 
         expect($second->fresh()->render()->getCustomProperty(Keyframe::CHECK_ISSUES))->toBe(['She faces the camera instead of the door.'])
             ->and($second->fresh()->render_stage)->toBeNull()
-            ->and($second->fresh()->renders())->toHaveCount(1);
+            ->and($second->fresh()->renders())->toHaveCount(1)
+            // All keyframes are drawn: the shot review reports it in the chat, not the check.
+            ->and(collect($shot->fresh()->plan_chat)->filter(fn(array $turn) => ! empty($turn['findings'])))->toBeEmpty();
         KeyframeChecker::assertPrompted(fn($prompt) => $prompt->model === 'check/model');
+    });
+
+    it('tells in the chat what the check found in keyframe 1 while it waits to be confirmed', function () {
+        Queue::fake([CheckKeyframe::class]);
+        Config::set('pipeline.keyframe_check', true);
+        Image::fake(fn() => fakePng());
+        FindingsReporter::fake(fn() => ['intro' => 'I looked at keyframe 1 and noticed this.', 'items' => [['sources' => [1], 'note' => 'He holds the badge in the wrong hand.']]]);
+
+        $shot = plannedShot($this->project);
+        drawFirstKeyframeOptions($shot);
+        // Keyframe 1 drawn on the chosen place, the reference it is checked against.
+        $first = $shot->keyframes()->with('media')->firstOrFail();
+        $first->renders()->first()->copy($shot, Shot::PLATE)->setCustomProperty(Shot::PLATE_CHOSEN, true)->save();
+        $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
+
+        KeyframeChecker::fake(fn() => ['inventory' => [], 'issues' => [
+            ['category' => 'person', 'change' => 'He holds the badge in his left hand instead of his right.', 'severity' => 'high'],
+        ]]);
+
+        (new CheckKeyframe($first, $first->render()->id))->handle(app(KeyframePainter::class), app(FindingsReport::class));
+
+        $turn = collect($shot->fresh()->plan_chat)->last();
+
+        expect($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY)
+            ->and($turn['text'])->toContain('Keyframe 1: He holds the badge in the wrong hand.')
+            ->and($turn['findings'][0]['keyframes'])->toBe([1]);
     });
 
     it('does not check the place of a keyframe put onto its place', function () {
@@ -1005,6 +1036,20 @@ describe('add', function () {
         Queue::assertNotPushed(GenerateKeyframeImage::class);
     });
 
+    it('shows a keyframe as checked once it is drawn, and a stage left behind by a drawing as nothing', function () {
+        Image::fake(fn() => fakePng());
+        $shot = plannedShot($this->project);
+        renderAllKeyframes($shot);
+        $shot->keyframes()->where('position', 1)->update(['render_stage' => Keyframe::STAGE_CHECKING]);
+        $shot->keyframes()->where('position', 2)->update(['render_stage' => Keyframe::STAGE_COMPOSITING]);
+
+        actingAs($this->director, 'director')
+            ->get(route('public.shots.view', [$this->project, $shot]))
+            ->assertInertia(fn($page) => $page
+                ->where('keyframes.0.renderStage', Keyframe::STAGE_CHECKING)
+                ->where('keyframes.1.renderStage', null));
+    });
+
     it('marks a copy as undescribed so the check and the review do not judge it by the original\'s text', function () {
         Image::fake(fn() => fakePng());
         $shot = plannedShot($this->project);
@@ -1646,6 +1691,36 @@ describe('tweak', function () {
 
         expect($image['content'])->toBe('png');
         Http::assertSentCount(2);
+    });
+
+    it('tries the images endpoint once more when it does not answer in time, both well before the job is stopped', function () {
+        Sleep::fake();
+        $calls = 0;
+        Http::fake(['openrouter.ai/api/v1/images' => function () use (&$calls) {
+            $calls++;
+
+            throw new ConnectionException('cURL error 28: Operation timed out after 120000 milliseconds with 0 bytes received');
+        }]);
+
+        expect(fn() => app(OpenRouterImageClient::class)->generate('openai/gpt-image-2.5-sunburst', 'A mailbox', [], '9:16'))
+            ->toThrow(ConnectionException::class)
+            ->and($calls)->toBe(2)
+            ->and(OpenRouterImageClient::TIMEOUT * OpenRouterImageClient::ATTEMPTS_AFTER_TIMEOUT)->toBeLessThan((new GenerateKeyframeImage(Keyframe::factory()->create()))->timeout);
+    });
+
+    it('gets the image when the second attempt answers after the first hung', function () {
+        Sleep::fake();
+        $calls = 0;
+        Http::fake(['openrouter.ai/api/v1/images' => function () use (&$calls) {
+            if (++$calls === 1) {
+                throw new ConnectionException('cURL error 28: Operation timed out after 120000 milliseconds with 0 bytes received');
+            }
+
+            return Http::response(['data' => [['b64_json' => base64_encode('png'), 'media_type' => 'image/png']]]);
+        }]);
+
+        expect(app(OpenRouterImageClient::class)->generate('openai/gpt-image-2.5-sunburst', 'A mailbox', [], '9:16')['content'])->toBe('png')
+            ->and($calls)->toBe(2);
     });
 
     it('does not try the images endpoint again after a bad request', function () {

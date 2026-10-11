@@ -16,9 +16,11 @@ use App\Models\Shot;
 use App\Support\Images\BackgroundDrift;
 use App\Support\Images\Cutout;
 use App\Support\Images\OpenRouterImageClient;
+use App\Support\Images\PersonCutout;
 use App\Support\Images\PlaceComposite;
 use App\Support\Images\PlaceObjects;
 use App\Support\Images\ReplicateClient;
+use App\Support\Shots\SequencePlaces;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
@@ -216,7 +218,20 @@ class KeyframePainter
     {
         // On a place only the people and the named things are kept, so the background cannot move and is not measured.
         if ($base !== null && $this->isPlace($base) && $this->composites()) {
-            $render = $this->compositeOn($base, $keyframe, $this->paint($keyframe, $prompt, $attachments, false, $model, $labels));
+            $drawn = $this->paint($keyframe, $prompt, $attachments, false, $model, $labels);
+
+            if ($choose) {
+                $keyframe->forceFill(['render_stage' => Keyframe::STAGE_COMPOSITING])->save();
+            }
+
+            try {
+                $render = $this->compositeOn($base, $keyframe, $drawn);
+            } finally {
+                // A failure leaves no stage behind for the next drawing.
+                if ($choose) {
+                    $keyframe->forceFill(['render_stage' => null])->save();
+                }
+            }
 
             if ($choose) {
                 $keyframe->forceFill(['render_id' => $render->id, 'rendering' => false, 'render_error' => null])->save();
@@ -300,7 +315,7 @@ class KeyframePainter
 
         try {
             /** @var StructuredAgentResponse $response */
-            $response = $reviewer->prompt($reviewer->promptFor(), attachments: $rendered->map(fn(Keyframe $keyframe) => $this->referenceFor($keyframe->render()))->all(), provider: 'openrouter', model: $model);
+            $response = $reviewer->prompt($reviewer->promptFor(), attachments: $rendered->map(fn(Keyframe $keyframe) => $this->referenceFor($keyframe->render()))->all(), provider: 'openrouter', model: $model, timeout: 180);
         } catch (Throwable $exception) {
             $shot->generations()->create([
                 'director_id' => $shot->project->director_id,
@@ -535,20 +550,34 @@ class KeyframePainter
             firstIsPlate: $plate !== null,
             setting: $setting['image'] ?? null,
             settingLabel: $setting['label'] ?? '',
+            leftBehind: $setting['left']['image'] ?? null,
+            leftBehindLabel: $setting['left']['label'] ?? '',
         );
     }
 
     /**
-     * The image of the setting the shot takes from another shot, with what it is.
+     * The image of the setting the shot takes from another shot, with what it
+     * is; for a place of its sequence also the last keyframe of the shot before
+     * there, when that one left something behind, such as a landed helicopter.
      *
-     * @return array{image: StoredImage, label: string}|null
+     * @return array{image: StoredImage, label: string, left?: array{image: StoredImage, label: string}|null}|null
      */
     public function settingFor(Shot $shot): ?array
     {
         $from = $shot->settingFrom();
 
         if ($from === null) {
-            return null;
+            $place = app(SequencePlaces::class)->of($shot);
+
+            return $place === null || $place['image'] === null ? null : ['image' => $this->referenceFor($place['image']), 'label' => "{$place['name']}, the place chosen for this sequence of shots"
+                . ($place['map'] !== null ? ". Where things stand in it: {$place['map']}" : '')
+                . match (true) {
+                    $place['brief'] !== null => " This shot's camera stands elsewhere: {$place['view']}. What this camera sees: {$place['brief']} Draw what this camera sees, with every fixed thing where the brief puts it in the frame; never copy the viewpoint of the attached picture, use it only for how the place and its things look",
+                    $place['view'] !== null => " This shot shows: {$place['view']}; keep every fixed thing where the place has it, also what is out of this view",
+                    default => '',
+                }
+                . ($place['left'] !== null ? " Since {$place['left']['shot']}, these stand in the place too and are drawn where they stand, as part of it: {$place['left']['text']}" : ''),
+                'left' => ($place['left']['image'] ?? null) !== null ? ['image' => $this->referenceFor($place['left']['image']), 'label' => "the last keyframe of {$place['left']['shot']}, the same place from another camera at the end of that shot"] : null];
         }
 
         $source = $from['shot'];
@@ -587,7 +616,7 @@ class KeyframePainter
      * plan, with the style sheet and the pictures of the places and objects
      * the plan uses. People are left out; they are added per keyframe.
      */
-    public function paintPlateOption(Shot $shot, int $variation): Media
+    public function paintPlateOption(Shot $shot, int $variation, string $extra = ''): Media
     {
         $names = collect($shot->storylineKeyframes())->flatMap(fn(array $keyframe) => (array) ($keyframe['elements'] ?? []))->unique()->all();
         $elementImages = $shot->project->elements()->with('media')->get()
@@ -597,9 +626,35 @@ class KeyframePainter
             ->values()
             ->all();
         $setting = $this->settingFor($shot);
-        $references = new KeyframeReferences(style: $this->styleReferenceFor($shot->project), elementImages: $elementImages, setting: $setting['image'] ?? null, settingLabel: $setting['label'] ?? '');
+        $references = new KeyframeReferences(style: $this->styleReferenceFor($shot->project), elementImages: $elementImages, setting: $setting['image'] ?? null, settingLabel: $setting['label'] ?? '', leftBehind: $setting['left']['image'] ?? null, leftBehindLabel: $setting['left']['label'] ?? '');
 
-        return $this->drawPlateOption($shot, KeyframeImageBrief::plate($shot, $references, $variation), $references->images(), $references->labels(), (string) Config::get('pipeline.models.keyframe'));
+        $prompt = KeyframeImageBrief::plate($shot, $references, $variation);
+
+        return $this->drawPlateOption($shot, $extra === '' ? $prompt : "{$prompt}\n{$extra}", $references->images(), $references->labels(), (string) Config::get('pipeline.models.keyframe'));
+    }
+
+    /**
+     * Draws one option of a place a sequence of shots plays in, wide and empty,
+     * with what happens there in each shot; kept on the first shot of the sequence.
+     *
+     * @param  array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}  $place
+     */
+    public function paintSequencePlaceOption(Shot $owner, array $place, int $variation): Media
+    {
+        $elementImages = $owner->project->elements()->with('media')->get()
+            ->filter(fn(Element $element) => in_array($element->name, $place['elements'], true) && $element->type !== ElementType::PERSON && $element->reference() !== null)
+            ->take((int) Config::get('pipeline.keyframes.max_element_references', 3))
+            ->map(fn(Element $element) => ['element' => $element, 'image' => $this->referenceFor($element->reference())])
+            ->values()
+            ->all();
+        $references = new KeyframeReferences(style: $this->styleReferenceFor($owner->project), elementImages: $elementImages);
+        $prompt = KeyframeImageBrief::sequencePlace($owner, $place, $references, $variation);
+        $result = $this->drawForShot($owner, $prompt, $references->images(), (string) Config::get('pipeline.models.keyframe'));
+
+        return $owner->addMediaFromString($result['content'])
+            ->usingFileName('sequence-place.' . ($result['mime'] === 'image/jpeg' ? 'jpg' : 'png'))
+            ->withCustomProperties(['place' => $place['key'], Keyframe::SENT => ['model' => $result['model'], 'prompt' => $prompt, 'images' => $references->labels()]])
+            ->toMediaCollection(Shot::SEQUENCE_PLACE_OPTIONS);
     }
 
     /**
@@ -783,8 +838,8 @@ class KeyframePainter
 
     /**
      * Keeps of a render drawn on a place only the people, their shadows and
-     * the objects they touch, and puts them on the place itself; objects
-     * nobody touches stay exactly as in the place. The render is replaced by
+     * the objects they handle, and puts them on the place itself; objects
+     * nobody handles stay exactly as in the place, also behind someone. The render is replaced by
      * the composite. It stays as it was drawn when the people cannot be cut
      * out, or when an object of the keyframe cannot be found in the place:
      * its state might have changed, and half a change is worse than a
@@ -802,21 +857,12 @@ class KeyframePainter
             return $render;
         }
 
-        $areas = [];
+        ['areas' => $areas, 'missing' => $missing] = $this->drawnAreas($place, $keyframe, $people, $drawn);
 
-        foreach ($keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
-            $area = $this->placeObjects->maskIn($place, $object);
+        if ($missing !== null) {
+            $render->setCustomProperty(Keyframe::NOT_COMPOSITED, __(':name could not be found in the place, so the keyframe is kept as it was drawn.', ['name' => $missing]))->save();
 
-            if ($area === null) {
-                $render->setCustomProperty(Keyframe::NOT_COMPOSITED, __(':name could not be found in the place, so the keyframe is kept as it was drawn.', ['name' => $object->name]))->save();
-
-                return $render;
-            }
-
-            // An object someone touches takes its state from the drawing, such as a handset off its cradle.
-            if ($this->composite->touches($area, $people)) {
-                $areas[] = $area;
-            }
+            return $render;
         }
 
         try {
@@ -830,12 +876,60 @@ class KeyframePainter
         $kept = $keyframe
             ->addMediaFromString($composite)
             ->usingFileName("keyframe-{$keyframe->position}.png")
-            ->withCustomProperties([...$render->custom_properties, Keyframe::COMPOSITED => true])
+            ->withCustomProperties([...$render->custom_properties, Keyframe::COMPOSITED => true, Keyframe::PEOPLE_MASK => base64_encode(PersonCutout::keptSmall($people))])
             ->toMediaCollection(Keyframe::RENDERS);
         $render->delete();
         $keyframe->load('media');
 
         return $kept;
+    }
+
+    /**
+     * Where the drawing is used for an object of the place instead of the place
+     * itself: only for what someone changes in this keyframe, such as a handset
+     * off its cradle, as the plan says. Standing in front of something is not
+     * changing it: the place keeps it, and the person is put in front of it.
+     * Something handled that is not in the place, such as a helicopter that
+     * flies in, is found in the drawing itself. Plans from before they said
+     * what is handled fall back on what the people touch. Names the object
+     * when it cannot be found in the place.
+     *
+     * @return array{areas: list<string>, missing: string|null}
+     */
+    private function drawnAreas(Media $place, Keyframe $keyframe, string $people, string $drawn): array
+    {
+        $plan = $keyframe->shot->storylineKeyframes()[$keyframe->position - 1] ?? [];
+        $handled = array_key_exists('handled', $plan) ? array_map(fn(mixed $name) => mb_strtolower(trim((string) $name)), (array) $plan['handled']) : null;
+        $areas = [];
+
+        foreach ($keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
+            if ($handled !== null && ! in_array(mb_strtolower($object->name), $handled, true)) {
+                continue;
+            }
+
+            // Not in the place, such as a badge carried in or a helicopter flying in: handled, it is found in the drawing; otherwise it comes along with the person who holds it.
+            if (! $this->placeObjects->isIn($place, $object)) {
+                $inDrawing = $handled !== null ? $this->placeObjects->maskInDrawing($drawn, $object) : null;
+
+                if ($inDrawing !== null) {
+                    $areas[] = $inDrawing;
+                }
+
+                continue;
+            }
+
+            $area = $this->placeObjects->maskIn($place, $object);
+
+            if ($area === null) {
+                return ['areas' => [], 'missing' => $object->name];
+            }
+
+            if ($handled !== null || $this->composite->touches($area, $people)) {
+                $areas[] = $area;
+            }
+        }
+
+        return ['areas' => $areas, 'missing' => null];
     }
 
     /**
@@ -933,18 +1027,10 @@ class KeyframePainter
             return null;
         }
 
-        $areas = [];
+        ['areas' => $areas, 'missing' => $missing] = $this->drawnAreas($place, $keyframe, $people, $current);
 
-        foreach ($keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
-            $area = $this->placeObjects->maskIn($place, $object);
-
-            if ($area === null) {
-                return null;
-            }
-
-            if ($this->composite->touches($area, $people)) {
-                $areas[] = $area;
-            }
+        if ($missing !== null) {
+            return null;
         }
 
         try {
@@ -958,7 +1044,7 @@ class KeyframePainter
         $kept = $keyframe
             ->addMediaFromString($composite)
             ->usingFileName("keyframe-{$keyframe->position}.png")
-            ->withCustomProperties($render->custom_properties)
+            ->withCustomProperties([...$render->custom_properties, Keyframe::PEOPLE_MASK => base64_encode(PersonCutout::keptSmall($people))])
             ->toMediaCollection(Keyframe::RENDERS);
         $keyframe->forceFill(['render_id' => $kept->id])->save();
         $render->delete();

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Support\Images;
 
 use App\Ai\Agents\DetectionWordsWriter;
+use App\Ai\Agents\ObjectInPlaceJudge;
 use App\Models\Element;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use Imagick;
+use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
@@ -18,11 +20,16 @@ use Throwable;
  * and object, while nobody stands in front of them, by common words an
  * object finder knows instead of the name made up for the project. What it
  * found is kept on the place, so every keyframe drawn on it uses the same.
+ * First a vision model says whether the object is in the place at all: the
+ * finder always finds something, also for a badge that is only carried in.
  */
 class PlaceObjects
 {
     /** On a place: the masks of the objects found in it, small, by object and words; false when not found. */
     public const MASKS = 'object_masks';
+
+    /** On a place: by object id, whether the object is in the place at all. */
+    public const PRESENT = 'objects_present';
 
     /** The width the masks are kept at; they are only used widened, so small is enough. */
     private const int MASK_WIDTH = 216;
@@ -49,6 +56,57 @@ class PlaceObjects
         }
 
         return $masks[$key] === false ? null : base64_decode((string) $masks[$key]);
+    }
+
+    /**
+     * Where the object is in a drawn keyframe, for one that is not in the
+     * place, such as a helicopter that flies in or a badge put down on the
+     * counter: it can only come from the drawing. Not kept, since every
+     * drawing differs. Null when it cannot be found.
+     */
+    public function maskInDrawing(string $drawn, Element $element): ?string
+    {
+        return $this->find($drawn, $this->wordsFor($element));
+    }
+
+    /**
+     * Whether the object is in the place at all, judged once by a vision model
+     * and kept on the place. An object that is only carried in is not, and
+     * comes along with the person who holds it. Without an answer it counts
+     * as there, as before the judge existed.
+     */
+    public function isIn(Media $place, Element $element): bool
+    {
+        $seen = (array) $place->getCustomProperty(self::PRESENT, []);
+
+        if (array_key_exists((string) $element->id, $seen)) {
+            return (bool) $seen[(string) $element->id];
+        }
+
+        $reference = $element->reference();
+
+        if ($reference === null) {
+            return true;
+        }
+
+        $judge = new ObjectInPlaceJudge($element);
+
+        try {
+            /** @var StructuredAgentResponse $response */
+            $response = $judge->prompt($judge->promptFor(), attachments: [
+                ImageFile::fromStorage($place->getPathRelativeToRoot(), $place->disk),
+                ImageFile::fromStorage($reference->getPathRelativeToRoot(), $reference->disk),
+            ], provider: 'openrouter', model: (string) Config::get('pipeline.models.keyframe_check'));
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return true;
+        }
+
+        $present = (bool) ($response->toArray()['present'] ?? true);
+        $place->setCustomProperty(self::PRESENT, [...$seen, (string) $element->id => $present])->save();
+
+        return $present;
     }
 
     /**

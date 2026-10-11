@@ -21,20 +21,6 @@
     </nav>
 
     <div class="flex shrink-0 items-center gap-2">
-      <Button v-if="decisions" as-child variant="outline" size="sm">
-        <Link :href="decisions.url">
-          <ListChecks class="size-4" />
-          {{ $t('Decisions') }}
-          <span
-            :class="
-              decisions.count > 0
-                ? 'rounded-full bg-signal px-1.5 text-xs font-semibold text-primary-foreground tabular-nums'
-                : 'text-xs text-muted-foreground tabular-nums'
-            "
-            >{{ decisions.count }}</span
-          >
-        </Link>
-      </Button>
       <NotificationsMenu v-if="account" :account="account" />
       <AccountMenu v-if="account" :account="account" />
     </div>
@@ -45,8 +31,7 @@ import { Link } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import AccountMenu from '@public:components/AccountMenu.vue'
 import NotificationsMenu from '@public:components/NotificationsMenu.vue'
-import { Button } from '@shared:ui/button'
-import { ChevronRight, ListChecks } from 'lucide-vue-next'
+import { ChevronRight } from 'lucide-vue-next'
 
 import { usePage } from '../../composables/page'
 
@@ -54,8 +39,6 @@ export type Crumb = { title: string; href?: string }
 
 defineProps<{
   crumbs: Crumb[]
-  /** The project's decision queue and how many decisions wait in it. */
-  decisions?: { url: string; count: number }
 }>()
 
 const { account, app } = usePage()

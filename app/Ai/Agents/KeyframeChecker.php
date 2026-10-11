@@ -32,6 +32,11 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
     /**
      * @param  list<string>  $roles  what each attached image is, in order; the last is the keyframe to check
      */
+    /**
+     * In a scene the camera is the place: a keyframe cannot be framed on its own.
+     */
+    private const string FIXED_CAMERA = 'The framing is fixed too: never ask for a closer or wider view, a crop, or someone shown larger or from the knees up; how large someone is follows from where they stand in the place.';
+
     public function __construct(
         private readonly Keyframe $keyframe,
         private readonly array $roles,
@@ -85,8 +90,8 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             $this->keyframe->shot->isMontage() => 'This keyframe is one still of a montage: it has its own place and camera, so the place is never an issue; the people and objects must match their pictures and the image must show its description. Which way a person faces is never an issue.',
             $this->keyframe->shot->isPresenter() => 'This keyframe is the still of a presenter who speaks to the camera: one person, from the chest up, facing the camera straight on with the face large and clear, in front of a softly blurred place. The place is never an issue; the person must match their picture, and a face that is small, turned away or covered is a high issue.',
             $this->keyframe->shot->kindOrScene() === ShotKind::CLOSE_UP => 'This keyframe is a close-up: the hands and one object fill the frame, and faces may be out of it. People are known by their clothing, sleeves and gloves, and which way they face is never an issue. Clothing that differs from their picture, such as a second jacket or shirt layer, a doubled collar or another garment, is a high issue in category person. The camera stands still between keyframes.',
-            $this->placeIsFixed => 'The camera stands still, and the place is pasted in from the same picture in every keyframe, so it is always right: never report the place, its walls, floor, lines, doors, signs or background. Only the people, the objects of the story and their state, lettering on people and objects, and the point of the keyframe count.',
-            default => 'The camera stands still: the place does not move between keyframes.',
+            $this->placeIsFixed => 'The camera stands still, and the place is pasted in from the same picture in every keyframe, so it is always right: never report the place, its walls, floor, lines, doors, signs or background. Only the people, the objects of the story and their state, lettering on people and objects, and the point of the keyframe count. ' . self::FIXED_CAMERA,
+            default => 'The camera stands still: the place does not move between keyframes. ' . self::FIXED_CAMERA,
         };
     }
 

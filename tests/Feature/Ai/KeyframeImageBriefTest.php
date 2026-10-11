@@ -142,11 +142,13 @@ it('never lets the image model write labels on cards, badges or permits', functi
 it('plans around what the image and video models cannot do, and has the plan director explain it and propose another way', function () {
     $shot = Shot::factory()->create();
 
-    expect(App\Ai\Briefs\VideoLimitsBrief::limits())->toHaveCount(16)
+    expect(App\Ai\Briefs\VideoLimitsBrief::limits())->toHaveCount(18)
         ->and((string) (new App\Ai\Agents\StorylineWriter($shot->load('project')))->instructions())
         ->toContain('What the image and video models cannot do in one shot')
         ->toContain('The place changes within the shot, such as driving through a gate')
         ->toContain('One person does two things with their hands at the same time')
+        ->toContain('17. Someone ends up on the other side of a person standing between')
+        ->toContain('18. Someone appears in a later keyframe without being seen to come in')
         ->and((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
         ->toContain('tell the director in plain words why it will not work')
         ->toContain('Never write a plan that runs into one of these limits');
@@ -177,6 +179,14 @@ it('takes where people stand from the description, not from the keyframe before'
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('place.png'), previous: new StoredImage('before.png'), firstIsPlate: true)))
         ->toContain('keep the people looking the same as there. Where each person stands, which way they face and what they do comes only from this keyframe\'s description, never from that image.');
+});
+
+it('keeps the objects of the empty place where they are, and places the people around them', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the fire spot.']);
+    $line = 'An object that is already in the first image, such as a bin, a sign or a machine, stays exactly where it is there';
+
+    expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('place.png'), firstIsPlate: true)))->toContain($line)
+        ->and(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('keyframe-1.png'))))->not->toContain($line);
 });
 
 it('frames a scene planned as a medium shot closer, also its empty place', function () {

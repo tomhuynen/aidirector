@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots\Plan;
 
 use App\Enums\ElementType;
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Jobs\UpdateElementImage;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
@@ -20,8 +19,6 @@ use Illuminate\Validation\ValidationException;
  */
 class ElementsController
 {
-    use ReturnsToDecisions;
-
     public function store(Project $project, Shot $shot)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
@@ -55,7 +52,7 @@ class ElementsController
             'added_elements' => array_values(array_unique([...($storyline['added_elements'] ?? []), ...$added])),
         ]);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -67,6 +64,6 @@ class ElementsController
 
         $shot->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['new_elements' => true]));
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 }

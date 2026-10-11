@@ -7,6 +7,7 @@ namespace App\Ai\Briefs;
 use App\Ai\KeyframeReferences;
 use App\Enums\ElementType;
 use App\Enums\ShotKind;
+use App\Enums\ShotSize;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
@@ -83,7 +84,7 @@ class KeyframeImageBrief
         }
         $lines[] = 'Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that belong to the place stay exactly as they are. Logos and lettering on clothing and helmets stay exactly as in the pictures of the people.';
 
-        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
+        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
         $attached = 0;
 
         if ($references->style !== null) {
@@ -92,6 +93,10 @@ class KeyframeImageBrief
 
         if ($references->setting !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. This keyframe plays in exactly that place, at that moment or right after it: keep its furniture, surfaces, objects, colours and light, and the people's clothing. Keep the screen direction: whoever is on the left there is on the left here, and comes in from the same side. Move the camera as the framing says; never copy that image's framing.";
+        }
+
+        if ($references->leftBehind !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->leftBehindLabel}. Draw what it left behind, as the setting says, standing just as there, seen from this shot's camera; never copy its viewpoint or its people.";
         }
 
         foreach ($references->elementImages as $entry) {
@@ -152,7 +157,7 @@ class KeyframeImageBrief
             'Soft, even light on the face. Only this one person. Do not add text, captions, brand names, logos or watermarks; logos on clothing and helmets stay as in the picture.',
         ];
 
-        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
+        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
         $attached = 0;
 
         if ($references->style !== null) {
@@ -194,8 +199,14 @@ class KeyframeImageBrief
                 default => "{$castNames} " . (count($references->castNames) > 1 ? 'are' : 'is') . ' not in the first image yet: add them into it, standing on the floor of the place at a natural size for where they stand.',
             }
                     . ($references->firstIsPlate && $references->previous !== null ? ' The keyframe before shows how they look in this shot.' : ''),
-            '',
         ];
+
+        // Only the people are kept from this drawing; an object moved in it would leave its spot in the place empty.
+        if ($references->firstIsPlate) {
+            $lines[] = 'An object that is already in the first image, such as a bin, a sign or a machine, stays exactly where it is there, at the same size, even when the description puts it on another side of the frame: place the people around it so they stand as the description says relative to it. Only an object a person picks up, carries or pushes moves.';
+        }
+
+        $lines[] = '';
 
         $lines[] = 'This keyframe shows: ' . Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null);
         $lines[] = '';
@@ -262,13 +273,13 @@ class KeyframeImageBrief
 
         array_push(
             $lines,
-            'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later.',
+            'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later, and anything that moves during the shot, such as a vehicle, a helicopter, a forklift or a hanging load, also when step 1 shows it: it is added in every keyframe, like the people. What an earlier shot left standing in the place, as the setting says, does belong in it.',
             'Draw everything in its state at step 1, such as a door open or closed as step 1 says; later changes to the place are made on this picture.',
             'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. A logo already on the place in its picture may stay, exactly as it is there.',
             self::plateVariation($variation),
         );
 
-        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
+        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth'];
         $attached = 0;
 
         if ($references->style !== null) {
@@ -278,6 +289,49 @@ class KeyframeImageBrief
         // In the order the images are attached: the setting comes right after the style sheet.
         if ($references->setting !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. Draw this same place, without its people: the same walls, floor, furniture, objects, colours and light. The camera for this option decides where it stands.";
+        }
+
+        if ($references->leftBehind !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->leftBehindLabel}. Draw what it left behind, as the setting says, standing just as there, seen from this shot's camera; never copy its viewpoint or its people.";
+        }
+
+        foreach ($references->elementImages as $entry) {
+            $element = $entry['element'];
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it, at its place in the scene.');
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The prompt for one option of a place a sequence of shots plays in: wide
+     * and empty, so every shot there can draw its own view of it, from a
+     * close-up of one part to the whole place.
+     *
+     * @param  array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}  $place
+     */
+    public static function sequencePlace(Shot $owner, array $place, KeyframeReferences $references, int $variation): string
+    {
+        $happens = collect($place['shots'])->map(fn(string $code, int $index) => "- {$code}: " . ($place['ideas'][$index] ?? ''))->join("\n");
+
+        $lines = [
+            $owner->project->styleBrief(),
+            '',
+            "Draw {$place['name']}, empty: no people at all. Several shots of one sequence play here, each drawn later from this picture with its own camera, from a close-up of one part to the whole place, so everything they need must be in it and recognisable.",
+            'Framing: ' . ShotSize::FULL->framing() . ' The people are added later, so do not draw them, but leave room for them: ' . ShotSize::FULL->personScale() . '.',
+            '',
+            "What happens here in the shots of the sequence; place the fixed objects, doors, signs and zones so all of it can happen in this one picture. Do not draw the people or what they hold:\n{$happens}",
+            '',
+            'Put every fixed object these shots use where it is needed, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or smoke, and anything that moves in these shots, such as a vehicle, a helicopter or a hanging load.',
+            'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. A logo already on the place in its picture may stay, exactly as it is there.',
+            self::plateVariation($variation),
+        ];
+
+        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth'];
+        $attached = 0;
+
+        if ($references->style !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly. Do not copy its subjects or layout.';
         }
 
         foreach ($references->elementImages as $entry) {

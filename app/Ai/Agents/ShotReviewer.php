@@ -9,6 +9,7 @@ use App\Ai\Contracts\HasReasoningEffort;
 use App\Enums\ShotKind;
 use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Support\Shots\SequencePlaces;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Collection;
 use Laravel\Ai\Contracts\Agent;
@@ -45,6 +46,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             - Is what each keyframe's description says about positions and distances, such as where someone stands relative to a line or a hazard, clearly visible and readable?
             - Does every keyframe show a step a viewer can see? Two keyframes in a row that look almost the same, where only a small detail such as a hand angle changes, is an issue: name the step that cannot be seen.
             - Does the movement go the way the storyline says? Someone who enters a place moves into it, someone who leaves moves out of it, someone who walks towards something ends up nearer to it. Moving the opposite way, such as walking out towards the camera while the storyline says she walks into the hall, is an issue.
+            - When the shot is part of a sequence, it may show only its part of the place: a danger or goal out of the frame is not an issue when the shot before shows where it is and this shot keeps that side, such as her looking back to the left where the fire was. It is an issue when nothing in the shot or its direction says where the danger is while the point is the distance to it.
             - Is everything that matters large enough to read at a glance on a phone? The people should be big in the frame and the object the story turns on, such as a cigarette, a key or a buckle, clearly visible. People that are small in a wide view with a lot of empty space, or an object of a few pixels, is an issue; name the keyframes.
             - Does the storyline happen in the keyframes? A step it names, such as someone entering, leaving or noticing something, that only happens between two keyframes or cannot be seen is an issue.
             - Does the place stay still? The camera does not move, so fixed parts such as markings and painted lines on the floor, doors and signs keep the same position, shape and angle in every keyframe; a floor line that runs differently is an issue.
@@ -55,6 +57,8 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             - The place and the camera stay the same unless the keyframes say they change; a sign, vehicle or door does not move, appear or disappear between keyframes.
             - Objects stay where they were left and change state in an order that makes sense: what is picked up is held, what is opened stays open.
             - Positions and distances change in the direction the steps describe.
+            - Nobody appears out of nothing: a person who is not in a keyframe and is in the next one, standing with the others, without being seen to come in from an edge of the frame or a door, is an issue; give the keyframe where they first appear.
+            - Nobody passes through someone else: the video takes the shortest way between two keyframes, so a person who is on one side of someone standing still in one keyframe and on the other side in the next keyframe walks straight through them. That is an issue; give the keyframe where they end up on the other side.
             Ignore small details such as exact hand positions or expressions, and matters of taste.
 
             Output:
@@ -116,6 +120,24 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
         $rules = $this->shot->project->rulesBrief();
         $rules = $rules === '' ? '' : "\n\nRules the director confirmed for this project; a keyframe that breaks one is an issue:\n{$rules}";
 
-        return "The shot teaches: {$this->shot->takeaway}\nStoryline: {$storyline}{$montage}{$closeUp}{$rules}\n\nKeyframes:\n{$lines}\n\n{$images}";
+        return "The shot teaches: {$this->shot->takeaway}\nStoryline: {$storyline}{$this->sequence()}{$montage}{$closeUp}{$rules}\n\nKeyframes:\n{$lines}\n\n{$images}";
+    }
+
+    /**
+     * Where this shot stands in its sequence: the shot before and the part of
+     * the place each shows, so a danger out of the frame is judged by the cut.
+     */
+    private function sequence(): string
+    {
+        $before = $this->shot->group_key === null ? null : $this->shot->previousShot();
+
+        if ($before === null || $before->group_key !== $this->shot->group_key) {
+            return '';
+        }
+
+        $view = fn(Shot $shot) => ($place = app(SequencePlaces::class)->of($shot)) === null ? '' : " It plays in {$place['name']}" . ($place['view'] !== null ? ", showing {$place['view']}" : '') . '.';
+        $plan = collect($before->storylineKeyframes())->map(fn(array $keyframe) => $keyframe['description'])->last() ?? (trim((string) $before->notes) ?: $before->takeaway);
+
+        return "\n\nThis shot is part of a sequence. The shot before, {$before->code()}, ends with: {$plan}{$view($before)}\nThis shot:{$view($this->shot)}";
     }
 }

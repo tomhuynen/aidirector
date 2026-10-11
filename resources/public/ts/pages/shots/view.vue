@@ -1,10 +1,7 @@
 <template>
   <Head :title="`${code} · ${project.title}`" />
 
-  <TopBar
-    :crumbs="crumbs"
-    :decisions="project.links?.decisions ? { url: project.links.decisions, count: decisionsCount } : undefined"
-  />
+  <TopBar :crumbs="crumbs" />
 
   <div class="flex min-h-0 flex-1">
     <ShotList
@@ -55,6 +52,9 @@
               :new-elements="shot.newElements"
               :elements-url="shot.links?.planElements"
               :waiting-for="shot.waitingFor"
+              :sequence-place="shot.sequencePlace"
+              :sequence-place-url="shot.links?.sequencePlaceChoose"
+              :sequence-place-drawing="shot.sequencePlaceDrawing"
             />
           </div>
           <PlanSkeleton v-else-if="planning" />
@@ -68,6 +68,9 @@
               newElements: shot.newElements,
               elementsUrl: shot.links?.planElements,
               waitingFor: shot.waitingFor,
+              sequencePlace: shot.sequencePlace,
+              sequencePlaceUrl: shot.links?.sequencePlaceChoose,
+              sequencePlaceDrawing: shot.sequencePlaceDrawing,
             }"
             :keyframes="panelKeyframes"
             :aspect-ratio="aspectRatio"
@@ -186,6 +189,7 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         copyUrl: keyframe.links.copy,
         moveSelectUrl: keyframe.links.moveSelect,
         moveUrl: keyframe.links.move,
+        moveFitUrl: keyframe.links.moveFit,
       }))
     : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
         id: String(i),
@@ -208,6 +212,8 @@ const busy = computed(
   () =>
     // Waiting for another shot or new cast pictures: drawing starts by itself, so the page keeps looking.
     Boolean(props.shot.waitingFor) ||
+    // The places of the sequence are drawn: the chat shows them once they are there.
+    Boolean(props.shot.sequencePlaceDrawing) ||
     planning.value ||
     props.shot.status === 'first-keyframe-pending' ||
     props.shot.status === 'keyframes-pending' ||
@@ -267,6 +273,7 @@ const shotList = computed(() =>
     partsCount: sibling.partsCount,
     status: sibling.status,
     busy: sibling.busy,
+    render: sibling.render,
     thumbnailUrl: sibling.thumbnailUrl,
     videoUrl: sibling.videoUrl,
     voiceOvers: sibling.voiceOvers,

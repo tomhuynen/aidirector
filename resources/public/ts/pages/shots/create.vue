@@ -45,6 +45,7 @@ const shotList = computed(() =>
     partsCount: sibling.partsCount,
     status: sibling.status,
     busy: sibling.busy,
+    render: sibling.render,
     thumbnailUrl: sibling.thumbnailUrl,
     videoUrl: sibling.videoUrl,
     voiceOvers: sibling.voiceOvers,

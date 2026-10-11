@@ -9,6 +9,7 @@ use App\Enums\ShotStatus;
 use App\Jobs\AdjustPlateOption;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
+use App\Jobs\MeasurePlaceDepth;
 use App\Jobs\TweakKeyframeImage;
 use App\Models\Keyframe;
 use App\Models\Shot;
@@ -79,6 +80,8 @@ class FirstKeyframeChoice
 
         $plate = $option->copy($shot, Shot::PLATE);
         $plate->setCustomProperty(Shot::PLATE_CHOSEN, true)->setCustomProperty('option', $option->id)->save();
+        // Measured now, so a person can be moved in its keyframes straight away later.
+        MeasurePlaceDepth::dispatch($plate);
 
         GenerateRemainingKeyframes::startOnPlate($shot, $this->painter);
 

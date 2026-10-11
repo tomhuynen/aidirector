@@ -15,7 +15,6 @@ use App\Http\Controllers\Public\Projects\Branding\StoreController as BrandingSto
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CoverController as ProjectCoverController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
-use App\Http\Controllers\Public\Projects\DecisionsController as ProjectDecisionsController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\DestroyController as ElementDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
@@ -49,6 +48,7 @@ use App\Http\Controllers\Public\Shots\MergeController as ShotMergeController;
 use App\Http\Controllers\Public\Shots\Plan\DirectorController as ShotPlanDirectorController;
 use App\Http\Controllers\Public\Shots\Plan\ElementsController as ShotPlanElementsController;
 use App\Http\Controllers\Public\Shots\Plan\PlateController as ShotPlateController;
+use App\Http\Controllers\Public\Shots\Plan\SequencePlaceController as ShotSequencePlaceController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
 use App\Http\Controllers\Public\Shots\RetryController as ShotRetryController;
 use App\Http\Controllers\Public\Shots\Video\GenerateController as VideoGenerateController;
@@ -91,7 +91,6 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{project}/cover', [ProjectCoverController::class, 'show'])->name('cover.view');
             Route::post('{project}/format', [ProjectFormatController::class, 'store'])->name('format');
             Route::post('{project}/voice-over', [ProjectVoiceOverController::class, 'store'])->name('voice-over');
-            Route::get('{project}/decisions', [ProjectDecisionsController::class, 'view'])->name('decisions');
             Route::post('{project}/rules/{rule}/accept', [ProjectRuleController::class, 'accept'])->scopeBindings()->name('rules.accept');
             Route::post('{project}/rules/{rule}/dismiss', [ProjectRuleController::class, 'dismiss'])->scopeBindings()->name('rules.dismiss');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
@@ -147,6 +146,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/plate/choose', [ShotPlateController::class, 'choose'])->name('plate.choose');
             Route::post('{shot}/plate/reset', [ShotPlateController::class, 'reset'])->name('plate.reset');
             Route::post('{shot}/plate/adjust', [ShotPlateController::class, 'adjust'])->name('plate.adjust');
+            Route::post('{shot}/sequence-places/choose', [ShotSequencePlaceController::class, 'choose'])->name('sequence-places.choose');
             Route::post('{shot}/keyframes', [KeyframeStoreController::class, 'store'])->name('keyframes.store');
             Route::post('{shot}/keyframes/reorder', [KeyframeReorderController::class, 'store'])->name('keyframes.reorder');
             Route::delete('{shot}/keyframes/{keyframe}', [KeyframeDestroyController::class, 'destroy'])->name('keyframes.destroy');
@@ -159,6 +159,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/keyframes/{keyframe}/tweak', [KeyframeTweakController::class, 'store'])->name('keyframes.tweak');
             Route::post('{shot}/keyframes/{keyframe}/move/select', [KeyframeMoveController::class, 'select'])->name('keyframes.move.select');
             Route::post('{shot}/keyframes/{keyframe}/move', [KeyframeMoveController::class, 'store'])->name('keyframes.move');
+            Route::post('{shot}/keyframes/{keyframe}/move/fit', [KeyframeMoveController::class, 'fit'])->name('keyframes.move.fit');
             Route::post('{shot}/keyframes/{keyframe}/render', [KeyframeRenderController::class, 'store'])->name('keyframes.render');
             Route::get('{shot}/keyframes/{keyframe}/image/{conversion?}', [KeyframeImageController::class, 'view'])
                 ->whereIn('conversion', [Keyframe::THUMBNAIL])

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Public;
 
+use App\Enums\ShotStatus;
 use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Support\Shots\RenderEstimates;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\URL;
@@ -47,6 +49,13 @@ class ShotListItemResource extends JsonResource
              */
             'busy' => $this->status->isWorking()
                 || ($this->relationLoaded('keyframes') && $this->keyframes->contains(fn(Keyframe $keyframe) => (bool) $keyframe->rendering)),
+            /**
+             * What is being made right now, for the progress on the thumbnail: a keyframe or the video, with the
+             * key the editor remembers its start under, how long it usually takes and, for a video, when it started.
+             *
+             * @var array{key: string, seconds: int, startedAt: string|null}|null
+             */
+            'render' => $this->render(),
             /** @var string|null */
             'thumbnailUrl' => $this->thumbnailUrl(),
             /**
@@ -82,6 +91,20 @@ class ShotListItemResource extends JsonResource
             'waitingFor' => $this->resource->waitsToDraw() ? $this->resource->waitsFor() : null,
             'url' => route('public.shots.view', [$this->project, $this->resource]),
         ];
+    }
+
+    /**
+     * @return array{key: string, seconds: int, startedAt: string|null}|null
+     */
+    private function render(): ?array
+    {
+        if ($this->status === ShotStatus::VIDEO_PENDING) {
+            return ['key' => "video:shot:{$this->sqid}", 'seconds' => app(RenderEstimates::class)->videoSeconds(), 'startedAt' => $this->video_submitted_at?->toIso8601String()];
+        }
+
+        $keyframe = $this->relationLoaded('keyframes') ? $this->keyframes->first(fn(Keyframe $keyframe) => (bool) $keyframe->rendering) : null;
+
+        return $keyframe === null ? null : ['key' => "keyframe:{$keyframe->sqid}", 'seconds' => app(RenderEstimates::class)->keyframeSeconds(), 'startedAt' => null];
     }
 
     /**

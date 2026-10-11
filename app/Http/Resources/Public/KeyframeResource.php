@@ -39,11 +39,11 @@ class KeyframeResource extends JsonResource
             /** @var bool */
             'rendering' => $this->rendering,
             /**
-             * What the rendering is busy with after drawing: checking the image.
+             * What the keyframe is busy with after drawing: placing the people on the place, or checking the image.
              *
-             * @var 'checking'|null
+             * @var 'compositing'|'checking'|null
              */
-            'renderStage' => $this->rendering ? $this->render_stage : null,
+            'renderStage' => $this->rendering || $this->render_stage === Keyframe::STAGE_CHECKING ? $this->render_stage : null,
             /** @var string|null */
             'renderError' => $this->render_error,
             /** @var array<int, string> */
@@ -78,6 +78,8 @@ class KeyframeResource extends JsonResource
                 'move' => $this->movable($rendered) ? route('public.shots.keyframes.move', [$this->shot->project, $this->shot, $this->resource]) : null,
                 /** @var string|null */
                 'moveSelect' => $this->movable($rendered) ? route('public.shots.keyframes.move.select', [$this->shot->project, $this->shot, $this->resource]) : null,
+                /** @var string|null Fitting the pose of a person moved by hand to their new spot: only on a version where someone was moved. */
+                'moveFit' => $this->movable($rendered) && is_array($render?->getCustomProperty(Keyframe::MOVED_BOX)) ? route('public.shots.keyframes.move.fit', [$this->shot->project, $this->shot, $this->resource]) : null,
                 'chooseRender' => route('public.shots.keyframes.render', [$this->shot->project, $this->shot, $this->resource]),
                 'destroy' => route('public.shots.keyframes.destroy', [$this->shot->project, $this->shot, $this->resource]),
                 'copy' => route('public.shots.keyframes.copy', [$this->shot->project, $this->shot, $this->resource]),

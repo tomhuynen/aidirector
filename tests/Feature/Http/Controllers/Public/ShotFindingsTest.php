@@ -15,7 +15,7 @@ use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\ReviewerVerdict;
 use App\Models\Shot;
-use App\Support\Decisions\FindingsReport;
+use App\Support\Findings\FindingsReport;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
@@ -108,7 +108,7 @@ it('fixes the findings the director agrees with in the chat and leaves the other
         ->and(app(FindingsReport::class)->waiting($shot, $shot->keyframes()->with('media')->get()))->toBeNull();
 });
 
-it('keeps the verdict when a finding is fixed or dismissed in the list of decisions', function () {
+it('keeps the verdict when a finding is fixed or dismissed with the buttons on the shot page', function () {
     $shot = shotWithFindings($this->project);
     Bus::fake();
 
@@ -116,8 +116,8 @@ it('keeps the verdict when a finding is fixed or dismissed in the list of decisi
     actingAs($this->director, 'director')->post(route('public.shots.issues.fix', [$this->project, $shot, 'keyframe-2']));
 
     expect(ReviewerVerdict::query()->orderBy('id')->get(['reviewer', 'verdict', 'via'])->toArray())->toBe([
-        ['reviewer' => 'review', 'verdict' => 'dismissed', 'via' => 'decisions'],
-        ['reviewer' => 'check', 'verdict' => 'fixed', 'via' => 'decisions'],
+        ['reviewer' => 'review', 'verdict' => 'dismissed', 'via' => 'shot'],
+        ['reviewer' => 'check', 'verdict' => 'fixed', 'via' => 'shot'],
     ]);
 });
 

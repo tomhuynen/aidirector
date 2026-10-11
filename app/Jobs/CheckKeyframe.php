@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
+use App\Enums\ShotStatus;
 use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Keyframe;
+use App\Support\Findings\FindingsReport;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -17,8 +19,9 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
  * Checks a drawn keyframe after it is shown, without holding it up: whether
  * the people, the objects and their state and the point of the keyframe are
  * right. What it finds is kept on the render as notes; the plan director
- * reports them in the chat once the shot review is done. It never redraws by
- * itself.
+ * reports them in the chat once the shot review is done, or right away while
+ * keyframe 1 waits to be confirmed, since no review follows then. It never
+ * redraws by itself.
  */
 #[DeleteWhenMissingModels]
 class CheckKeyframe implements ShouldQueue
@@ -50,7 +53,7 @@ class CheckKeyframe implements ShouldQueue
         }
     }
 
-    public function handle(KeyframePainter $painter): void
+    public function handle(KeyframePainter $painter, FindingsReport $report): void
     {
         $shot = $this->keyframe->shot()->with('project')->firstOrFail();
         $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
@@ -69,6 +72,13 @@ class CheckKeyframe implements ShouldQueue
                 $issues === []
                     ? $render->forgetCustomProperty(Keyframe::CHECK_ISSUES)->save()
                     : $render->setCustomProperty(Keyframe::CHECK_ISSUES, $issues)->save();
+            }
+
+            // Read as stored now: keyframe 1 may have been confirmed while the check ran.
+            $fresh = $shot->fresh();
+
+            if ($fresh?->status === ShotStatus::FIRST_KEYFRAME_READY) {
+                $report->report($fresh);
             }
         } finally {
             $this->doneChecking();

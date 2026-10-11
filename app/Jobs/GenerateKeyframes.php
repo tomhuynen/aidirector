@@ -12,12 +12,14 @@ use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Shots\FirstKeyframeChoice;
+use App\Support\Shots\SequencePlaces;
 use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
 
 /**
@@ -53,6 +55,10 @@ class GenerateKeyframes implements ShouldQueue
         if (! $this->more) {
             $this->replaceKeyframes($shot);
         }
+
+        // A shot with its own view of the place of its sequence: what its camera sees is written out first, so its place or keyframe 1 is drawn from there.
+        app(SequencePlaces::class)->writeCameraBrief($shot);
+        $shot->refresh();
 
         $shotId = $shot->id;
         $planVersion = $this->planVersion;
@@ -174,6 +180,11 @@ class GenerateKeyframes implements ShouldQueue
 
         if ($hasPlates) {
             $shot->say(__('The places are ready. Click the one you like or tell me which one, or ask me for more places.'));
+
+            // Every option kept the camera of the place of the sequence: the director hears it now, not at keyframe 1.
+            if ($shot->getMedia(Shot::PLATE_OPTIONS)->every(fn(Media $option) => $option->getCustomProperty(GeneratePlateOption::SAME_CAMERA) === true)) {
+                $shot->say(__('These places still show the place from about the same camera as the place chosen for the sequence, not from where this shot should look. Ask me for more places, or for a view from the side, which works more reliably than looking straight back.'));
+            }
         }
 
         $url = route('public.shots.view', [$shot->project, $shot]);

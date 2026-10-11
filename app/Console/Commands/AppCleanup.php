@@ -109,11 +109,15 @@ class AppCleanup extends Command
             return;
         }
 
+        // The working folder stays: jobs and requests create it and write to it a moment later, so removing it while
+        // it is empty makes their write fail.
         $command = [
             'find',
             escapeshellarg($dir),
+            '-mindepth 1',
             '-empty',
             '-type d',
+            '-not -path ' . escapeshellarg($dir . '/tmp'),
             '-delete',
         ];
 

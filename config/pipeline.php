@@ -63,6 +63,11 @@ return [
         'shot_reviewer' => env('AI_SHOT_REVIEW_REASONING', 'medium'),
         'correction_classifier' => env('AI_CORRECTION_REASONING', 'low'),
         'detection_words_writer' => 'low',
+        'object_in_place_judge' => 'low',
+        'plan_place_aligner' => 'low',
+        'place_mapper' => 'low',
+        'camera_brief_writer' => 'low',
+        'left_behind_reader' => 'low',
         'findings_reporter' => 'low',
         'voice_over_writer' => env('AI_VOICE_OVER_REASONING', 'low'),
         'voice_over_translator' => env('AI_VOICE_OVER_REASONING', 'low'),
@@ -125,9 +130,13 @@ return [
         'plate_options' => (int) env('AI_PLATE_OPTIONS', 3),
         // Reference images of the cast and sets attached to one keyframe render.
         'max_element_references' => 3,
-        // Moving a person by hand: the pose is redrawn for the new spot, again when the redraw moves them off it.
+        // Moving a person by hand is instant; asked for, the pose is redrawn for the new spot, again when the redraw moves them off it.
         'move' => [
             'attempts' => 2,
+            // The crop the pose is redrawn on, as times the person's height: tight, so the model cannot move them.
+            'crop' => 1.3,
+            // Where the place is nearer the camera than the person's feet by this share, it stands in front of them.
+            'in_front' => 0.92,
             // How far the feet may end up from where they were put, as a share of the image.
             'tolerance' => 0.06,
         ],
@@ -140,12 +149,20 @@ return [
         ],
         // A keyframe drawn on a place keeps only its people and the objects named in it; everything else is the place itself, pixel for pixel.
         // A change to the place, such as a door that closes, becomes its own version of the place the same way. Needs a Replicate token.
+        // A place drawn for a shot with its own view that lines up this well with the chosen place, after a small shift or zoom, kept its camera (calibrated 2026-10-09: same camera 0.30-0.52, other places 0.01-0.03).
+        'sequence_view_same_camera' => 0.2,
+
+        // Before keyframe 1 is drawn on the chosen place, left and right in the plan are matched to the place.
+        'align_plan' => (bool) env('AI_ALIGN_PLAN', true),
+
         'composite' => [
             'enabled' => (bool) env('AI_COMPOSITE', true),
             // Cuts out the people: BiRefNet.
             'people_model' => env('AI_COMPOSITE_PEOPLE_MODEL', 'f74986db0355b58403ed20963af156525e2891ea3c2d499bfbfb2a28cd87c5d7'),
             // Cuts out a thing by its name: Lang-SAM.
             'object_model' => env('AI_COMPOSITE_OBJECT_MODEL', '891411c38a6ed2d44c004b7b9e44217df7a5b07848f29ddefd2e28bc7cbf93bc'),
+            // Measures the depth of a place, for moving people in it: Depth Anything 3 metric.
+            'depth_model' => env('AI_DEPTH_MODEL', 'd2ef7653aa75f87e3b502738a3f57ca2b09ba92f6f286075c8929a69937a013f'),
         ],
     ],
 

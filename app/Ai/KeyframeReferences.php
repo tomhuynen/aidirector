@@ -25,6 +25,8 @@ final class KeyframeReferences
      * @param  bool  $firstIsPlate  `$first` is the place without people, made from keyframe 1
      * @param  StoredImage|null  $setting  a keyframe or the place of another shot this one plays in, for keyframe 1 and the places
      * @param  string  $settingLabel  what that image is, such as "the last keyframe of SH100, the shot before"
+     * @param  StoredImage|null  $leftBehind  the last keyframe of the shot before in this place, for what it left there, such as a landed helicopter
+     * @param  string  $leftBehindLabel  what that image is
      */
     public function __construct(
         public readonly ?StoredImage $style = null,
@@ -37,6 +39,8 @@ final class KeyframeReferences
         public readonly bool $firstIsPlate = false,
         public readonly ?StoredImage $setting = null,
         public readonly string $settingLabel = '',
+        public readonly ?StoredImage $leftBehind = null,
+        public readonly string $leftBehindLabel = '',
     ) {}
 
     /**
@@ -50,6 +54,7 @@ final class KeyframeReferences
             $this->first !== null ? ($this->firstIsPlate ? 'The place without people, the image that is edited' : 'Keyframe 1, the image that is edited') : null,
             $this->style !== null ? 'Style sheet' : null,
             $this->setting !== null ? 'The setting: ' . $this->settingLabel : null,
+            $this->leftBehind !== null ? 'Left behind: ' . $this->leftBehindLabel : null,
             ...array_map(fn(array $entry) => "Picture of {$entry['element']->name}", $this->elementImages),
             $this->previous !== null ? 'The keyframe before' : null,
         ]));
@@ -64,6 +69,7 @@ final class KeyframeReferences
             $this->first,
             $this->style,
             $this->setting,
+            $this->leftBehind,
             ...array_column($this->elementImages, 'image'),
             $this->previous,
         ]));

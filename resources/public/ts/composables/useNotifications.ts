@@ -72,8 +72,8 @@ const open = (item: AppNotification) => {
 
 /**
  * Tells the director about a result that just came in with a desktop
- * notification while the tab is in the background. In the app the bell and
- * the decision queue show it. On the page that shows the result itself it is
+ * notification while the tab is in the background. In the app the bell shows
+ * it. On the page that shows the result itself it is
  * marked read straight away.
  */
 const announce = (item: AppNotification) => {

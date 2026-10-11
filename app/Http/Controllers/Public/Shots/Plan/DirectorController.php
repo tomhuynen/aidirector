@@ -20,9 +20,11 @@ use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\ReviewerVerdict;
 use App\Models\Shot;
-use App\Support\Decisions\FindingsReport;
-use App\Support\Decisions\ShotIssues;
+use App\Support\Findings\FindingsReport;
+use App\Support\Findings\ShotIssues;
+use App\Support\Shots\DrawnPlan;
 use App\Support\Shots\FirstKeyframeChoice;
+use App\Support\Shots\SequencePlaces;
 use App\Support\Shots\ShotPlan;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -55,17 +57,22 @@ class DirectorController
     /** How long to wait before asking again after a rate limit, times the attempt, in milliseconds. */
     private const int RATE_LIMIT_WAIT_MS = 2000;
 
-    public function store(PlanDirectorRequest $request, Project $project, Shot $shot, KeyframePainter $painter, FirstKeyframeChoice $choice, FindingsReport $report, ShotIssues $issues): JsonResponse
+    public function store(PlanDirectorRequest $request, Project $project, Shot $shot, KeyframePainter $painter, FirstKeyframeChoice $choice, FindingsReport $report, ShotIssues $issues, SequencePlaces $sequencePlaces): JsonResponse
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
         $shot->setRelation('project', $project);
         $elements = $project->elements()->get();
         $keyframes = $shot->keyframes()->with('media')->get()->each->setRelation('shot', $shot);
-        $message = trim((string) $request->validated('message'));
+        // Going on by itself, such as once the places are chosen by clicking: an instruction, not something the director said.
+        $continuing = $request->boolean('continue');
+        $message = $continuing
+            ? __('(Every place of the sequence is chosen now. Go on with this shot from where the conversation is: take the next step in this answer.)')
+            : trim((string) $request->validated('message'));
         $conversation = array_values((array) ($shot->plan_chat ?? []));
         // Before the keyframes are drawn, the places or options waiting for a choice are attached in order; after, the selected image.
-        $waiting = $choice->waiting($shot);
+        // The places of a sequence come first: they are chosen in the chat of its first shot before anything else.
+        $waiting = $sequencePlaces->waiting($shot) ?? $choice->waiting($shot);
         [$selected, $image] = $keyframes->isEmpty() || $waiting !== null ? ['', null] : $this->selected($keyframes, $request);
         $images = $waiting !== null ? $waiting['options']->take(self::MAX_OPTIONS_SHOWN)->values()->all() : array_filter([$image]);
         // What the checks found and was reported in the chat, waiting for the director's answer.
@@ -74,24 +81,19 @@ class DirectorController
             $shot,
             array_map(fn(array $turn) => ['role' => (string) $turn['role'], 'text' => (string) $turn['text']], $conversation),
             $selected,
-            $waiting !== null ? ['step' => $waiting['step'], 'count' => count($images)] : null,
+            $waiting !== null ? ['step' => $waiting['step'], 'count' => count($images), 'place' => isset($waiting['place']) ? "{$waiting['place']['name']}, for " . implode(', ', $waiting['place']['shots']) : null] : null,
             $findings['findings'] ?? [],
         );
         $prompt = $director->promptFor($message);
         $model = (string) Config::get('pipeline.models.text');
-
-        try {
-            $attachments = array_map(fn(Media $media) => $painter->referenceFor($media), array_values($images));
-            // A rate limit passes within seconds: asked again a little later, before the director sees an error.
-            /** @var StructuredAgentResponse $response */
+        // A rate limit passes within seconds: asked again a little later, before the director sees an error.
+        $ask = function (string $prompt, array $attachments) use ($director, $model): StructuredAgentResponse {
+            /** @var StructuredAgentResponse $response an agent with a schema answers in that structure */
             $response = retry(self::RATE_LIMIT_ATTEMPTS, fn() => $director->prompt($prompt, attachments: $attachments, provider: 'openrouter', model: $model), fn(int $attempt) => $attempt * self::RATE_LIMIT_WAIT_MS, fn(Throwable $exception) => $exception instanceof RateLimitedException);
-        } catch (Throwable $exception) {
-            report($exception);
 
-            return response()->json(['message' => __('The plan director is unavailable right now. Please try again.')], 503);
-        }
-
-        $shot->generations()->create([
+            return $response;
+        };
+        $log = fn(StructuredAgentResponse $response, string $prompt) => $shot->generations()->create([
             'director_id' => $project->director_id,
             'kind' => 'text',
             'provider' => $response->meta->provider ?? 'openrouter',
@@ -99,6 +101,37 @@ class DirectorController
             'prompt' => $prompt,
             'usage' => $response->usage->toArray(),
         ]);
+
+        try {
+            $attachments = array_map(fn(Media $media) => $painter->referenceFor($media), array_values($images));
+            $response = $ask($prompt, $attachments);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return response()->json(['message' => __('The plan director is unavailable right now. Please try again.')], 503);
+        }
+
+        $log($response, $prompt);
+
+        // An idea or keyframes proposed without checking its story and places is asked once more; when that fails, the first answer stands.
+        if (PlanDirector::skippedCheck($response->toArray())) {
+            try {
+                $response = $ask($prompt . PlanDirector::checkReminder(), $attachments);
+                $log($response, $prompt . PlanDirector::checkReminder());
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        // Shots that break the sequence rules, such as two full shots in a row, are asked for once more the same way.
+        if (($problems = PlanDirector::sequenceProblems($response->toArray())) !== []) {
+            try {
+                $response = $ask($prompt . PlanDirector::sequenceReminder($problems), $attachments);
+                $log($response, $prompt . PlanDirector::sequenceReminder($problems));
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
 
         $data = $response->toArray();
         $stage = in_array($data['stage'] ?? null, PlanDirector::STAGES, true) ? $data['stage'] : null;
@@ -113,50 +146,93 @@ class DirectorController
 
         $made = $elements->filter(fn(Element $element) => in_array($element->sqid, (array) $request->validated('made', []), true))->pluck('sqid')->values()->all();
         $cast = $sqids((array) ($data['cast'] ?? []));
+        // Shown once: the same cast as the last one shown is not shown again under every reply.
+        $shownCast = collect($conversation)->reverse()->first(fn(array $turn) => ! empty($turn['cast']))['cast'] ?? [];
+        $cast = collect($cast)->sort()->values()->all() === collect($shownCast)->sort()->values()->all() ? [] : $cast;
         $adjusted = $this->adjustElements($elements, $data['adjust_elements'] ?? null);
 
         // The same plan again for a drawn shot draws nothing new: what is drawn stays.
         $proposal = $keyframes->isNotEmpty() && ShotPlan::isCurrent($shot, $data['proposal'] ?? null) ? null : $data['proposal'] ?? null;
 
-        // A new plan for a drawn shot: what was drawn for the old one goes, and the new plan is drawn.
-        if ($keyframes->isNotEmpty() && ShotPlan::isPlan($proposal)) {
+        // A new plan for a drawn shot keeps the keyframes that stay the same; when what they are all drawn from changes, or the director asks, it starts over.
+        $planned = $shot->storylineKeyframes();
+        $keepsDrawn = $keyframes->isNotEmpty() && DrawnPlan::keeps($shot, $keyframes, $proposal);
+
+        if ($keyframes->isNotEmpty() && ShotPlan::isPlan($proposal) && ! $keepsDrawn) {
             $shot->startPlanOver();
             $keyframes = collect();
         }
 
         $plan = ShotPlan::apply($shot, $proposal);
+        $redrawn = $plan !== null && $keepsDrawn ? DrawnPlan::update($shot, $keyframes, $planned) : [];
         $reply = trim((string) ($data['reply'] ?? ''));
         $chosen = match (true) {
             $plan !== null => ['made' => [], 'waiting' => null],
+            $waiting !== null && $waiting['step'] === SequencePlaces::STEP => $this->chooseSequencePlace($shot, $waiting, $sequencePlaces, $data['choice'] ?? null),
             $waiting !== null => $this->choose($shot, $waiting, $choice, $data['choice'] ?? null),
             default => $this->backToPlaces($shot, $keyframes, $data['choice'] ?? null),
         };
         $changes = match (true) {
-            $plan !== null || $keyframes->isEmpty() || $chosen['made'] !== [] => ['made' => [], 'waiting' => null],
+            $plan !== null || $keyframes->isEmpty() || $chosen['made'] !== [] || ($waiting['step'] ?? null) === SequencePlaces::STEP => ['made' => [], 'waiting' => null],
             $waiting !== null && $waiting['step'] !== FirstKeyframeChoice::CONFIRM => $this->adjustOption($shot, $waiting, $choice, $data['changes'] ?? null),
             default => $this->change($shot, $keyframes, $request, $data['changes'] ?? null, $painter),
         };
         $judged = $plan === null && $findings !== null ? $this->judge($shot, $keyframes, $issues, $findings, $data['verdicts'] ?? null, $conversation) : ['made' => [], 'waiting' => null];
         $spoken = $plan === null ? $this->changeVoiceOver($shot, $data['voice_over'] ?? null) : [];
-        $changes = ['made' => [...$chosen['made'], ...$judged['made'], ...$spoken, ...$changes['made']], 'waiting' => $chosen['waiting'] ?? $judged['waiting'] ?? $changes['waiting']];
+        $spoken = [...$spoken, ...$this->changeView($shot, $data['view'] ?? null)];
+        $changes = ['made' => [...$redrawn, ...$chosen['made'], ...$judged['made'], ...$spoken, ...$changes['made']], 'waiting' => $chosen['waiting'] ?? $judged['waiting'] ?? $changes['waiting']];
 
         $turns = [
             ...$conversation,
-            array_filter(['role' => 'director', 'text' => $message, 'made' => $made, 'about' => $selected]),
-            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made']]),
+            ...($continuing ? [] : [array_filter(['role' => 'director', 'text' => $message, 'made' => $made, 'about' => $selected])]),
+            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'chosen_place' => $chosen['place'] ?? null, 'rules_check' => self::rulesCheck($data['rules_check'] ?? null)]),
         ];
 
         $shot->forceFill(['plan_chat' => $turns])->save();
 
-        $added = $this->splitInto($project, $shot, $data['shots'] ?? null);
+        $sequenceNotes = $this->splitInto($project, $shot, $data['shots'] ?? null);
+        $added = count($sequenceNotes);
+
+        // What the agreed sequence means for drawing, shown under the reply, so the director sees which shot uses what and waits for what.
+        if ($sequenceNotes !== []) {
+            $last = array_key_last($turns);
+            $turns[$last]['changes'] = [...($turns[$last]['changes'] ?? []), ...$sequenceNotes];
+            $shot->forceFill(['plan_chat' => $turns])->save();
+        }
         $removed = $this->removeShots($project, $shot, $data['remove_shots'] ?? null);
+        $visit = $this->removeThisShot($project, $shot, $data['remove_shots'] ?? null);
+
+        if ($visit !== null) {
+            return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'reload' => false, 'visit' => $visit]);
+        }
 
         // Agreed: drawn now, or as soon as the pictures or the setting it needs are there.
-        if ($plan !== null) {
+        if ($plan !== null && ! $keepsDrawn) {
             $shot->drawKeyframes();
         }
 
-        return response()->json(['messages' => $turns, 'reload' => $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $removed !== [] || $offered]);
+        return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'reload' => $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $removed !== [] || $offered]);
+    }
+
+    /**
+     * The plan director's own check of its answer against the director rules,
+     * kept on its turn to see later whether it saw a rule; never shown.
+     *
+     * @return array{places: string, must_read: string, rules: list<int>, story: string, sequence: list<array{framing: string, steps: int, adds: string}>}|null
+     */
+    private static function rulesCheck(mixed $check): ?array
+    {
+        if (! is_array($check)) {
+            return null;
+        }
+
+        return [
+            'places' => trim((string) ($check['places'] ?? '')),
+            'must_read' => trim((string) ($check['must_read'] ?? '')),
+            'rules' => array_values(array_map(intval(...), array_filter((array) ($check['rules'] ?? []), is_numeric(...)))),
+            'story' => trim((string) ($check['story'] ?? '')),
+            'sequence' => array_values(array_map(fn(array $shot) => ['framing' => (string) ($shot['framing'] ?? ''), 'steps' => (int) ($shot['steps'] ?? 0), 'adds' => trim((string) ($shot['adds'] ?? ''))], array_filter((array) ($check['sequence'] ?? []), is_array(...)))),
+        ];
     }
 
     /**
@@ -208,6 +284,61 @@ class DirectorController
         }
 
         return ['made' => $made !== null ? [$made] : [], 'waiting' => null];
+    }
+
+    /**
+     * Gives the shot another view of the place of its sequence, as agreed in
+     * the chat: what its camera sees is written anew, and when places or
+     * keyframes were drawn from the old view, the shot starts over from new
+     * places, since redrawing a keyframe never moves the camera.
+     *
+     * @return list<string>
+     */
+    private function changeView(Shot $shot, mixed $view): array
+    {
+        $view = trim((string) $view);
+
+        if ($view === '' || $shot->sequencePlaceKey() === null || $view === $shot->sequenceView()) {
+            return [];
+        }
+
+        $drawn = $shot->getMedia(Shot::PLATE_OPTIONS)->isNotEmpty() || $shot->keyframes()->whereNotNull('render_id')->exists();
+        $shot->updateStoredJson('storyline', fn(?array $storyline) => [...array_diff_key($storyline ?? [], [SequencePlaces::CAMERA_BRIEF => true]), 'sequence_view' => $view]);
+
+        if ($drawn) {
+            $shot->refresh()->startPlanOver();
+            $shot->drawKeyframes();
+        }
+
+        return [__('New view: :view', ['view' => $view]) . ($drawn ? __('; new places are drawn from it') : '')];
+    }
+
+    /**
+     * The place of the sequence chosen in the chat, or more options of it drawn.
+     *
+     * @param  array{step: string, options: Collection<int, Media>, place: array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}}  $waiting
+     * @return array{made: list<string>, waiting: string|null, place: array{name: string, media: int}|null}
+     */
+    private function chooseSequencePlace(Shot $shot, array $waiting, SequencePlaces $places, mixed $said): array
+    {
+        $action = is_array($said) ? (string) ($said['action'] ?? 'none') : 'none';
+        $number = is_array($said) ? max(1, (int) ($said['option'] ?? 1)) : 1;
+        $option = $waiting['options']->get($number - 1);
+
+        // What comes next is added to the reply: the chat saves this turn after the choice is made.
+        [$act, $made] = match (true) {
+            $action === 'choose' && $option !== null => [fn() => $places->choose($shot, $option, say: false), __('Place :n chosen for :place', ['n' => $number, 'place' => $waiting['place']['name']])],
+            $action === 'more' => [fn() => $places->more($shot), __('More to choose from for :place', ['place' => $waiting['place']['name']])],
+            default => [null, null],
+        };
+
+        try {
+            $chosen = $act !== null ? $act() : null;
+        } catch (ValidationException $exception) {
+            return ['made' => [], 'waiting' => '(' . collect($exception->errors())->flatten()->first() . ')', 'place' => null];
+        }
+
+        return ['made' => $made !== null ? [$made] : [], 'waiting' => $chosen['text'] ?? null, 'place' => $chosen['place'] ?? null];
     }
 
     /**
@@ -478,10 +609,12 @@ class DirectorController
      * The story told in several shots, as agreed: this shot becomes the first,
      * the others follow right after it with an empty plan and a chat that
      * starts from their idea. They share a group, so they show together in the
-     * shot list and can be merged later. Returns how many shots the sequence
-     * has after this one.
+     * shot list and can be merged later. Returns, per shot, what the agreed
+     * sequence means for drawing, for the director; empty when nothing is split.
+     *
+     * @return list<string>
      */
-    private function splitInto(Project $project, Shot $shot, mixed $shots): int
+    private function splitInto(Project $project, Shot $shot, mixed $shots): array
     {
         $parts = collect(is_array($shots) ? $shots : [])
             ->filter(fn(mixed $part) => is_array($part) && trim((string) ($part['takeaway'] ?? '')) !== '')
@@ -491,15 +624,20 @@ class DirectorController
                 'idea' => trim((string) ($part['idea'] ?? '')),
                 'setting' => (string) ($part['setting'] ?? 'new_place'),
                 'same_place_as' => (int) ($part['same_place_as'] ?? 0),
+                'cast' => array_values(array_filter(array_map(fn(mixed $name) => trim((string) $name), (array) ($part['cast'] ?? [])), fn(string $name) => $name !== '')),
+                'place' => trim((string) ($part['place'] ?? '')),
+                'view' => trim((string) ($part['view'] ?? '')),
             ])
             ->values();
 
         // A montage is one shot with its stills as keyframes, never a sequence of shots.
         if ($parts->count() < 2 || $parts->contains('kind', ShotKind::MONTAGE)) {
-            return 0;
+            return [];
         }
 
-        DB::connection($shot->getConnectionName())->transaction(function () use ($project, $shot, $parts) {
+        $notes = [];
+
+        DB::connection($shot->getConnectionName())->transaction(function () use ($project, $shot, $parts, &$notes) {
             // Agreed again on a sequence that already exists: the shots after this one are updated in order, only extra ones are added.
             $following = $shot->group_key === null
                 ? collect()
@@ -516,6 +654,17 @@ class DirectorController
                 'kind' => $first['kind'],
             ])->save();
 
+            // The places the sequence plays in, chosen first in this chat; a shot that continues the one before plays where that one ends.
+            $places = self::sequencePlaces($parts->all());
+            $placeOf = fn(int $index) => collect($places)->first(fn(array $place) => in_array($index, $place['indexes'], true))['key'] ?? null;
+            // A setting from an earlier agreement of the sequence, such as the place of a later shot, makes way for the new one.
+            $earlier = ($shot->storyline['setting_from']['sequence'] ?? false) === true && $shot->keyframes()->doesntExist() ? ['setting_from' => true] : [];
+            $shot->updateStoredJson('storyline', fn(?array $storyline) => [
+                ...array_diff_key($storyline ?? [], ['sequence_place' => true, 'sequence_view' => true, ...$earlier]),
+                'sequence_cast' => $first['cast'],
+                ...($placeOf(0) !== null ? ['sequence_place' => $placeOf(0)] : []),
+                ...($placeOf(0) !== null && $first['view'] !== '' ? ['sequence_view' => $first['view']] : []),
+            ]);
             $sequence = [$shot];
 
             foreach ($parts->skip(1)->values() as $index => $part) {
@@ -524,6 +673,11 @@ class DirectorController
                     'stage' => 'idea',
                     'text' => __('This shot is part of the sequence we planned: :idea Shall we go on from there?', ['idea' => $part['idea']]),
                 ]];
+                $cast = [
+                    'sequence_cast' => $part['cast'],
+                    ...($placeOf($index + 1) !== null ? ['sequence_place' => $placeOf($index + 1)] : []),
+                    ...($placeOf($index + 1) !== null && $part['view'] !== '' ? ['sequence_view' => $part['view']] : []),
+                ];
                 $existing = $following->get($index);
 
                 if ($existing !== null) {
@@ -536,6 +690,7 @@ class DirectorController
                             'kind' => $part['kind'],
                             'plan_chat' => $opening,
                         ])->save();
+                        $existing->updateStoredJson('storyline', fn(?array $storyline) => [...array_diff_key($storyline ?? [], ['setting_from' => true, 'sequence_place' => true, 'sequence_view' => true]), ...$cast]);
                     }
 
                     $sequence[] = $existing;
@@ -557,26 +712,185 @@ class DirectorController
                     'aspect_ratio_override' => $shot->aspect_ratio_override,
                     'status' => ShotStatus::STORYLINE_READY,
                     'chosen_storyline' => ['title' => Str::limit($part['takeaway'], 80), 'storyline' => ''],
-                    'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => []],
+                    'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => [], ...$cast],
                     'plan_chat' => $opening,
                 ]);
             }
 
-            // Where each shot plays, as agreed: from where the shot before ends, or in the place of an earlier shot.
-            foreach ($parts->skip(1)->values() as $index => $part) {
-                $from = match (true) {
-                    $part['setting'] === 'continues' => ['shot_id' => $sequence[$index]->id, 'keyframe' => Shot::LAST_KEYFRAME],
-                    $part['setting'] === 'same_place' && $part['same_place_as'] >= 1 && $part['same_place_as'] <= $index + 1 => ['shot_id' => $sequence[$part['same_place_as'] - 1]->id, 'keyframe' => 0],
-                    default => null,
-                };
+            // Where each shot plays, as agreed: from where the shot before ends, or in the place of another shot, also a later one.
+            $sources = self::settingSources($parts->all());
 
-                if ($from !== null && $sequence[$index + 1]->isUntouchedInSequence()) {
-                    $sequence[$index + 1]->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'setting_from' => $from]);
+            foreach ($sources as $index => $source) {
+                $target = $sequence[$index];
+                $settable = $index === 0 ? $target->keyframes()->doesntExist() : $target->isUntouchedInSequence();
+
+                if ($settable) {
+                    $target->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'setting_from' => [
+                        'shot_id' => $sequence[$source['from']]->id,
+                        'keyframe' => $source['continues'] ? Shot::LAST_KEYFRAME : 0,
+                        // Set when the sequence was agreed, so a plan written later keeps it.
+                        'sequence' => true,
+                    ]]);
+                }
+            }
+
+            $notes = self::sequenceNotes($sequence, $parts->all(), $sources, $places);
+            $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'sequence_places' => array_map(fn(array $place) => [
+                'key' => $place['key'],
+                'name' => $place['name'],
+                'shots' => array_map(fn(int $index) => $sequence[$index]->code(), $place['indexes']),
+                'ideas' => array_map(fn(int $index) => $parts[$index]['idea'], $place['indexes']),
+                'elements' => array_values(array_unique(array_merge(...array_map(fn(int $index) => $parts[$index]['cast'], $place['indexes'])))),
+            ], $places)]);
+
+            // Each shot that waits in the shot list says from its first message what it uses and where its place comes from.
+            foreach (array_slice($sequence, 1, null, true) as $index => $next) {
+                $opening = (array) ($next->plan_chat ?? []);
+
+                if ($next->isUntouchedInSequence() && count($opening) === 1) {
+                    $opening[0]['text'] .= ' ' . __('For drawing: :note.', ['note' => $notes[$index]]);
+                    $next->forceFill(['plan_chat' => $opening])->save();
                 }
             }
         });
 
-        return $parts->count() - 1;
+        // The places are drawn right away, so they are chosen before anything else of the sequence.
+        if ($notes !== []) {
+            app(SequencePlaces::class)->draw($shot->refresh());
+        }
+
+        return $notes;
+    }
+
+    /**
+     * The places a sequence plays in, by the name each shot gives its place,
+     * in the order they first appear. A shot that continues the one before
+     * plays where that one ends and needs no place of its own.
+     *
+     * @param  list<array{setting: string, place: string, kind: ShotKind}>  $parts
+     * @return list<array{key: string, name: string, indexes: list<int>}>
+     */
+    private static function sequencePlaces(array $parts): array
+    {
+        $places = [];
+
+        foreach ($parts as $index => $part) {
+            // Only a close-up continues the shot before; a wider shot after a close-up plays in that close-up's place.
+            if ($part['setting'] === 'continues' && $index > 0 && $part['kind'] !== ShotKind::CLOSE_UP && $parts[$index - 1]['kind'] === ShotKind::CLOSE_UP) {
+                $part['place'] = $part['place'] !== '' ? $part['place'] : $parts[$index - 1]['place'];
+                $part['setting'] = 'new_place';
+            }
+
+            if ($part['place'] === '' || ($part['setting'] === 'continues' && $index > 0)) {
+                continue;
+            }
+
+            $key = Str::slug($part['place']) ?: 'place-' . ($index + 1);
+            $places[$key] ??= ['key' => $key, 'name' => $part['place'], 'indexes' => []];
+            $places[$key]['indexes'][] = $index;
+        }
+
+        return array_values($places);
+    }
+
+    /**
+     * Which shot of the sequence each shot takes its setting from, by index:
+     * the shot before when it continues, or the shot it shares the place
+     * with, earlier or later. A chain that would come back to itself, such
+     * as a close-up waiting for the place of the next shot while that shot
+     * continues from the close-up, is cut at the later shot, which then
+     * plays in a place of its own.
+     *
+     * @param  list<array{setting: string, same_place_as: int, place: string, kind: ShotKind}>  $parts
+     * @return array<int, array{from: int, continues: bool}>
+     */
+    private static function settingSources(array $parts): array
+    {
+        $sources = [];
+
+        foreach ($parts as $index => $part) {
+            $shared = $part['same_place_as'] - 1;
+
+            if ($part['setting'] === 'continues' && $index > 0 && ($part['kind'] === ShotKind::CLOSE_UP || $parts[$index - 1]['kind'] !== ShotKind::CLOSE_UP)) {
+                $sources[$index] = ['from' => $index - 1, 'continues' => true];
+            } elseif ($part['setting'] === 'same_place' && $shared >= 0 && $shared < $index && $part['place'] === '') {
+                $sources[$index] = ['from' => $shared, 'continues' => false];
+            }
+        }
+
+        foreach (array_keys($sources) as $start) {
+            $seen = [$start];
+            $at = $start;
+
+            while (isset($sources[$at])) {
+                $at = $sources[$at]['from'];
+
+                if (in_array($at, $seen, true)) {
+                    unset($sources[max($seen)]);
+
+                    break;
+                }
+
+                $seen[] = $at;
+            }
+        }
+
+        ksort($sources);
+
+        return $sources;
+    }
+
+    /**
+     * What the agreed sequence means for drawing, in plain lines for the
+     * director: who and what each shot uses, and which shot waits for the
+     * place or the end of another.
+     *
+     * @param  list<Shot>  $sequence
+     * @param  list<array{cast: list<string>, view: string}>  $parts
+     * @param  array<int, array{from: int, continues: bool}>  $sources
+     * @param  list<array{key: string, name: string, indexes: list<int>}>  $places
+     * @return list<string>
+     */
+    private static function sequenceNotes(array $sequence, array $parts, array $sources, array $places): array
+    {
+        return array_map(function (Shot $shot, int $index) use ($sequence, $parts, $sources, $places): string {
+            $source = $sources[$index] ?? null;
+            $place = collect($places)->first(fn(array $place) => in_array($index, $place['indexes'], true));
+            $uses = $parts[$index]['cast'] === [] ? '' : __(' uses :cast', ['cast' => implode(', ', $parts[$index]['cast'])]);
+            $where = match (true) {
+                $source === null && $place !== null => __('; plays in :place, chosen first', ['place' => $place['name']]) . ($parts[$index]['view'] !== '' ? " ({$parts[$index]['view']})" : ''),
+                $source === null => __('; its own place'),
+                $source['continues'] => __('; continues from the end of :shot, so it is drawn once the keyframes of :shot are ready', ['shot' => $sequence[$source['from']]->code()]),
+                default => __('; plays in the place of :shot', ['shot' => $sequence[$source['from']]->code()]),
+            };
+
+            return "{$shot->code()} ({$shot->kindOrScene()->label()}){$uses}{$where}";
+        }, $sequence, array_keys($sequence));
+    }
+
+    /**
+     * Removes this shot itself when the director agreed to drop it and none
+     * of its keyframes are drawn yet. Returns where the editor goes next: the
+     * shot that took its place, the one before it when it was the last, or a
+     * new shot when none are left.
+     */
+    private function removeThisShot(Project $project, Shot $shot, mixed $codes): ?string
+    {
+        $wanted = array_map(fn(mixed $code) => mb_strtoupper(str_replace(' ', '', (string) $code)), is_array($codes) ? $codes : []);
+
+        if (! in_array($shot->code(), $wanted, true) || $shot->keyframes()->exists()) {
+            return null;
+        }
+
+        $position = $shot->position;
+        $shot->delete();
+
+        $remaining = $project->shots()->orderBy('position')->get();
+        $remaining->each(fn(Shot $sibling, int $index) => $sibling->update(['position' => $index + 1]));
+
+        $next = $remaining->get(min($position, $remaining->count()) - 1);
+
+        return $next === null ? route('public.shots.create', $project) : route('public.shots.view', [$project, $next]);
     }
 
     /**

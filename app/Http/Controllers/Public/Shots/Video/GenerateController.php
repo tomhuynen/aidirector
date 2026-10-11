@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Public\Shots\Video;
 
 use App\Enums\ShotStatus;
 use App\Http\Controllers\Public\Shots\Concerns\GuardsBusyShots;
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Jobs\GenerateVideo;
 use App\Models\Keyframe;
 use App\Models\Policies\Public\ShotPolicy;
@@ -18,7 +17,6 @@ use Illuminate\Validation\ValidationException;
 class GenerateController
 {
     use GuardsBusyShots;
-    use ReturnsToDecisions;
 
     /**
      * Render the video from the shot's keyframes at the project's resolution.
@@ -49,6 +47,6 @@ class GenerateController
 
         GenerateVideo::dispatch($shot);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 }

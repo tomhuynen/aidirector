@@ -14,7 +14,6 @@ use App\Http\Resources\Public\ShotResource;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Support\Decisions\DecisionQueue;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
@@ -29,8 +28,6 @@ class ViewController
 
         return Inertia::render('shots/view', [
             'project' => fn() => ProjectResource::make($project),
-            /** @var int How many decisions wait for the director in this project. */
-            'decisionsCount' => fn() => app(DecisionQueue::class)->count($project),
             'shot' => fn() => ShotResource::make($shot),
             /** @var array<int, array{value: string, label: string, description: string}> */
             'shotKinds' => fn() => ShotKind::catalogue(),

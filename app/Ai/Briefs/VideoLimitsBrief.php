@@ -49,9 +49,9 @@ class VideoLimitsBrief
                 'instead' => 'another camera position where the action is in plain view',
             ],
             [
-                'risk' => 'Fast or physical motion: running, falling, a collision, liquid, smoke or fire',
+                'risk' => 'Fast or physical motion: running, falling, a collision, liquid, smoke that billows or fire',
                 'why' => 'video models animate it unreliably and it looks wrong',
-                'instead' => 'show the moment just before and the result, without the motion itself',
+                'instead' => 'show the moment just before and the result, without the motion itself; a thin wisp of smoke that hardly moves, such as under a door, can be shown',
             ],
             [
                 'risk' => 'A jump in time within the shot, such as "an hour later" or "afterwards"',
@@ -98,16 +98,27 @@ class VideoLimitsBrief
                 'why' => 'the image model mixes them up and swaps their places or actions',
                 'instead' => 'people who clearly differ, such as a hi-vis vest against a striped shirt, and each on their own side of the frame throughout the shot',
             ],
+            [
+                'risk' => 'Someone ends up on the other side of a person standing between where they start and where they end, such as an officer who stands right of the visitor and leaves on the left',
+                'why' => 'the video model takes the shortest way between two keyframes and walks them straight through the person in between',
+                'instead' => 'have them leave or move on their own side, out of the frame on that side, or have the person in between step aside first in a keyframe of its own',
+            ],
+            [
+                'risk' => 'Someone appears in a later keyframe without being seen to come in, such as an officer who is suddenly standing beside the visitor',
+                'why' => 'the video model has to make up where they come from, so they pop up out of nothing or walk in from a random side, through a wall or from behind someone',
+                'instead' => 'have them in the frame from keyframe 1, such as further back walking towards the others, or show them entering in a keyframe of their own, mid-step at a named edge of the frame or in a doorway, before they stand with the others',
+            ],
         ];
     }
 
     /**
-     * The limits as a list for a prompt.
+     * The limits as a numbered list for a prompt, so an answer can name the ones that apply.
      */
     public static function brief(): string
     {
         return collect(self::limits())
-            ->map(fn(array $limit) => "- {$limit['risk']}: fails because {$limit['why']}. Instead: {$limit['instead']}.")
+            ->values()
+            ->map(fn(array $limit, int $index) => ($index + 1) . ". {$limit['risk']}: fails because {$limit['why']}. Instead: {$limit['instead']}.")
             ->join("\n");
     }
 }

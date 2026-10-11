@@ -29,4 +29,13 @@ class TransientHttpFailure
         return $exception instanceof RequestException
             && ($exception->response->serverError() || $exception->response->status() === 429);
     }
+
+    /**
+     * Whether the call got no answer in time, as opposed to a dropped connection.
+     */
+    public static function timedOut(Throwable $exception): bool
+    {
+        return $exception instanceof ConnectionException
+            && (str_contains($exception->getMessage(), 'cURL error 28') || str_contains($exception->getMessage(), 'timed out'));
+    }
 }

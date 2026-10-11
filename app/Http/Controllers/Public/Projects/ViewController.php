@@ -12,7 +12,6 @@ use App\Http\Resources\Public\ShotListItemResource;
 use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use App\Models\ProjectRule;
-use App\Support\Decisions\DecisionQueue;
 use App\Support\Video\VideoFormats;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Gate;
@@ -39,8 +38,6 @@ class ViewController
 
         return Inertia::render('projects/view', [
             'project' => fn() => ProjectResource::make($project),
-            /** @var int How many decisions wait for the director in this project. */
-            'decisionsCount' => fn() => app(DecisionQueue::class)->count($project),
             'shots' => fn() => ShotListItemResource::collection($project->shots),
             /** @var array{aspectRatios: array<int, array{value: string, name: string}>, resolutions: array<int, string>, sizes: array<string, array{width: int, height: int}>} */
             'videoFormats' => fn() => VideoFormats::catalogue(),

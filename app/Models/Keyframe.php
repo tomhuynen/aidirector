@@ -52,8 +52,17 @@ class Keyframe extends Model implements HasMedia
     /** While rendering: the drawn image is being checked. */
     public const STAGE_CHECKING = 'checking';
 
+    /** While rendering: the drawn people are cut out and placed on the chosen place. */
+    public const STAGE_COMPOSITING = 'compositing';
+
     /** On a render: after a move, why the image no longer fits the keyframe's point in the story. */
     public const MOVE_WARNING = 'move_warning';
+
+    /** On a version where a person was moved by hand: where they were put, as shares of the image, for fitting their pose to it. */
+    public const MOVED_BOX = 'moved_box';
+
+    /** On a version: the people in it as found by the cut-out model, small, so a click can pick a person whole. */
+    public const PEOPLE_MASK = 'people_mask';
 
     /** On a render drawn on a base image: the share of the background that stayed in place, from 0 to 1. */
     public const STILLNESS = 'stillness';
@@ -139,14 +148,17 @@ class Keyframe extends Model implements HasMedia
     }
 
     /**
-     * A description with its spatial fact added as the last sentence, for a keyframe or a planned one.
+     * A description with its spatial fact added as the last sentence, for a
+     * keyframe or a planned one; not again when the description already says
+     * it, such as one rewritten from the joined text.
      */
     public static function joined(string $description, ?string $spatial): string
     {
         $description = trim($description);
         $spatial = trim((string) $spatial);
+        $plain = fn(string $text) => mb_strtolower((string) preg_replace('/\s+/', ' ', rtrim($text, '.!? ')), 'UTF-8');
 
-        if ($spatial === '') {
+        if ($spatial === '' || ($description !== '' && str_contains($plain($description), $plain($spatial)))) {
             return $description;
         }
 

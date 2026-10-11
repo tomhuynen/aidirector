@@ -32,8 +32,8 @@ class ReviewerVerdict extends Model
     /** Decided by answering in the chat. */
     public const VIA_CHAT = 'chat';
 
-    /** Decided in the list of decisions. */
-    public const VIA_DECISIONS = 'decisions';
+    /** Decided with the buttons on the shot page. */
+    public const VIA_SHOT = 'shot';
 
     protected $guarded = [];
 

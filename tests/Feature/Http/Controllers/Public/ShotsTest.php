@@ -135,7 +135,7 @@ describe('create', function () {
 
         expect($shot->fresh()->storylineFraming()['size'])->toBe('medium');
 
-        PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Coverage: a takeaway may be told in up to three shots')
+        PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Coverage: think like a film editor, not like a slide')
             && str_contains((string) $prompt->agent->instructions(), 'Give it a turn')
             && str_contains((string) $prompt->agent->instructions(), 'A strong plan for the same takeaway')
             && str_contains((string) $prompt->agent->instructions(), 'The idea is already a small story'));
@@ -171,7 +171,7 @@ describe('create', function () {
 
         expect($shot->kind)->toBe(App\Enums\ShotKind::CLOSE_UP)
             ->and($shot->chosenStoryline()['storyline'])->toBe('She pulls the cord and the badge comes round to her chest.')
-            ->and($shot->storylineKeyframes())->toEqual([['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['Female engineer']]])
+            ->and($shot->storylineKeyframes())->toEqual([['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['Female engineer'], 'handled' => []]])
             ->and($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($shot->plan_chat)->toHaveCount(4);
         Queue::assertPushed(App\Jobs\GenerateKeyframes::class);
@@ -194,6 +194,89 @@ describe('create', function () {
 
         expect($shot->fresh()->storyline['new_elements'])->toBe([['name' => 'Badge clip', 'type' => 'object', 'description' => 'A small metal clip on a short red cord.']]);
         PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), '- close-up: when'));
+    });
+
+    it('shows the cast under a reply only when it changed since it was last shown', function () {
+        $visitor = App\Models\Element::factory()->for($this->project)->create(['name' => 'Helmeted visitor', 'type' => 'person']);
+        $bin = App\Models\Element::factory()->for($this->project)->create(['name' => 'Burning waste bin', 'type' => 'object']);
+        PlanDirector::fake([
+            directorReply(['reply' => 'I use these.', 'stage' => 'cast', 'cast' => ['Helmeted visitor', 'Burning waste bin']]),
+            directorReply(['reply' => 'Writing the plan.', 'stage' => 'cast', 'cast' => ['Burning waste bin', 'Helmeted visitor']]),
+            directorReply(['reply' => 'Only her now.', 'stage' => 'cast', 'cast' => ['Helmeted visitor']]),
+        ]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'ok');
+        talkTo($this, $shot->fresh(), 'ok');
+        talkTo($this, $shot->fresh(), 'leave out the bin');
+
+        $replies = collect($shot->fresh()->plan_chat)->where('role', 'assistant')->values();
+
+        expect($replies[$replies->count() - 3]['cast'])->toEqualCanonicalizing([$visitor->sqid, $bin->sqid])
+            ->and($replies[$replies->count() - 2])->not->toHaveKey('cast')
+            ->and($replies[$replies->count() - 1]['cast'])->toBe([$visitor->sqid]);
+    });
+
+    it('asks again when an idea is proposed without checking its story and places', function () {
+        PlanDirector::fake([
+            directorReply(['reply' => 'The host guides her away from the fire.', 'stage' => 'idea', 'rules_check' => ['places' => 'none', 'must_read' => 'none', 'rules' => [], 'story' => 'none']]),
+            directorReply(['reply' => 'She lowers her phone at the smoke and walks to the exit herself; the call is a second shot.', 'stage' => 'idea', 'rules_check' => ['places' => 'the corridor', 'must_read' => 'none', 'rules' => [1, 7], 'story' => 'about to call beside the smoke; she walks to the exit herself.']]),
+        ]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'ok');
+
+        PlanDirector::assertPromptedTimes(2);
+        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Your previous answer to this message proposed an idea or keyframes with story or places in rules_check left empty'));
+        expect(collect($shot->fresh()->plan_chat)->last()['text'])->toBe('She lowers her phone at the smoke and walks to the exit herself; the call is a second shot.')
+            ->and(collect($shot->fresh()->plan_chat)->last()['rules_check']['rules'])->toBe([1, 7])
+            ->and($shot->generations()->count())->toBe(2);
+    });
+
+    it('does not ask again when the idea was checked or nothing is proposed', function (array $reply) {
+        PlanDirector::fake([directorReply($reply)]);
+
+        talkTo($this, planShot($this->project), 'ok');
+
+        PlanDirector::assertPromptedTimes(1);
+    })->with([
+        'checked idea' => [['stage' => 'idea', 'rules_check' => ['places' => 'the corridor', 'must_read' => 'none', 'rules' => [], 'story' => 'about to call beside the smoke; she walks away.']]],
+        'takeaway step' => [['stage' => 'takeaway', 'rules_check' => ['places' => '', 'must_read' => 'none', 'rules' => [], 'story' => 'none']]],
+    ]);
+
+    it('asks again when the shots it proposes break the sequence rules', function () {
+        $checked = ['places' => 'beside the bin, behind the line', 'must_read' => 'none', 'rules' => [], 'story' => 'too close to the fire; the officer points him back.'];
+        PlanDirector::fake([
+            directorReply(['reply' => 'Three shots: too close and pointed back, at a distance, the phone.', 'stage' => 'idea', 'rules_check' => [...$checked, 'sequence' => [
+                ['framing' => 'full', 'steps' => 5, 'adds' => 'too close, stopped, pointed back'],
+                ['framing' => 'full', 'steps' => 1, 'adds' => 'at a distance'],
+                ['framing' => 'close-up', 'steps' => 2, 'adds' => 'the call'],
+            ]]]),
+            directorReply(['reply' => 'Four shots: the burning bin, him freezing, stepping back behind the line, the call.', 'stage' => 'idea', 'rules_check' => [...$checked, 'sequence' => [
+                ['framing' => 'close-up', 'steps' => 1, 'adds' => 'the danger'],
+                ['framing' => 'medium', 'steps' => 2, 'adds' => 'he freezes with the phone'],
+                ['framing' => 'full', 'steps' => 3, 'adds' => 'pointed back behind the line'],
+                ['framing' => 'close-up', 'steps' => 2, 'adds' => 'the call'],
+            ]]]),
+        ]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'what shots?');
+
+        PlanDirector::assertPromptedTimes(2);
+        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Shot 1 has 5 steps; split it, no shot has more than 3.')
+            && str_contains($prompt->prompt, 'Shots 1 and 2 are both full;'));
+        expect(collect($shot->fresh()->plan_chat)->last()['text'])->toStartWith('Four shots')
+            ->and(collect($shot->fresh()->plan_chat)->last()['rules_check']['sequence'])->toHaveCount(4);
+    });
+
+    it('finds nothing to rework in a sequence that keeps to the rules, or in a single shot', function () {
+        $sequence = fn(array ...$shots) => ['rules_check' => ['sequence' => array_map(fn(array $shot) => ['framing' => $shot[0], 'steps' => $shot[1], 'adds' => 'something'], $shots)]];
+
+        expect(PlanDirector::sequenceProblems($sequence(['close-up', 1], ['medium', 3], ['full', 2])))->toBe([])
+            ->and(PlanDirector::sequenceProblems($sequence(['full', 6])))->toBe([])
+            ->and(PlanDirector::sequenceProblems(['rules_check' => []]))->toBe([])
+            ->and((string) (new PlanDirector(planShot($this->project), []))->instructions())->toContain('no two shots in a row have the same framing');
     });
 
     it('tells the story in several shots right after this one, grouped together', function () {
@@ -236,7 +319,7 @@ describe('create', function () {
     it('updates the sequence when it is agreed again, instead of adding it twice', function () {
         $sequence = fn(string $second) => directorReply(['shots' => [
             ['takeaway' => 'Ask before you take a photo', 'kind' => 'scene', 'idea' => 'The host stops the visitor at the dock.', 'setting' => 'new_place', 'same_place_as' => 0],
-            ['takeaway' => 'Photograph only where allowed', 'kind' => 'scene', 'idea' => $second, 'setting' => 'continues', 'same_place_as' => 0],
+            ['takeaway' => 'Photograph only where allowed', 'kind' => 'close-up', 'idea' => $second, 'setting' => 'continues', 'same_place_as' => 0],
         ]]);
         PlanDirector::fake([$sequence('The host points to a safe spot.'), $sequence('The host points away from the dock.')]);
         $shot = planShot($this->project, ['position' => 1]);
@@ -257,7 +340,7 @@ describe('create', function () {
         $talked = planShot($this->project, ['position' => 2, 'group_key' => 'g1', 'plan_chat' => [['role' => 'assistant', 'text' => 'Idea'], ['role' => 'director', 'text' => 'yes']]]);
         $duplicate = planShot($this->project, ['position' => 3, 'group_key' => 'g1', 'plan_chat' => [['role' => 'assistant', 'text' => 'Idea']]]);
         $elsewhere = planShot($this->project, ['position' => 4]);
-        PlanDirector::fake([directorReply(['reply' => 'Removed.', 'remove_shots' => ['SH010', 'SH020', 'SH030', 'SH040']])]);
+        PlanDirector::fake([directorReply(['reply' => 'Removed.', 'remove_shots' => ['SH020', 'SH030', 'SH040']])]);
 
         talkTo($this, $shot, 'yes, remove them')->assertJsonPath('reload', true);
 
@@ -266,6 +349,28 @@ describe('create', function () {
             ->and($talked->fresh())->not->toBeNull()
             ->and($elsewhere->fresh()->position)->toBe(3)
             ->and($this->project->shots()->pluck('position')->all())->toBe([1, 2, 3]);
+    });
+
+    it('removes this shot when the director drops it before anything is drawn and goes on to the next', function () {
+        $shot = planShot($this->project, ['position' => 1]);
+        $next = planShot($this->project, ['position' => 2]);
+        PlanDirector::fake([directorReply(['reply' => 'I\'ll remove SH010.', 'remove_shots' => ['SH010']])]);
+
+        talkTo($this, $shot, 'the full scene was enough, delete this part')
+            ->assertJsonPath('visit', route('public.shots.view', [$this->project, $next]));
+
+        expect(Shot::query()->find($shot->id))->toBeNull()
+            ->and($next->fresh()->position)->toBe(1);
+    });
+
+    it('keeps this shot once its keyframes are drawn', function () {
+        $shot = planShot($this->project, ['position' => 1]);
+        Keyframe::factory()->for($shot)->create();
+        PlanDirector::fake([directorReply(['reply' => 'Removed.', 'remove_shots' => ['SH010']])]);
+
+        talkTo($this, $shot, 'delete this shot')->assertJsonMissingPath('visit');
+
+        expect($shot->fresh())->not->toBeNull();
     });
 
     it('offers to make a new person when the director asks for one', function () {
@@ -391,16 +496,20 @@ describe('view', function () {
 
     it('marks the shots in the list that are being generated', function () {
         $idle = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::VIDEO_READY]);
-        Shot::factory()->for($this->project)->create(['position' => 2, 'status' => ShotStatus::VIDEO_PENDING]);
+        $rendering = Shot::factory()->for($this->project)->create(['position' => 2, 'status' => ShotStatus::VIDEO_PENDING, 'video_submitted_at' => now()]);
         $drawing = Shot::factory()->for($this->project)->create(['position' => 3, 'status' => ShotStatus::KEYFRAMES_READY]);
-        Keyframe::factory()->for($drawing)->create(['position' => 1, 'rendering' => true]);
+        $keyframe = Keyframe::factory()->for($drawing)->create(['position' => 1, 'rendering' => true]);
 
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $idle]))
             ->assertInertia(fn($page) => $page
                 ->where('siblings.0.busy', false)
+                ->where('siblings.0.render', null)
                 ->where('siblings.1.busy', true)
-                ->where('siblings.2.busy', true));
+                ->where('siblings.1.render.key', "video:shot:{$rendering->sqid}")
+                ->where('siblings.1.render.startedAt', $rendering->video_submitted_at->toIso8601String())
+                ->where('siblings.2.busy', true)
+                ->where('siblings.2.render.key', "keyframe:{$keyframe->sqid}"));
     });
 
     it('does not resolve a shot through a project it does not belong to', function () {

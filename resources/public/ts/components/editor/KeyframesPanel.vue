@@ -67,7 +67,7 @@
           >
             <!-- Keyframe 1 on the chosen place: clicking it confirms it, as saying yes in the chat does. -->
             <button
-              v-if="canConfirmFirst"
+              v-if="canConfirmFirst && !movable(selected)"
               type="button"
               class="group size-full cursor-pointer"
               :disabled="confirming.processing"
@@ -85,16 +85,35 @@
               :src="selected.imageUrl"
               :alt="selected.title"
               :class="
-                cn('size-full rounded-xl border border-border bg-card object-cover', busy(selected) && 'opacity-50')
+                cn('size-full rounded-xl border border-border bg-card object-cover', drawing(selected) && 'opacity-50')
               "
             />
-            <KeyframeMover v-if="mover.state.active && !busy(selected)" :key="selected.id" :mover="mover" />
+            <KeyframeScan v-if="scanning(selected)" :label="scanLabel()" large class="rounded-xl" />
+            <!-- Click a person in the image to move them. -->
+            <KeyframeMover
+              v-if="movable(selected)"
+              :key="selected.id"
+              :mover="mover"
+              :select-url="selected.moveSelectUrl!"
+              :move-url="selected.moveUrl!"
+            />
+            <!-- Keyframe 1 waits to be confirmed; the image itself is for moving people. -->
+            <Button
+              v-if="canConfirmFirst && movable(selected) && !mover.state.picked"
+              type="button"
+              class="absolute top-4 shadow-lg"
+              :disabled="confirming.processing"
+              @click="confirmFirst"
+            >
+              <Check class="size-4" />
+              {{ $t('Use this keyframe') }}
+            </Button>
             <p
-              v-if="busy(selected)"
+              v-if="drawing(selected)"
               class="absolute bottom-4 mx-4 flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
             >
               <LoaderCircle class="size-4 shrink-0 animate-spin" />
-              {{ renderLabel(selected) }}
+              {{ finishing(selected) ? $t('Finishing…') : $t('Generating image…') }}
             </p>
           </div>
           <Placeholder v-else class="max-h-full max-w-full rounded-xl bg-card" :style="frameSize">
@@ -125,9 +144,9 @@
                 {{ $t('Keyframe :n of :total', { n: String(selectedIndex + 1), total: String(keyframes.length) }) }}
               </p>
               <!-- The title and description are in the column on the right. -->
-              <p v-if="busy(selected)" class="flex items-center justify-center gap-2 pt-1 text-xs text-signal">
+              <p v-if="drawing(selected)" class="flex items-center justify-center gap-2 pt-1 text-xs text-signal">
                 <LoaderCircle class="size-3.5 animate-spin" />
-                {{ renderLabel(selected) }}
+                {{ $t('Generating image…') }}
               </p>
             </div>
           </Placeholder>
@@ -149,6 +168,9 @@
           :new-elements="chat.newElements"
           :elements-url="chat.elementsUrl"
           :waiting-for="chat.waitingFor ?? null"
+          :sequence-place="chat.sequencePlace ?? null"
+          :sequence-place-url="chat.sequencePlaceUrl"
+          :sequence-place-drawing="chat.sequencePlaceDrawing ?? null"
           :target="chatTarget"
         />
       </aside>
@@ -176,8 +198,6 @@
         :can-delete="canArrange && !checkingFirst"
         :can-copy="keyframes.length < newKeyframe.max && !checkingFirst"
         :issues="issuesFor(selected.id)"
-        :mover="mover"
-        @move="selected.moveSelectUrl && selected.moveUrl && mover.start(selected.moveSelectUrl, selected.moveUrl)"
       />
     </div>
 
@@ -239,16 +259,9 @@
           </div>
         </header>
 
-        <p
-          v-if="reviewing && !generating"
-          class="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm text-signal"
-        >
-          <LoaderCircle class="size-4 animate-spin" />
-          {{ $t('Reviewing the keyframes together…') }}
-        </p>
         <!-- Only for what concerns the whole shot; a keyframe with something found is marked in the strip and explained when selected. -->
         <div
-          v-else-if="shotIssues.length > 0 && !generating"
+          v-if="!reviewing && shotIssues.length > 0 && !generating"
           class="space-y-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
         >
           <div class="flex items-center gap-3">
@@ -301,7 +314,7 @@
               @click="selectById(keyframe.id)"
             >
               <img
-                v-if="keyframe.thumbnailUrl && !keyframe.rendering"
+                v-if="keyframe.thumbnailUrl && !drawing(keyframe)"
                 :src="keyframe.thumbnailUrl"
                 :alt="keyframe.title"
                 draggable="false"
@@ -310,13 +323,15 @@
               <Placeholder v-else class="size-full rounded-none border-0 bg-card" />
               <RenderProgress
                 :progress-key="`keyframe:${keyframe.id}`"
-                :active="keyframe.rendering"
+                :active="drawing(keyframe)"
                 :seconds="renderSeconds.keyframe"
                 :image-url="keyframe.thumbnailUrl"
+                :label="finishing(keyframe) ? $t('Finishing') : undefined"
               />
+              <KeyframeScan v-if="scanning(keyframe)" :label="scanLabel()" />
               <!-- A light shade over the image, so the warning stands out. -->
               <span
-                v-if="!keyframe.rendering && issuesFor(keyframe.id)"
+                v-else-if="!keyframe.rendering && issuesFor(keyframe.id)"
                 class="absolute inset-0 bg-black/10"
                 :title="$t('The check found something here')"
               >
@@ -340,8 +355,8 @@
               </span>
               <div class="min-w-0">
                 <p class="truncate text-sm font-semibold">{{ keyframe.title }}</p>
-                <p v-if="keyframe.renderStage" class="truncate text-xs text-signal" :title="renderLabel(keyframe)">
-                  {{ renderLabel(keyframe) }}
+                <p v-if="drawing(keyframe)" class="truncate text-xs text-signal">
+                  {{ finishing(keyframe) ? $t('Finishing…') : $t('Generating image…') }}
                 </p>
                 <p v-else class="text-xs text-muted-foreground tabular-nums">{{ timeAt(i) }}</p>
               </div>
@@ -476,6 +491,7 @@ import { Button } from '@shared:ui/button'
 import { DropdownMenuItem } from '@shared:ui/dropdown-menu'
 import { NativeSelect } from '@shared:ui/native-select'
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Clapperboard,
@@ -494,6 +510,7 @@ import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
 import KeyframeInspector from './KeyframeInspector.vue'
 import { createKeyframeMover } from './keyframeMover'
 import KeyframeMover from './KeyframeMover.vue'
+import KeyframeScan from './KeyframeScan.vue'
 import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import PlanChat, { type ChatTarget, type PlanChatTurn } from './PlanChat.vue'
@@ -519,11 +536,13 @@ export type PanelKeyframe = {
   /** Moving a person by hand: picking them, and putting them down. Only on a keyframe drawn on a place. */
   moveSelectUrl?: string | null
   moveUrl?: string | null
+  /** Fitting the pose of a person moved by hand to their new spot; only after a move. */
+  moveFitUrl?: string | null
   imageUrl: string | null
   thumbnailUrl: string | null
   rendering: boolean
   /** After drawing: the image is being checked, or redrawn to fix what the check found. */
-  renderStage?: 'checking' | null
+  renderStage?: 'compositing' | 'checking' | null
   renderError: string | null
   renders: {
     id: number
@@ -598,6 +617,9 @@ const props = defineProps<{
     elementsUrl?: string
     /** What the keyframes wait for before they are drawn, such as a picture still being made. */
     waitingFor?: string | null
+    sequencePlace?: { name: string; shots: string[]; options: { id: number; imageUrl: string }[] } | null
+    sequencePlaceUrl?: string
+    sequencePlaceDrawing?: { name: string; shots: string[]; count: number } | null
   }
   keyframes: PanelKeyframe[]
   aspectRatio: string
@@ -845,17 +867,25 @@ const canArrange = computed(
     props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.destroyUrl && !keyframe.rendering),
 )
 
-/** Drawn, or still being checked after drawing, as the place check does without blocking the keyframe. */
-const busy = (keyframe: PanelKeyframe) => keyframe.rendering || keyframe.renderStage === 'checking'
+/** Being drawn, including placing its people on the place afterwards: the last stretch of the same progress. */
+const drawing = (keyframe: PanelKeyframe) => keyframe.rendering
+
+/** Drawn, and its people are being placed on the place. */
+const finishing = (keyframe: PanelKeyframe) => keyframe.rendering && keyframe.renderStage === 'compositing'
 
 /**
- * What a busy keyframe is doing, so a longer wait explains itself.
+ * Busy with a drawn image: checked on its own, or reviewed with the others in the shot review.
  */
-const renderLabel = (keyframe: PanelKeyframe) => {
-  if (keyframe.renderStage === 'checking') return $t('Checking image…')
+const scanning = (keyframe: PanelKeyframe) =>
+  Boolean(keyframe.thumbnailUrl) &&
+  !keyframe.rendering &&
+  (keyframe.renderStage === 'checking' || Boolean(props.reviewing && !props.generating))
 
-  return $t('Generating image…')
-}
+const scanLabel = () => $t('Reviewing')
+
+/** People can be moved by clicking them in a finished keyframe drawn on a place. */
+const movable = (keyframe: PanelKeyframe) =>
+  Boolean(keyframe.moveSelectUrl && keyframe.moveUrl && !keyframe.rendering && !scanning(keyframe))
 
 const isSelected = (id: string) => !showVideo.value && !adding.value && selected.value?.id === id
 

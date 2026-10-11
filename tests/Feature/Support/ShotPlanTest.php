@@ -39,3 +39,23 @@ it('puts the named people into the plan agreed in the chat', function () {
 
     expect($shot->fresh()->storylineKeyframes()[0]['elements'])->toBe(['Damen host']);
 });
+
+it('drops a person from a keyframe\'s cast when its description never names them', function () {
+    $project = Project::factory()->create();
+    Element::factory()->for($project)->create(['name' => 'Helmeted visitor', 'type' => ElementType::PERSON]);
+    Element::factory()->for($project)->create(['name' => 'Reception security', 'type' => ElementType::PERSON]);
+    Element::factory()->for($project)->create(['name' => 'Reception Security Desk', 'type' => ElementType::PLACE]);
+    $shot = Shot::factory()->for($project)->create()->load('project');
+
+    $keyframes = ShotPlan::withNamedPeople($shot, [
+        ['description' => 'At the wall beside the Reception Security Desk, the Helmeted visitor holds the handset.', 'elements' => ['Helmeted visitor', 'Reception Security Desk', 'Reception security']],
+        ['description' => 'Reception security nods to the Helmeted visitor.', 'elements' => ['Helmeted visitor', 'Reception security']],
+        ['description' => 'She hangs up.', 'elements' => ['Helmeted visitor']],
+    ]);
+
+    expect(array_column($keyframes, 'elements'))->toBe([
+        ['Helmeted visitor', 'Reception Security Desk'],
+        ['Helmeted visitor', 'Reception security'],
+        ['Helmeted visitor'],
+    ]);
+});

@@ -18,7 +18,9 @@ class PlanDirectorRequest extends FormRequest
     {
         return [
             /** What the director says to the plan director. */
-            'message' => ['required', 'string', 'max:2000'],
+            'message' => ['required_unless:continue,true', 'nullable', 'string', 'max:2000'],
+            /** Go on without a message, such as once every place of the sequence is chosen by clicking; nothing is added for the director. */
+            'continue' => ['sometimes', 'boolean'],
             /** The ids of the cast and sets the director just made from the chat; they stay shown with the message. */
             'made' => ['sometimes', 'array', 'max:8'],
             'made.*' => ['string'],

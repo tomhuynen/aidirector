@@ -57,8 +57,10 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Say what the viewer should see afterwards, for example the back of the head, an empty hand, a closed door.
             - Name what must stay exactly the same: the feet and stance unless the change needs them, the other hand, the props, the camera, the framing, the background, the lighting and the style.
             - Never ask for text: no letters, words, numbers, labels or ID details on anything, also not to make an object recognisable. An object is recognisable by its shape, colour, size and where it is; say that instead. Lettering that is already in the picture stays as it is.
+            {$this->fixedCamera()}
             - Change only what the director asked for. Do not add new ideas, such as where in the frame someone stands or a pose, unless the request needs it.
             - When someone enters, leaves or walks somewhere, show them mid-step in the direction they go, not standing still.
+            - When someone backs away from something, they still face it: body, face and feet point toward it, the back foot a step further from it with the weight on it, the front foot lifting at the heel. Say so in those words, with where the toes point, such as "both feet pointing left toward the bin"; never "moving to the right in mid-step" for someone who faces left, which an image model draws as a sideways step.
             - Write three to five short plain sentences in English, in the present tense, as a description of the edited image. No lists, no markdown.
 
             Also choose how the change is made:
@@ -107,5 +109,19 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
         $rules = $this->keyframe->shot->project->rulesBrief();
 
         return $rules === '' ? '' : "The instruction and the description never break the rules the director confirmed for this project:\n{$rules}";
+    }
+
+    /**
+     * In a scene every keyframe is drawn on the same place with a camera that
+     * does not move: a closer view of one keyframe zooms the whole picture,
+     * and the people no longer fit the place they are put on.
+     */
+    private function fixedCamera(): string
+    {
+        if ($this->keyframe->shot->drawsStandalone()) {
+            return '';
+        }
+
+        return '- The camera never moves in this shot: never change the viewpoint, zoom, crop or framing, also when the request or a check asks for a closer view or for someone seen from the knees up. To show someone larger, have them stand nearer to the camera within the place; otherwise keep the framing as it is.';
     }
 }

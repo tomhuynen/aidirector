@@ -7,12 +7,15 @@ namespace App\Jobs;
 use App\Ai\Agents\MovedPersonDescriber;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
+use App\Enums\ElementType;
 use App\Jobs\Concerns\FollowsPlan;
 use App\Jobs\Concerns\MarksRenderFailures;
+use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Support\Images\BackgroundDrift;
 use App\Support\Images\PersonCutout;
+use App\Support\Images\PlaceObjects;
 use App\Support\Media\LocalMediaFiles;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -27,12 +30,13 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
 
 /**
- * After the director moved a person in a keyframe by hand, the image model
- * redraws their pose, gaze and gesture for the new spot, on a crop around
- * them only, which is blended back in: the rest of the image cannot drift.
- * A redraw that moved the person off their spot or shifted the place is
- * drawn again. Then the description and the plan are made true to the image,
- * also when the redraw failed, and only then is the shot reviewed.
+ * After the director moved a person in a keyframe by hand, the description
+ * and the plan are made true to the image and the shot is reviewed. When the
+ * director asks to fit the person to the new spot, the image model first
+ * redraws their pose, gaze and gesture on a tight crop around them, and only
+ * the person is put back, with their feet where they were put: the rest of
+ * the image cannot drift. A redraw that moved them off their spot or shifted
+ * the place is drawn again.
  */
 #[DeleteWhenMissingModels]
 class PoseMovedPerson implements ShouldQueue
@@ -47,11 +51,13 @@ class PoseMovedPerson implements ShouldQueue
 
     /**
      * @param  array{x: float, y: float, width: float, height: float}  $box  where the person was put, as shares of the image
+     * @param  bool  $redraw  whether the pose is fitted to the new spot; otherwise only the description follows the image
      */
     public function __construct(
         public readonly Keyframe $keyframe,
         public readonly string $instruction,
         public readonly array $box,
+        public readonly bool $redraw = true,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
         $this->followPlan($this->keyframe);
@@ -61,6 +67,14 @@ class PoseMovedPerson implements ShouldQueue
     {
         $keyframe = $this->keyframe->load(['shot.project', 'media']);
         $shot = $keyframe->shot;
+
+        if (! $this->redraw) {
+            $this->describe($keyframe, $painter);
+            ReviewShot::after($shot);
+
+            return;
+        }
+
         $plate = $painter->baseFor($keyframe, $shot->keyframes()->with('media')->get()->each->setRelation('shot', $shot));
         $moved = $keyframe->render();
 
@@ -73,7 +87,7 @@ class PoseMovedPerson implements ShouldQueue
         $attempts = max(1, (int) Config::get('pipeline.keyframes.move.attempts'));
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
-            $render = $this->redrawAround($painter, $cutout, $keyframe, $moved);
+            $render = $this->redrawAround($painter, $cutout, $keyframe, $moved, $plate);
             $still = $drift->measure($plate, $render)['moved'] === false;
             $stayed = $this->stayedPut($cutout, $plate, $render);
 
@@ -113,13 +127,13 @@ class PoseMovedPerson implements ShouldQueue
     }
 
     /**
-     * The pose redrawn on a crop around the person, blended back into the moved version.
+     * The pose redrawn on a tight crop around the person; only the person is put back into the moved version.
      */
-    private function redrawAround(KeyframePainter $painter, PersonCutout $cutout, Keyframe $keyframe, Media $moved): Media
+    private function redrawAround(KeyframePainter $painter, PersonCutout $cutout, Keyframe $keyframe, Media $moved, Media $plate): Media
     {
         $files = new LocalMediaFiles();
         $image = new \Imagick($files->path($moved));
-        $crop = $cutout->cropAround($this->box, $image->getImageWidth(), $image->getImageHeight());
+        $crop = $cutout->cropAround($this->box, $image->getImageWidth(), $image->getImageHeight(), (float) Config::get('pipeline.keyframes.move.crop'));
         $image->cropImage($crop['width'], $crop['height'], $crop['x'], $crop['y']);
         $image->setImagePage(0, 0, 0, 0);
         $image->setImageFormat('png');
@@ -130,7 +144,7 @@ class PoseMovedPerson implements ShouldQueue
         try {
             $redrawn = $painter->paint(
                 $keyframe,
-                KeyframeImageBrief::tweak($this->instruction),
+                KeyframeImageBrief::tweak(trim($this->instruction . ' ' . $this->directions($keyframe, $plate, $crop, $image->getImageWidth(), $image->getImageHeight()))),
                 [ImageFile::fromStorage($stored, 'local')],
                 false,
                 (string) Config::get('pipeline.models.keyframe_edit'),
@@ -142,14 +156,80 @@ class PoseMovedPerson implements ShouldQueue
 
         $output = storage_path('app/tmp/pose-' . Str::random(12) . '.png');
         @mkdir(dirname($output), 0755, true);
-        $cutout->pasteBack($files->path($moved), $files->path($redrawn), $crop, $output);
+        $mask = $moved->getCustomProperty(Keyframe::PEOPLE_MASK);
+        $cutout->withPeople(is_string($mask) ? base64_decode($mask) : null)->pastePerson($files->path($plate), $files->path($moved), $files->path($redrawn), $crop, $this->box, $output);
         $sent = $redrawn->getCustomProperty(Keyframe::SENT);
         $redrawn->delete();
 
         return $keyframe->addMedia($output)
             ->usingFileName("keyframe-{$keyframe->position}.png")
-            ->withCustomProperties([Keyframe::SENT => $sent])
+            ->withCustomProperties([Keyframe::SENT => $sent, Keyframe::MOVED_BOX => $this->box])
             ->toMediaCollection(Keyframe::RENDERS);
+    }
+
+    /**
+     * Which way each object the instruction names lies from the person's head, in the crop's own terms, such as
+     * "the ash bin is toward the lower right of them, beyond the right edge of the image": the crop does not
+     * show the whole keyframe, so the model is told where to look instead.
+     *
+     * @param  array{x: int, y: int, width: int, height: int}  $crop
+     */
+    private function directions(Keyframe $keyframe, Media $plate, array $crop, int $width, int $height): string
+    {
+        $placeObjects = app(PlaceObjects::class);
+        $headX = ($this->box['x'] + $this->box['width'] / 2) * $width;
+        $headY = ($this->box['y'] + $this->box['height'] * 0.08) * $height;
+        $lines = [];
+
+        foreach ($keyframe->load('elements.media')->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
+            if (! str_contains(mb_strtolower($this->instruction), mb_strtolower($object->name)) || ! $placeObjects->isIn($plate, $object)) {
+                continue;
+            }
+
+            $centre = $this->centreOf($placeObjects->maskIn($plate, $object));
+
+            if ($centre === null) {
+                continue;
+            }
+
+            $dx = $centre[0] * $width - $headX;
+            $dy = $centre[1] * $height - $headY;
+            $side = $dx > 0 ? 'right' : 'left';
+            $vertical = $dy > abs($dx) * 0.4 ? 'lower ' : ($dy < -abs($dx) * 0.4 ? 'upper ' : '');
+            $x = $centre[0] * $width - $crop['x'];
+            $outside = $x > $crop['width'] || $x < 0 ? ", beyond the {$side} edge of the image" : '';
+            $lines[] = "The {$object->name} is toward the {$vertical}{$side} of them{$outside}: they turn their head and eyes that way, toward the {$vertical}{$side}.";
+        }
+
+        return $lines === [] ? '' : implode(' ', [...$lines, 'Their feet stay exactly where they are.']);
+    }
+
+    /**
+     * The centre of a white-on-black mask, as shares of its width and height.
+     *
+     * @return array{float, float}|null
+     */
+    private function centreOf(?string $mask): ?array
+    {
+        if ($mask === null) {
+            return null;
+        }
+
+        $image = new \Imagick();
+        $image->readImageBlob($mask);
+        [$w, $h] = [$image->getImageWidth(), $image->getImageHeight()];
+        $pixels = $image->exportImagePixels(0, 0, $w, $h, 'I', \Imagick::PIXEL_CHAR);
+        [$sx, $sy, $n] = [0, 0, 0];
+
+        foreach ($pixels as $i => $value) {
+            if ($value > 127) {
+                $sx += $i % $w;
+                $sy += intdiv($i, $w);
+                $n++;
+            }
+        }
+
+        return $n === 0 ? null : [($sx / $n + 0.5) / $w, ($sy / $n + 0.5) / $h];
     }
 
     /**

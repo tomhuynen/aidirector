@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Support\Decisions;
+namespace App\Support\Findings;
 
 use App\Ai\Agents\FindingsReporter;
 use App\Models\Keyframe;
@@ -136,7 +136,7 @@ class FindingsReport
     }
 
     /**
-     * A finding as plain sentences, without the "The check found:" the list of decisions puts before a check's findings.
+     * A finding as plain sentences, without the "The check found:" put before a check's findings.
      *
      * @param  array{id: string, text: string, problem: string}  $issue
      */

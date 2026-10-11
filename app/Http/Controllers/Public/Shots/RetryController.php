@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots;
 
 use App\Enums\ShotStatus;
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Jobs\GenerateKeyframeImage;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateStoryline;
@@ -18,8 +17,6 @@ use Illuminate\Validation\ValidationException;
 
 class RetryController
 {
-    use ReturnsToDecisions;
-
     /**
      * Try again what failed: the plan, the options for
      * keyframe 1 when none could be drawn, or each keyframe that failed.
@@ -46,6 +43,6 @@ class RetryController
             throw ValidationException::withMessages(['retry' => __('Nothing failed on this shot.')]);
         }
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 }

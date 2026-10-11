@@ -14,6 +14,7 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Images\Cutout;
 use App\Support\Images\PlaceComposite;
 use App\Support\Images\PlaceObjects;
 use App\Support\Shots\ShotPlan;
@@ -100,9 +101,14 @@ function fakeReplicate(): void
     Http::fake([
         'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => Http::response([
             'status' => 'succeeded',
-            'output' => $request['version'] === $people ? 'https://replicate.delivery/people.png' : 'https://replicate.delivery/thing.png',
+            'output' => match (true) {
+                $request['version'] === $people => 'https://replicate.delivery/people.png',
+                ($request['input']['text_prompt'] ?? null) === Cutout::PERSON => 'https://replicate.delivery/person.png',
+                default => 'https://replicate.delivery/thing.png',
+            },
         ]),
         'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+        'replicate.delivery/person.png' => Http::response(rectangleMask(60, 100, 80, 180)),
         'replicate.delivery/thing.png' => Http::response(rectangleMask(20, 40, 60, 200)),
     ]);
 }
@@ -183,6 +189,79 @@ it('takes only the thing that changed when the words also find another one furth
         ->and(colourAt($state, 110, 105))->toBe(colourAt(stripedPlace(), 110, 105));
 });
 
+describe('people', function () {
+    beforeEach(fn() => Config::set('services.replicate.token', 'test-token'));
+
+    it('keeps someone further back the cut-out takes for background, found by name', function () {
+        $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+        Http::fake([
+            'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => Http::response(['status' => 'succeeded', 'output' => $request['version'] === $people ? 'https://replicate.delivery/people.png' : 'https://replicate.delivery/person.png']),
+            // The cut-out keeps only the person in front.
+            'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+            // Found by name: the one in front, and also the one half hidden behind the counter.
+            'replicate.delivery/person.png' => Http::response(compositePng(function (GdImage $image) {
+                imagefilledrectangle($image, 62, 100, 78, 175, (int) imagecolorallocate($image, 255, 255, 255));
+                imagefilledrectangle($image, 100, 60, 120, 110, (int) imagecolorallocate($image, 255, 255, 255));
+            })),
+        ]);
+
+        $mask = app(Cutout::class)->people(stripedPlace());
+
+        expect(colourAt($mask, 70, 140))->toBe([255, 255, 255])
+            ->and(colourAt($mask, 110, 80))->toBe([255, 255, 255])
+            ->and(colourAt($mask, 20, 20))->toBe([0, 0, 0]);
+        Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === Cutout::PERSON);
+    });
+
+    it('leaves out a large object the cut-out takes for the front, such as a bin, and keeps the whole person', function () {
+        $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+        Http::fake([
+            'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => Http::response(['status' => 'succeeded', 'output' => $request['version'] === $people ? 'https://replicate.delivery/people.png' : 'https://replicate.delivery/person.png']),
+            // The cut-out keeps the person with the bag she carries, and the bin in the foreground.
+            'replicate.delivery/people.png' => Http::response(compositePng(function (GdImage $image) {
+                $white = (int) imagecolorallocatealpha($image, 255, 255, 255, 0);
+                imagefilledrectangle($image, 30, 100, 50, 180, $white);
+                imagefilledrectangle($image, 50, 150, 60, 165, $white);
+                imagefilledrectangle($image, 90, 170, 130, 230, $white);
+            }, alpha: true)),
+            // Found by name: only the person, without the bag.
+            'replicate.delivery/person.png' => Http::response(rectangleMask(30, 100, 50, 180)),
+        ]);
+
+        $mask = app(Cutout::class)->people(stripedPlace());
+
+        expect(colourAt($mask, 40, 140))->toBe([255, 255, 255])
+            ->and(colourAt($mask, 56, 158))->toBe([255, 255, 255])
+            ->and(colourAt($mask, 110, 200))->toBe([0, 0, 0]);
+    });
+
+    it('keeps the whole cut-out when nobody is found by name', function () {
+        $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+        Http::fake([
+            'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => Http::response(['status' => 'succeeded', 'output' => $request['version'] === $people ? 'https://replicate.delivery/people.png' : 'https://replicate.delivery/person.png']),
+            'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+            'replicate.delivery/person.png' => Http::response(compositePng(fn(GdImage $image) => null)),
+        ]);
+
+        expect(colourAt(app(Cutout::class)->people(stripedPlace()), 70, 140))->toBe([255, 255, 255]);
+    });
+
+    it('keeps the people in front when finding them by name fails', function () {
+        $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+        Http::fake([
+            'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => $request['version'] === $people
+                ? Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/people.png'])
+                : Http::response(['detail' => 'Invalid version'], 422),
+            'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+        ]);
+
+        $mask = app(Cutout::class)->people(stripedPlace());
+
+        expect(colourAt($mask, 70, 140))->toBe([255, 255, 255])
+            ->and(colourAt($mask, 110, 80))->toBe([0, 0, 0]);
+    });
+});
+
 describe('painter', function () {
     beforeEach(function () {
         Config::set('pipeline.keyframes.composite.enabled', true);
@@ -247,8 +326,8 @@ describe('painter', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('He lifts the phone.') && $prompt->attachments->first()->path === $state->getPathRelativeToRoot());
         Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'door');
         // The phone is looked for once, in the place, by common words; it is touched, so it comes from the drawing.
-        // Each a prediction and its download: the door in the place before and after, the people of keyframes 2 and 3, the phone once.
-        Http::assertSentCount(2 * (2 + 2 + 1));
+        // Each a prediction and its download: the door in the place before and after, the people of keyframes 2 and 3 both cut out and found by name, the phone once.
+        Http::assertSentCount(2 * (2 + 2 * 2 + 1));
         Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'red wall phone');
         Http::assertNotSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'Wall phone');
         expect($phone->fresh()->detection_words)->toBe(['red wall phone', 'telephone'])
@@ -316,6 +395,33 @@ describe('painter', function () {
         expect($render)->not->toBeNull()
             ->and($render->getCustomProperty(Keyframe::COMPOSITED))->toBeNull();
     });
+
+    it('shows that the people are being placed while they are cut out, and clears it afterwards', function () {
+        Config::set('pipeline.keyframes.drift.enabled', false);
+        Config::set('pipeline.keyframe_check', false);
+        Image::fake(fn() => base64_encode(stripedPlace(3)));
+
+        $shot = Shot::factory()->for($this->project)->create([
+            'status' => ShotStatus::KEYFRAMES_PENDING,
+            'storyline' => ['keyframes' => [['title' => 'One', 'description' => 'He waits.'], ['title' => 'Two', 'description' => 'He waves.']]],
+        ]);
+        $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+        Keyframe::factory()->for($shot)->create(['position' => 1]);
+        $second = Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'He waves.']);
+        $stages = [];
+        Http::fake(function () use ($second, &$stages) {
+            $stages[] = Keyframe::query()->whereKey($second->id)->value('render_stage');
+
+            return Http::response(['detail' => 'Invalid version'], 422);
+        });
+
+        (new GenerateRemainingKeyframes($shot, elementsDrawn: true))->handle(app(KeyframePainter::class));
+
+        expect($stages)->not->toBeEmpty()
+            ->and(array_unique($stages))->toBe([Keyframe::STAGE_COMPOSITING])
+            ->and($second->fresh()->render_stage)->toBeNull()
+            ->and($second->fresh()->rendering)->toBeFalse();
+    });
 });
 
 describe('objects', function () {
@@ -378,4 +484,130 @@ describe('planner', function () {
         expect($shot->fresh()->storylineKeyframes()[1])->toMatchArray(['place_change' => 'The door is closed.', 'place_part' => 'door'])
             ->and($shot->fresh()->storylineKeyframes()[0])->not->toHaveKey('place_change');
     });
+});
+
+it('skips an object that is only carried into the place, instead of finding something that looks like it', function () {
+    Config::set('pipeline.keyframes.composite.enabled', true);
+    Config::set('services.replicate.token', 'test-token');
+    $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+    Http::fake([
+        'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => Http::response(['status' => 'succeeded', 'output' => match (true) {
+            $request['version'] === $people => 'https://replicate.delivery/people.png',
+            ($request['input']['text_prompt'] ?? null) === Cutout::PERSON => 'https://replicate.delivery/person.png',
+            default => 'https://replicate.delivery/thing.png',
+        }]),
+        'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+        'replicate.delivery/person.png' => Http::response(rectangleMask(60, 100, 80, 180)),
+        // The look-alike the finder would come up with, right beside the person.
+        'replicate.delivery/thing.png' => Http::response(rectangleMask(82, 120, 100, 140)),
+    ]);
+    App\Ai\Agents\ObjectInPlaceJudge::fake(fn() => ['present' => false]);
+    DetectionWordsWriter::fake(fn() => ['words' => ['clear badge holder']]);
+    Image::fake(fn() => base64_encode(stripedPlace(3)));
+    Config::set('pipeline.keyframes.drift.enabled', false);
+
+    $shot = Shot::factory()->for($this->project)->create([
+        'status' => ShotStatus::KEYFRAMES_PENDING,
+        'storyline' => ['keyframes' => [['title' => 'One', 'description' => 'He waits.'], ['title' => 'Two', 'description' => 'He holds up the badge holder.']]],
+    ]);
+    $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+    Keyframe::factory()->for($shot)->create(['position' => 1]);
+    $second = Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'He holds up the badge holder.']);
+    $holder = Element::factory()->object()->for($this->project)->create(['name' => 'Broken badge holder']);
+    $holder->addMediaFromString(stripedPlace())->usingFileName('holder.png')->toMediaCollection(Element::REFERENCE);
+    $second->elements()->attach($holder);
+
+    (new GenerateRemainingKeyframes($shot, elementsDrawn: true))->handle(app(KeyframePainter::class));
+
+    $place = $shot->getFirstMedia(Shot::PLATE);
+
+    // Put onto the place with only the person; the finder was never asked and the answer is kept on the place.
+    expect($second->fresh()->render()->getCustomProperty(Keyframe::COMPOSITED))->toBeTrue()
+        ->and($place->getCustomProperty(PlaceObjects::PRESENT))->toBe([(string) $holder->id => false])
+        ->and($place->getCustomProperty(PlaceObjects::MASKS))->toBeNull();
+    Http::assertNotSent(fn(HttpRequest $request) => isset($request['input']['text_prompt']) && $request['input']['text_prompt'] !== Cutout::PERSON);
+    App\Ai\Agents\ObjectInPlaceJudge::assertPrompted(fn($prompt) => count($prompt->attachments) === 2 && str_contains($prompt->prompt, 'Is Broken badge holder in the place?'));
+});
+
+it('keeps an object of the place that someone only stands in front of, and takes it from the drawing when the plan says it is handled', function (array $handled, bool $searched) {
+    Config::set('pipeline.keyframes.composite.enabled', true);
+    Config::set('services.replicate.token', 'test-token');
+    Config::set('pipeline.keyframes.drift.enabled', false);
+    $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+    Http::fake([
+        'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => Http::response(['status' => 'succeeded', 'output' => $request['version'] === $people ? 'https://replicate.delivery/people.png' : 'https://replicate.delivery/thing.png']),
+        'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+        // The bin, right behind the person's legs.
+        'replicate.delivery/thing.png' => Http::response(rectangleMask(55, 150, 85, 190)),
+    ]);
+    App\Ai\Agents\ObjectInPlaceJudge::fake(fn() => ['present' => true]);
+    DetectionWordsWriter::fake(fn() => ['words' => ['waste bin']]);
+    Image::fake(fn() => base64_encode(stripedPlace(3)));
+
+    $shot = Shot::factory()->for($this->project)->create([
+        'status' => ShotStatus::KEYFRAMES_PENDING,
+        'storyline' => ['keyframes' => [
+            ['title' => 'One', 'description' => 'She waits.', 'handled' => []],
+            ['title' => 'Two', 'description' => 'She walks past the Burning waste bin.', 'handled' => $handled],
+        ]],
+    ]);
+    $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+    Keyframe::factory()->for($shot)->create(['position' => 1]);
+    $second = Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'She walks past the Burning waste bin.']);
+    $bin = Element::factory()->object()->for($this->project)->create(['name' => 'Burning waste bin']);
+    $bin->addMediaFromString(stripedPlace())->usingFileName('bin.png')->toMediaCollection(Element::REFERENCE);
+    $second->elements()->attach($bin);
+
+    (new GenerateRemainingKeyframes($shot, elementsDrawn: true))->handle(app(KeyframePainter::class));
+
+    expect($second->fresh()->render()->getCustomProperty(Keyframe::COMPOSITED))->toBeTrue();
+    $searched
+        ? Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'waste bin')
+        : Http::assertNotSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'waste bin');
+})->with([
+    'only in front of it' => [[], false],
+    'handled' => [['Burning waste bin'], true],
+]);
+
+it('finds something handled that is not in the place, such as a helicopter flying in, in the drawing itself', function () {
+    Config::set('pipeline.keyframes.composite.enabled', true);
+    Config::set('services.replicate.token', 'test-token');
+    Config::set('pipeline.keyframes.drift.enabled', false);
+    $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+    Http::fake([
+        'api.replicate.com/v1/predictions' => fn(HttpRequest $request) => Http::response(['status' => 'succeeded', 'output' => $request['version'] === $people ? 'https://replicate.delivery/people.png' : 'https://replicate.delivery/thing.png']),
+        'replicate.delivery/people.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+        'replicate.delivery/thing.png' => Http::response(rectangleMask(20, 20, 70, 50)),
+    ]);
+    App\Ai\Agents\ObjectInPlaceJudge::fake(fn() => ['present' => false]);
+    DetectionWordsWriter::fake(fn() => ['words' => ['grey helicopter']]);
+    Image::fake(fn() => base64_encode(stripedPlace(3)));
+
+    $shot = Shot::factory()->for($this->project)->create([
+        'status' => ShotStatus::KEYFRAMES_PENDING,
+        'storyline' => ['keyframes' => [
+            ['title' => 'Far', 'description' => 'The Site helicopter is small over the sea.', 'handled' => ['Site helicopter']],
+            ['title' => 'Near', 'description' => 'The Site helicopter hovers above the landing circle.', 'handled' => ['Site helicopter']],
+        ]],
+    ]);
+    $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+    Keyframe::factory()->for($shot)->create(['position' => 1]);
+    $second = Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'The Site helicopter hovers above the landing circle.']);
+    $helicopter = Element::factory()->object()->for($this->project)->create(['name' => 'Site helicopter']);
+    $helicopter->addMediaFromString(stripedPlace())->usingFileName('helicopter.png')->toMediaCollection(Element::REFERENCE);
+    $second->elements()->attach($helicopter);
+
+    (new GenerateRemainingKeyframes($shot, elementsDrawn: true))->handle(app(KeyframePainter::class));
+
+    expect($second->fresh()->render()->getCustomProperty(Keyframe::COMPOSITED))->toBeTrue()
+        // Not searched in the place, which does not have it: only in the drawing, and not kept on the place.
+        ->and($shot->getFirstMedia(Shot::PLATE)->getCustomProperty(PlaceObjects::MASKS))->toBeNull();
+    Http::assertSent(fn(HttpRequest $request) => ($request['input']['text_prompt'] ?? null) === 'grey helicopter');
+});
+
+it('keeps things that move out of the empty place and has the plan mark them as handled', function () {
+    $shot = Shot::factory()->for($this->project)->create(['storyline' => ['keyframes' => [['title' => 'Far', 'description' => 'The helicopter is small over the sea.']]]])->load('project');
+
+    expect(App\Ai\Briefs\KeyframeImageBrief::plate($shot, new App\Ai\KeyframeReferences(), 0))->toContain('anything that moves during the shot, such as a vehicle, a helicopter, a forklift or a hanging load, also when step 1 shows it')
+        ->and((string) (new StorylineWriter($shot))->instructions())->toContain('and the things that move by themselves, such as a helicopter, a vehicle or a hanging load: those are handled in every keyframe they are in, keyframe 1 too');
 });

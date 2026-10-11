@@ -1,31 +1,23 @@
 <template>
-  <!-- An image revealed from left to right while it is made: grey and dim where it is not done yet. -->
+  <!-- While an image is made: an area that grows from left to right, over the current image blurred when there is one. -->
   <span
     v-if="visible"
-    :class="cn('absolute inset-0 overflow-hidden transition-opacity duration-300', fading && 'opacity-0')"
+    :class="cn('absolute inset-0 overflow-hidden bg-background transition-opacity duration-300', fading && 'opacity-0')"
     role="progressbar"
     :aria-valuenow="percent"
     aria-valuemin="0"
     aria-valuemax="100"
   >
-    <template v-if="imageUrl">
-      <img
-        :src="imageUrl"
-        alt=""
-        draggable="false"
-        class="absolute inset-0 size-full object-cover opacity-35 grayscale"
-      />
-      <img
-        :src="imageUrl"
-        alt=""
-        draggable="false"
-        :class="cn('absolute inset-0 size-full object-cover transition-[clip-path]', motion)"
-        :style="{ clipPath: `inset(0 ${100 - percent}% 0 0)` }"
-      />
-    </template>
+    <!-- The current image, blurred: it is being made again, so it only stands in until the new one is there. -->
+    <img
+      v-if="imageUrl"
+      :src="imageUrl"
+      alt=""
+      draggable="false"
+      class="absolute inset-0 size-full scale-105 object-cover opacity-60 blur-[3px]"
+    />
     <span
-      v-else
-      :class="cn('absolute inset-y-0 left-0 bg-signal/15 transition-[width]', motion)"
+      :class="cn('absolute inset-y-0 left-0 bg-signal/20 transition-[width]', motion)"
       :style="{ width: `${percent}%` }"
     />
     <span
@@ -33,9 +25,10 @@
       :style="{ left: `calc(${percent}% - 1px)` }"
     />
     <span
+      v-if="!compact"
       class="absolute right-1.5 bottom-1.5 rounded-full bg-background/70 px-1.5 py-0.5 text-[11px] font-semibold text-signal tabular-nums backdrop-blur-sm"
     >
-      {{ percent }}%
+      <template v-if="label">{{ label }} · </template>{{ percent }}%
     </span>
   </span>
 </template>
@@ -57,8 +50,12 @@ const props = defineProps<{
   seconds: number
   /** When the server says the render started, as an ISO date. */
   startedAt?: string | null
-  /** The image revealed; without one a plain bar fills up. */
+  /** The current image, shown blurred behind the progress. */
   imageUrl?: string | null
+  /** For a small thumbnail: only the reveal, without the percentage. */
+  compact?: boolean
+  /** The last step, such as "Finishing", shown before the percentage. */
+  label?: string
 }>()
 
 const progress = useRenderProgress(

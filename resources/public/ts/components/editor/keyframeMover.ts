@@ -5,65 +5,72 @@ import { computed, reactive } from 'vue'
 
 export type MoverBox = { x: number; y: number; width: number; height: number }
 
-/** Where the horizon roughly lies in these keyframes, as a share of the height; people shrink towards it. */
-const HORIZON = 0.42
+/** How far each part of the place is from the camera, on a small grid; only ratios between depths are used. */
+export type MoverDepth = { width: number; height: number; values: number[] }
+
+/** A drag shorter than this, as a share of the image, is a click, not a move. */
+const MIN_MOVE = 0.01
 
 /**
- * Moving a person in a keyframe by hand. The image shows the person and
- * takes the click and the drag; the column on the right shows the controls.
- * Both share this state, which lives in the panel, so it is reset after the
- * move is sent or cancelled even when the image is no longer shown.
+ * Moving a person in a keyframe by hand: click them in the image, drag them,
+ * and let go to put them down. The size follows the depth of the place while
+ * dragging; the server hides them behind what stands in front of them.
+ * The state lives in the panel, so it is reset when another keyframe is shown.
  */
 export function createKeyframeMover() {
   const state = reactive({
-    active: false,
     selectUrl: '',
     moveUrl: '',
-    picked: null as { box: MoverBox; overlay: string; cutout: string; x: number; y: number } | null,
+    picked: null as {
+      box: MoverBox
+      overlay: string
+      cutout: string
+      x: number
+      y: number
+      depth: MoverDepth | null
+    } | null,
     offset: { dx: 0, dy: 0 },
-    factor: 1,
-    instruction: '',
     selecting: false,
     applying: false,
     error: null as string | null,
   })
 
-  /** Larger closer to the camera, smaller further back, times the director's own correction. */
+  const depthAt = (depth: MoverDepth, x: number, y: number) => {
+    const column = Math.min(depth.width - 1, Math.max(0, Math.floor(x * depth.width)))
+    const row = Math.min(depth.height - 1, Math.max(0, Math.floor(y * depth.height)))
+
+    return depth.values[row * depth.width + column]
+  }
+
+  /** Larger closer to the camera, smaller further back: the depth at the old feet over the depth at the new feet. */
   const scale = computed(() => {
-    if (!state.picked) return 1
+    const picked = state.picked
 
-    const feet = state.picked.box.y + state.picked.box.height
-    const depth = feet > HORIZON + 0.02 ? (feet + state.offset.dy - HORIZON) / (feet - HORIZON) : 1
+    if (!picked?.depth) return 1
 
-    return Math.min(3, Math.max(0.3, Math.min(2.5, Math.max(0.4, depth)) * state.factor))
+    const feetX = picked.box.x + picked.box.width / 2
+    const feetY = Math.min(0.999, picked.box.y + picked.box.height)
+    const from = depthAt(picked.depth, feetX, feetY)
+    const to = depthAt(picked.depth, feetX + state.offset.dx, Math.min(0.999, feetY + state.offset.dy))
+
+    return to > 0 ? Math.min(3, Math.max(0.3, from / to)) : 1
   })
 
   const reset = () =>
-    Object.assign(state, {
-      active: false,
-      picked: null,
-      offset: { dx: 0, dy: 0 },
-      factor: 1,
-      instruction: '',
-      selecting: false,
-      applying: false,
-      error: null,
-    })
-
-  const start = (selectUrl: string, moveUrl: string) => {
-    reset()
-    Object.assign(state, { active: true, selectUrl, moveUrl })
-  }
+    Object.assign(state, { picked: null, offset: { dx: 0, dy: 0 }, selecting: false, applying: false, error: null })
 
   /** Finds the person at a point given as shares of the image width and height. */
-  const pick = async (point: { x: number; y: number }) => {
-    if (!state.active || state.picked || state.selecting) return
+  const pick = async (urls: { selectUrl: string; moveUrl: string }, point: { x: number; y: number }) => {
+    if (state.selecting || state.applying) return
 
-    state.selecting = true
-    state.error = null
+    reset()
+    Object.assign(state, { ...urls, selecting: true })
 
     try {
-      const found = await postJson<{ box: MoverBox; overlay: string; cutout: string }>(state.selectUrl, point)
+      const found = await postJson<{ box: MoverBox; overlay: string; cutout: string; depth: MoverDepth | null }>(
+        state.selectUrl,
+        point,
+      )
       state.picked = { ...found, ...point }
     } catch (caught) {
       state.error = caught instanceof PostJsonError ? caught.message : $t('The person could not be found. Try again.')
@@ -72,20 +79,14 @@ export function createKeyframeMover() {
     }
   }
 
-  const apply = () => {
-    if (!state.picked) return
+  /** Puts the person down where they were dragged; a click without a drag only keeps them selected. */
+  const drop = () => {
+    if (!state.picked || Math.hypot(state.offset.dx, state.offset.dy) < MIN_MOVE) return
 
     state.applying = true
     router.post(
       state.moveUrl,
-      {
-        x: state.picked.x,
-        y: state.picked.y,
-        dx: state.offset.dx,
-        dy: state.offset.dy,
-        scale: scale.value,
-        instruction: state.instruction,
-      },
+      { x: state.picked.x, y: state.picked.y, dx: state.offset.dx, dy: state.offset.dy, scale: scale.value },
       {
         preserveScroll: true,
         onSuccess: reset,
@@ -97,12 +98,10 @@ export function createKeyframeMover() {
     )
   }
 
-  const setFactor = (factor: number) => (state.factor = factor)
-  const setInstruction = (instruction: string) => (state.instruction = instruction)
   /** Moves the person's feet by shares of the image width and height. */
   const moveBy = (dx: number, dy: number) => (state.offset = { dx, dy })
 
-  return { state, scale, start, cancel: reset, pick, apply, setFactor, setInstruction, moveBy }
+  return { state, scale, pick, drop, cancel: reset, moveBy }
 }
 
 export type KeyframeMoverState = ReturnType<typeof createKeyframeMover>

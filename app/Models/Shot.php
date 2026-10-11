@@ -15,6 +15,7 @@ use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateVoiceOverAudio;
 use App\Jobs\RetimeShot;
 use App\Jobs\ReviewShot;
+use App\Support\Shots\SequencePlaces;
 use Closure;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -24,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\URL;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
@@ -53,6 +55,12 @@ class Shot extends Model implements HasMedia
 
     /** Empty places drawn from the whole plan, for the director to choose the one every keyframe is drawn on. */
     public const PLATE_OPTIONS = 'plate_options';
+
+    /** On the first shot of a sequence: the empty places to choose from for the places the sequence plays in, each with its place key. */
+    public const SEQUENCE_PLACE_OPTIONS = 'sequence_place_options';
+
+    /** On the first shot of a sequence: the chosen place of each place the sequence plays in, with its place key. */
+    public const SEQUENCE_PLACES = 'sequence_places';
 
     /** On the plate: it was chosen from the options, so it is the base of every keyframe. */
     public const PLATE_CHOSEN = 'chosen';
@@ -213,6 +221,31 @@ class Shot extends Model implements HasMedia
     }
 
     /**
+     * The plan chat as the director sees it: without the plan director's own
+     * check against the director rules, which is only kept for looking back,
+     * and with the picture of a place of the sequence chosen in it.
+     *
+     * @param  array<int, array<string, mixed>>  $turns
+     * @return list<array<string, mixed>>
+     */
+    public static function shownPlanChat(array $turns, ?self $shot = null): array
+    {
+        $chosen = $shot?->getMedia(self::SEQUENCE_PLACES)->keyBy('id');
+
+        return array_values(array_map(function (array $turn) use ($chosen): array {
+            $place = $turn['chosen_place'] ?? null;
+            $media = is_array($place) ? $chosen?->get((int) ($place['media'] ?? 0)) : null;
+            $shown = Arr::except($turn, ['rules_check', 'chosen_place']);
+
+            // A place of the sequence chosen here stays visible in the conversation.
+            return $media === null ? $shown : [...$shown, 'chosenPlace' => [
+                'name' => (string) $place['name'],
+                'imageUrl' => URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $media]),
+            ]];
+        }, $turns));
+    }
+
+    /**
      * The changes the director made to the empty place through the chat, each
      * from a keyframe on, such as a door handle taken away for the whole shot.
      *
@@ -282,7 +315,9 @@ class Shot extends Model implements HasMedia
      *
      * Older plans also carry a `prompt`: an image instruction no longer written or used; the description goes to the image model.
      *
-     * @return list<array{title: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, copied?: bool}>
+     * `handled` lists the objects someone changes in that keyframe; plans from before it was asked for have none.
+     *
+     * @return list<array{title: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, handled?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
@@ -366,10 +401,15 @@ class Shot extends Model implements HasMedia
         if (is_array($chosen)) {
             $source = isset($chosen['shot_id']) ? self::query()->where('project_id', $this->project_id)->whereKey($chosen['shot_id'])->first() : null;
 
-            return $source === null || $source->is($this) ? null : ['shot' => $source, 'keyframe' => max(self::LAST_KEYFRAME, (int) ($chosen['keyframe'] ?? 0)), 'chosen' => true];
+            if ($source === null || $source->is($this) || $this->placeOfCloseUp($source) !== null) {
+                return null;
+            }
+
+            return ['shot' => $source, 'keyframe' => max(self::LAST_KEYFRAME, (int) ($chosen['keyframe'] ?? 0)), 'chosen' => true];
         }
 
-        $previous = $this->kindOrScene() === ShotKind::CLOSE_UP && $this->group_key !== null ? $this->previousShot() : null;
+        // A shot that plays in a place chosen for its sequence takes that place, not the end of the shot before.
+        $previous = $this->kindOrScene() === ShotKind::CLOSE_UP && $this->group_key !== null && $this->sequencePlaceKey() === null ? $this->previousShot() : null;
 
         return $previous !== null && $previous->group_key === $this->group_key
             ? ['shot' => $previous, 'keyframe' => self::LAST_KEYFRAME, 'chosen' => false]
@@ -386,7 +426,7 @@ class Shot extends Model implements HasMedia
         $from = $this->settingFrom();
 
         if ($from === null) {
-            return null;
+            return app(SequencePlaces::class)->waitsFor($this);
         }
 
         $source = $from['shot'];
@@ -407,6 +447,12 @@ class Shot extends Model implements HasMedia
     public function inheritedPlate(): ?Media
     {
         $from = $this->settingFrom();
+
+        // A full scene in a place chosen for its sequence plays in that place as it is: it was drawn at that size. A shot of another part of it, or from another side, draws its own view.
+        if ($from === null && $this->kindOrScene()->usesPlace() && $this->shotSize() === ShotSize::FULL && $this->sequenceView() === null) {
+            // Something left there by the shot before, such as a landed helicopter, is not in the chosen picture: the shot draws its own place.
+            return app(SequencePlaces::class)->of($this)['left'] ?? null ? null : app(SequencePlaces::class)->chosenFor($this);
+        }
 
         if ($from === null || $from['keyframe'] !== 0 || ! $this->kindOrScene()->usesPlace()) {
             return null;
@@ -490,6 +536,63 @@ class Shot extends Model implements HasMedia
             'montage_clips' => null,
             'reviewing' => false,
         ])->save();
+    }
+
+    /**
+     * The place of its sequence this shot plays in, as agreed when the
+     * sequence was planned; null when it has its own or continues a shot.
+     */
+    public function sequencePlaceKey(): ?string
+    {
+        $key = trim((string) ($this->storyline['sequence_place'] ?? ''));
+
+        if ($key !== '') {
+            return $key;
+        }
+
+        $from = $this->storyline['setting_from']['shot_id'] ?? null;
+        $source = $from === null ? null : self::query()->where('project_id', $this->project_id)->whereKey($from)->first();
+
+        return $source === null ? null : $this->placeOfCloseUp($source);
+    }
+
+    /**
+     * The place of the sequence a wider shot plays in when it would take its
+     * setting from a close-up: a close-up shows only a part of the place, so
+     * the rest would be made up and no longer match the other shots there.
+     * Null when this shot is a close-up itself or the close-up has no place.
+     */
+    private function placeOfCloseUp(self $source): ?string
+    {
+        if ($this->kindOrScene() === ShotKind::CLOSE_UP || $source->kindOrScene() !== ShotKind::CLOSE_UP) {
+            return null;
+        }
+
+        $key = trim((string) ($source->storyline['sequence_place'] ?? ''));
+
+        return $key === '' ? null : $key;
+    }
+
+    /**
+     * Which part of the place of its sequence this shot shows and from where,
+     * with where the danger or goal is, as agreed when the sequence was planned.
+     */
+    public function sequenceView(): ?string
+    {
+        $view = trim((string) ($this->storyline['sequence_view'] ?? ''));
+
+        return $view === '' ? null : $view;
+    }
+
+    /**
+     * Who and what this shot shows, as agreed when its sequence was planned,
+     * by the names in the cast and sets.
+     *
+     * @return list<string>
+     */
+    public function sequenceCast(): array
+    {
+        return array_values(array_filter(array_map(fn(mixed $name) => trim((string) $name), (array) ($this->storyline['sequence_cast'] ?? [])), fn(string $name) => $name !== ''));
     }
 
     /**
@@ -742,6 +845,8 @@ class Shot extends Model implements HasMedia
         $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::PLATE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PLATE_OPTIONS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::SEQUENCE_PLACE_OPTIONS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::SEQUENCE_PLACES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PLACE_STATES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);

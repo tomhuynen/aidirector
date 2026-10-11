@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Support\Decisions;
+namespace App\Support\Findings;
 
 use App\Ai\KeyframePainter;
 use App\Jobs\GenerateKeyframeImage;
@@ -277,7 +277,7 @@ class ShotIssues
      * @param  string|null  $only  only this finding, instead of all of the group's
      * @param  bool  $record  whether to keep the director's verdict; once per finding
      */
-    private function resolve(Shot $shot, Collection $keyframes, array $group, string $verdict, string $via = ReviewerVerdict::VIA_DECISIONS, ?string $only = null, bool $record = true): void
+    private function resolve(Shot $shot, Collection $keyframes, array $group, string $verdict, string $via = ReviewerVerdict::VIA_SHOT, ?string $only = null, bool $record = true): void
     {
         $position = $group['position'];
         $resolved = [];

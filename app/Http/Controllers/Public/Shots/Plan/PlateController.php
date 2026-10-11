@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Plan;
 
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Http\Requests\Public\PlateAdjustRequest;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
@@ -17,8 +16,6 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 class PlateController
 {
-    use ReturnsToDecisions;
-
     /**
      * Choose the empty place the shot starts from, and draw keyframe 1 on it.
      */
@@ -30,7 +27,7 @@ class PlateController
 
         $choice->choosePlace($shot, $this->option($shot, $request->integer('plate')));
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -43,7 +40,7 @@ class PlateController
 
         $choice->adjust($shot, $this->option($shot, $request->integer('plate')), (string) $request->validated('instruction'));
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -55,7 +52,7 @@ class PlateController
 
         $choice->anotherPlace($shot);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     private function option(Shot $shot, int $id): Media

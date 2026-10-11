@@ -58,18 +58,30 @@
     <p v-if="moveWarning" class="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
       {{ moveWarning }}
     </p>
-    <KeyframeMoverControls v-if="mover?.state.active" :mover="mover" />
-    <Button
-      v-else-if="keyframe.moveUrl"
-      type="button"
-      variant="outline"
-      class="w-full"
-      :disabled="!canTweak"
-      @click="emit('move')"
+    <!-- After a person was moved by hand: fit their pose, gaze and gesture to the new spot, only when asked. -->
+    <form
+      v-if="keyframe.moveFitUrl"
+      class="space-y-3 rounded-lg border border-signal/40 bg-signal-soft/30 p-4 text-sm"
+      @submit.prevent="fitMoved"
     >
-      <Move class="size-4" />
-      {{ $t('Move a person') }}
-    </Button>
+      <p class="font-semibold">{{ $t('Fit the moved person to the spot') }}</p>
+      <div class="space-y-1.5">
+        <Label for="fit-instruction">{{ $t('What they do from there') }}</Label>
+        <Textarea
+          id="fit-instruction"
+          v-model="fit.instruction"
+          rows="2"
+          maxlength="500"
+          :placeholder="$t('For example: looks at the ash bin. Empty: as the description says.')"
+        />
+        <InputError :message="fit.errors.instruction" />
+      </div>
+      <Button type="submit" variant="outline" class="w-full" :disabled="fit.processing || !canTweak">
+        <LoaderCircle v-if="fit.processing" class="size-4 animate-spin" />
+        <Move v-else class="size-4" />
+        {{ $t('Fit to the spot') }}
+      </Button>
+    </form>
 
     <form class="space-y-3" @submit.prevent="applyChange">
       <div class="space-y-1.5">
@@ -256,8 +268,6 @@ import { Textarea } from '@shared:ui/textarea'
 import { Copy, LoaderCircle, Move, RefreshCw, Trash2, TriangleAlert, Wand2 } from 'lucide-vue-next'
 import { computed, watch } from 'vue'
 
-import type { KeyframeMoverState } from './keyframeMover'
-import KeyframeMoverControls from './KeyframeMoverControls.vue'
 import type { PanelIssueGroup, PanelKeyframe } from './KeyframesPanel.vue'
 
 const props = defineProps<{
@@ -268,11 +278,15 @@ const props = defineProps<{
   canCopy: boolean
   /** What the checks found wrong with this keyframe, with how to fix or dismiss it. */
   issues?: PanelIssueGroup | null
-  /** Moving a person on the image; its controls show here while it is active. */
-  mover?: KeyframeMoverState
 }>()
 
-const emit = defineEmits<{ move: [] }>()
+const fit = useForm({ instruction: '' })
+
+const fitMoved = () => {
+  if (!props.keyframe.moveFitUrl) return
+
+  fit.post(props.keyframe.moveFitUrl, { preserveScroll: true, onSuccess: () => fit.reset() })
+}
 
 const hasRender = computed(() => props.keyframe.renders.length > 0)
 
@@ -285,7 +299,7 @@ const adjustment = computed(() => {
     : null
 })
 const busyLabel = computed(() => {
-  if (props.keyframe.renderStage === 'checking') return $t('Checking the image…')
+  if (props.keyframe.renderStage === 'compositing') return $t('Finishing…')
 
   return $t('Generating image…')
 })

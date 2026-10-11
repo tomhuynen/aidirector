@@ -12,6 +12,7 @@ use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Shots\FirstKeyframeChoice;
+use App\Support\Shots\PlanToPlace;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
@@ -46,9 +47,16 @@ class GenerateRemainingKeyframes implements ShouldQueue
         $this->followPlan($this->shot);
     }
 
-    public function handle(KeyframePainter $painter): void
+    public function handle(KeyframePainter $painter, ?PlanToPlace $planToPlace = null): void
     {
         $shot = $this->shot->load('project');
+
+        // Keyframe 1 on the chosen place: the plan is first matched to where things stand in it.
+        if ($this->onlyFirst && Config::get('pipeline.keyframes.align_plan') && ($chosen = $painter->chosenPlate($shot)) !== null) {
+            ($planToPlace ?? app(PlanToPlace::class))->align($shot, $chosen);
+            $shot->refresh();
+        }
+
         $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
         $first = $siblings->first();
         $plate = $painter->chosenPlate($shot);

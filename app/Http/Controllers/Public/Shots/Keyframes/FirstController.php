@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Http\Requests\Public\FirstKeyframeAdjustRequest;
 use App\Http\Requests\Public\KeyframeRenderRequest;
 use App\Models\Policies\Public\ShotPolicy;
@@ -21,8 +20,6 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
  */
 class FirstController
 {
-    use ReturnsToDecisions;
-
     /**
      * Choose an option for keyframe 1 and render the other keyframes from it.
      */
@@ -33,7 +30,7 @@ class FirstController
         $choice->ensureChoosing($shot, 'render');
         $choice->useFirst($shot, $this->render($shot, $request->integer('render')));
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -45,7 +42,7 @@ class FirstController
 
         $choice->more($shot);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -59,7 +56,7 @@ class FirstController
         $choice->ensureChoosing($shot, 'instruction');
         $choice->adjust($shot, $this->render($shot, $request->integer('render')), (string) $request->validated('instruction'), $request->boolean('rewrite'));
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     private function render(Shot $shot, int $id): Media

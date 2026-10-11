@@ -7,6 +7,7 @@ use App\Enums\Disk;
 use App\Enums\ShotStatus;
 use App\Jobs\AdjustPlateOption;
 use App\Jobs\ChangePlace;
+use App\Jobs\GenerateKeyframeImage;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
 use App\Jobs\TweakKeyframeImage;
@@ -259,6 +260,83 @@ it('starts the plan over when a new plan is agreed for a drawn shot', function (
     Bus::assertDispatched(GenerateKeyframes::class);
 });
 
+/**
+ * The plan of a drawn shot proposed again, with `$keyframes` and `$extra` merged into the proposal.
+ *
+ * @param  list<array<string, mixed>>  $keyframes
+ * @param  array<string, mixed>  $extra
+ * @return array<string, mixed>
+ */
+function drawnShotProposal(array $keyframes, array $extra = []): array
+{
+    return [
+        'takeaway' => '', 'kind' => 'scene', 'storyline' => 'The visitor walks on.', 'seconds' => 4, 'setting_from' => null, 'start_over' => false,
+        'keyframes' => array_map(fn(array $keyframe) => [...$keyframe, 'spatial' => '', 'elements' => []], $keyframes),
+        ...$extra,
+    ];
+}
+
+it('keeps the drawn keyframes that stay the same and draws only the new one when a keyframe is added', function () {
+    $shot = drawnShot($this->project);
+    $shot->forceFill(['kind' => 'scene'])->save();
+    $renders = $shot->keyframes()->orderBy('position')->pluck('render_id')->all();
+    PlanDirector::fake([imagesReply(['reply' => 'I add a keyframe where he has left.', 'proposal' => drawnShotProposal([
+        ...$shot->storylineKeyframes(),
+        ['title' => 'Gone', 'description' => 'The gate is empty.'],
+    ])])]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'add a keyframe where he has left the frame'])
+        ->assertOk()
+        ->assertJsonPath('messages.3.changes', ['Keyframes 1 to 3 kept as drawn', 'Keyframe 4 added']);
+
+    $shot->refresh();
+    $keyframes = $shot->keyframes()->orderBy('position')->get();
+
+    expect($shot->plan_version)->toBe(0)
+        ->and($shot->status)->toBe(ShotStatus::KEYFRAMES_READY)
+        ->and($keyframes->take(3)->pluck('render_id')->all())->toBe($renders)
+        ->and($keyframes[3]->title)->toBe('Gone')
+        ->and($keyframes[3]->rendering)->toBeTrue();
+    Bus::assertChained([fn(GenerateKeyframeImage $job) => $job->keyframe->is($keyframes[3])]);
+    Bus::assertNotDispatched(GenerateKeyframes::class);
+});
+
+it('draws a changed keyframe again and removes the ones the new plan leaves out', function () {
+    $shot = drawnShot($this->project);
+    $shot->forceFill(['kind' => 'scene'])->save();
+    [$first] = $shot->storylineKeyframes();
+    $render = $shot->keyframes()->where('position', 1)->value('render_id');
+    PlanDirector::fake([imagesReply(['proposal' => drawnShotProposal([$first, ['title' => 'Badge up', 'description' => 'The visitor holds the badge up high.']])])]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'make it two keyframes, the badge held up high'])
+        ->assertOk()
+        ->assertJsonPath('messages.3.changes', ['Keyframe 1 kept as drawn', 'Keyframe 2 drawn again', 'Keyframe 3 removed']);
+
+    $keyframes = $shot->keyframes()->orderBy('position')->get();
+
+    expect($keyframes)->toHaveCount(2)
+        ->and($keyframes[0]->render_id)->toBe($render)
+        ->and($keyframes[1]->description)->toBe('The visitor holds the badge up high.')
+        ->and($keyframes[1]->rendering)->toBeTrue();
+    Bus::assertChained([fn(GenerateKeyframeImage $job) => $job->keyframe->is($keyframes[1])]);
+});
+
+it('starts over when the director asks for it, even when keyframe 1 stays the same', function () {
+    $shot = drawnShot($this->project);
+    $shot->forceFill(['kind' => 'scene'])->save();
+    PlanDirector::fake([imagesReply(['proposal' => drawnShotProposal($shot->storylineKeyframes(), ['storyline' => 'The visitor walks on, slower.', 'start_over' => true])])]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'start all over'])
+        ->assertOk();
+
+    expect($shot->fresh()->plan_version)->toBe(1);
+    Bus::assertDispatched(GenerateKeyframes::class);
+    Bus::assertNotDispatched(GenerateKeyframeImage::class);
+});
+
 it('keeps what is drawn when the same plan is given again, such as for "draw the others"', function () {
     $shot = drawnShot($this->project);
     $shot->forceFill(['kind' => 'scene', 'chosen_storyline' => ['title' => 'Gate', 'storyline' => 'The visitor walks on.']])->save();
@@ -354,4 +432,20 @@ it('asks the plan director again when the AI provider answers with a rate limit'
 
     expect($attempts)->toBe(2);
     Illuminate\Support\Sleep::assertSleptTimes(1);
+});
+
+it('keeps the plan director\'s check against the rules on its turn, without showing it', function () {
+    $shot = drawnShot($this->project);
+    PlanDirector::fake([imagesReply(['reply' => 'The permit is too small to read here.', 'rules_check' => ['places' => 'the gate', 'must_read' => 'the parking permit behind the windscreen', 'rules' => [4], 'story' => 'none']])]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'can you see the permit?'])
+        ->assertOk()
+        ->assertJsonMissingPath('messages.3.rules_check');
+
+    expect($shot->fresh()->plan_chat[3]['rules_check'])->toEqual(['places' => 'the gate', 'must_read' => 'the parking permit behind the windscreen', 'rules' => [4], 'story' => 'none', 'sequence' => []]);
+
+    actingAs($this->director, 'director')
+        ->get(route('public.shots.view', [$this->project, $shot]))
+        ->assertInertia(fn($page) => $page->where('shot.planChat.3.text', 'The permit is too small to read here.')->missing('shot.planChat.3.rules_check'));
 });

@@ -1,8 +1,7 @@
 <template>
   <div class="flex min-w-0 flex-1">
     <aside class="flex w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto border-r border-border p-6">
-      <div class="flex items-start justify-between gap-4">
-        <h2 class="text-2xl leading-tight font-semibold text-balance">{{ title }}</h2>
+      <div class="flex flex-col items-start gap-4">
         <ConfirmDelete
           :action="merge.links.unmerge"
           :title="$t('Unmerge this shot?')"
@@ -20,6 +19,7 @@
             </Button>
           </template>
         </ConfirmDelete>
+        <h2 class="text-2xl leading-tight font-semibold text-balance">{{ title }}</h2>
       </div>
 
       <section class="space-y-3">

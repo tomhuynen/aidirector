@@ -4,17 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots;
 
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Support\Decisions\ShotIssues;
+use App\Support\Findings\ShotIssues;
 use Illuminate\Support\Facades\Gate;
 
 class IssueController
 {
-    use ReturnsToDecisions;
-
     /**
      * Redraw a keyframe, told what the checks found wrong with it.
      */
@@ -24,7 +21,7 @@ class IssueController
 
         $issues->fix($shot, $group);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -36,7 +33,7 @@ class IssueController
 
         $issues->fixAll($shot);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -48,7 +45,7 @@ class IssueController
 
         $issues->dismissAll($shot);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -60,6 +57,6 @@ class IssueController
 
         $issues->dismiss($shot, $group);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 }

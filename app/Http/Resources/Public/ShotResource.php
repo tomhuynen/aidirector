@@ -11,8 +11,9 @@ use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateVoiceOver;
 use App\Models\Keyframe;
 use App\Models\Shot;
-use App\Support\Decisions\ShotIssues;
+use App\Support\Findings\ShotIssues;
 use App\Support\Shots\RenderEstimates;
+use App\Support\Shots\SequencePlaces;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -158,15 +159,27 @@ class ShotResource extends JsonResource
             /**
              * The conversation about the plan: the director's messages and the plan director's replies, some with the plan they wrote into the shot.
              *
-             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}}>
+             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}, chosenPlace?: array{name: string, imageUrl: string}}>
              */
-            'planChat' => array_values((array) ($this->plan_chat ?? [])),
+            'planChat' => Shot::shownPlanChat((array) ($this->plan_chat ?? []), $this->resource),
             /**
              * What the keyframes wait for before they are drawn, such as "the place of SH100", once drawing was asked for.
              *
              * @var string|null
              */
             'waitingFor' => $this->resource->waitsToDraw() ? $this->resource->waitsFor() : null,
+            /**
+             * The place of the sequence waiting to be chosen in this chat, with its options, while the sequence's places are chosen.
+             *
+             * @var array{name: string, shots: array<int, string>, options: array<int, array{id: int, imageUrl: string}>}|null
+             */
+            'sequencePlace' => $this->sequencePlace(),
+            /**
+             * The place of the sequence being drawn in this chat, shown while it waits.
+             *
+             * @var array{name: string, shots: array<int, string>, count: int}|null
+             */
+            'sequencePlaceDrawing' => $this->resource->exists ? app(SequencePlaces::class)->drawingPlace($this->resource) : null,
             'createdAt' => $this->created_at,
             'links' => $this->when($this->resource->exists, fn() => [
                 'view' => route('public.shots.view', [$this->project, $this->resource]),
@@ -182,6 +195,7 @@ class ShotResource extends JsonResource
                 'plateChoose' => route('public.shots.plate.choose', [$this->project, $this->resource]),
                 'plateReset' => route('public.shots.plate.reset', [$this->project, $this->resource]),
                 'plateAdjust' => route('public.shots.plate.adjust', [$this->project, $this->resource]),
+                'sequencePlaceChoose' => route('public.shots.sequence-places.choose', [$this->project, $this->resource]),
                 'issuesFixAll' => route('public.shots.issues.fix-all', [$this->project, $this->resource]),
                 'issuesDismissAll' => route('public.shots.issues.dismiss-all', [$this->project, $this->resource]),
                 'voiceOver' => route('public.shots.voice-over', [$this->project, $this->resource]),
@@ -299,4 +313,17 @@ class ShotResource extends JsonResource
         return URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $media]);
     }
 
+    /**
+     * @return array{name: string, shots: array<int, string>, options: array<int, array{id: int, imageUrl: string}>}|null
+     */
+    private function sequencePlace(): ?array
+    {
+        $waiting = $this->resource->exists ? app(SequencePlaces::class)->waiting($this->resource) : null;
+
+        return $waiting === null ? null : [
+            'name' => $waiting['place']['name'],
+            'shots' => $waiting['place']['shots'],
+            'options' => $waiting['options']->map(fn(Media $media) => ['id' => $media->id, 'imageUrl' => (string) $this->mediaUrl($media)])->values()->all(),
+        ];
+    }
 }
