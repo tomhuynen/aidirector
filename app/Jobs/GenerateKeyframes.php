@@ -58,6 +58,8 @@ class GenerateKeyframes implements ShouldQueue
 
         // A shot with its own view of the place of its sequence: what its camera sees is written out first, so its place or keyframe 1 is drawn from there.
         app(SequencePlaces::class)->writeCameraBrief($shot);
+        // A shot that cuts in on a keyframe of the shot before, such as a close-up at a window: what its own camera sees is written out first too.
+        app(KeyframePainter::class)->writeCutInBrief($shot);
         $shot->refresh();
 
         $shotId = $shot->id;

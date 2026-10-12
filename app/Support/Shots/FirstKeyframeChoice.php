@@ -7,6 +7,7 @@ namespace App\Support\Shots;
 use App\Ai\KeyframePainter;
 use App\Enums\ShotStatus;
 use App\Jobs\AdjustPlateOption;
+use App\Jobs\EmptyPlace;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
 use App\Jobs\MeasurePlaceDepth;
@@ -80,8 +81,9 @@ class FirstKeyframeChoice
 
         $plate = $option->copy($shot, Shot::PLATE);
         $plate->setCustomProperty(Shot::PLATE_CHOSEN, true)->setCustomProperty('option', $option->id)->save();
-        // Measured now, so a person can be moved in its keyframes straight away later.
+        // Measured and emptied of its named things now, so a person or a thing can be moved in its keyframes straight away later.
         MeasurePlaceDepth::dispatch($plate);
+        EmptyPlace::dispatch($shot, $plate);
 
         GenerateRemainingKeyframes::startOnPlate($shot, $this->painter);
 

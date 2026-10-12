@@ -37,6 +37,9 @@ class PlaceObjects
     /** A mask covering more than this share of the place is not one object. */
     private const float MAX_SHARE = 0.35;
 
+    /** In a drawing, something that moves can come close to the camera, such as a helicopter landing in front of it: only a mask covering more than this is surely not one thing. */
+    private const float MAX_SHARE_IN_DRAWING = 0.8;
+
     public function __construct(private readonly Cutout $cutout) {}
 
     /**
@@ -66,7 +69,7 @@ class PlaceObjects
      */
     public function maskInDrawing(string $drawn, Element $element): ?string
     {
-        return $this->find($drawn, $this->wordsFor($element));
+        return $this->find($drawn, $this->wordsFor($element), self::MAX_SHARE_IN_DRAWING);
     }
 
     /**
@@ -146,21 +149,23 @@ class PlaceObjects
      *
      * @param  list<string>  $words
      */
-    private function find(string $image, array $words): ?string
+    private function find(string $image, array $words, float $maxShare = self::MAX_SHARE): ?string
     {
         foreach ($words as $word) {
             try {
                 $mask = $this->cutout->thing($image, $word);
             } catch (Throwable $exception) {
-                // The finder fails when nothing matches the words well enough.
-                report($exception);
+                // The finder fails when nothing matches the words well enough, which is an answer, not an error.
+                if (! Cutout::foundNothing($exception)) {
+                    report($exception);
+                }
 
                 continue;
             }
 
             $share = $this->share($mask);
 
-            if ($share > 0.0005 && $share < self::MAX_SHARE) {
+            if ($share > 0.0005 && $share < $maxShare) {
                 return $mask;
             }
         }
@@ -183,11 +188,6 @@ class PlaceObjects
 
     private function shrink(string $mask): string
     {
-        $image = new Imagick();
-        $image->readImageBlob($mask);
-        $image->resizeImage(self::MASK_WIDTH, (int) max(1, round(self::MASK_WIDTH * $image->getImageHeight() / $image->getImageWidth())), Imagick::FILTER_TRIANGLE, 1);
-        $image->setImageFormat('png');
-
-        return $image->getImageBlob();
+        return Masks::small(Masks::grey($mask), self::MASK_WIDTH);
     }
 }

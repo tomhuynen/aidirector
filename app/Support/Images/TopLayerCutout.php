@@ -4,21 +4,24 @@ declare(strict_types=1);
 
 namespace App\Support\Images;
 
+use Closure;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
 use Imagick;
 use ImagickDraw;
+use ImagickKernel;
 use ImagickPixel;
 use Throwable;
 
 /**
- * Lifts a person out of a keyframe drawn on a place, without a model: what
- * differs from the empty place is what was added, it falls apart into
- * separate shapes, and the shape the director clicks is the person, shadow
- * included. Moving puts the empty place back where the person stood and the
- * person down at the new spot.
+ * Lifts a person or a thing out of the top layer of a keyframe drawn on a
+ * place: the mask of what lies on top, made the way the composite makes it,
+ * falls apart into separate shapes, and the shape the director clicks is the
+ * one that moves, a person's shadow included. Moving puts the empty place
+ * back where it stood and it down at the new spot. Without a mask, what
+ * differs from the empty place counts as added.
  */
-class PersonCutout
+class TopLayerCutout
 {
     /** Width of the small copy the shapes are found on; the height follows the image. */
     private const int SMALL = 216;
@@ -41,6 +44,9 @@ class PersonCutout
     /** Shapes smaller than this share of the image are noise. */
     private const float MIN_AREA = 0.0015;
 
+    /** How far to either side of a person, in their widths, a shadow they leave on the floor is looked for. */
+    private const float SHADOW_REACH = 0.75;
+
     /** How far from a shape a click may land, in small pixels. */
     private const int REACH = 6;
 
@@ -49,40 +55,102 @@ class PersonCutout
 
     private const int SOLID = 48;
 
-    /** The width a people mask is kept at on a version; fine enough for hair and fingers once scaled up and softened. */
+    /** The width a top-layer mask is kept at on a version; fine enough for hair and fingers once scaled up and softened. */
     private const int MASK_WIDTH = 432;
 
-    /** The people in the image as found by the cut-out model, white on black; without it, what differs from the place counts. */
-    private ?string $peopleMask = null;
+    /** What lies on top of the place, people and things, white on black; without it, what differs from the place counts. */
+    private ?string $topLayerMask = null;
 
-    /** After a move with a people mask: the mask of the moved image. */
-    private ?string $movedPeople = null;
+    /** After a move with a top-layer mask: the mask of the moved image. */
+    private ?string $movedTopLayer = null;
 
-    public function __construct(private readonly Cutout $cutout) {}
+    /** Of what lies on top, the things, such as a helicopter flying in, white on black; a shape mostly in it is a thing, not a person. */
+    private ?string $thingsMask = null;
+
+    /** After a move with a things mask: the things mask of the moved image. */
+    private ?string $movedThings = null;
+
+    /** Whether the last move moved a thing rather than a person. */
+    private bool $movedThing = false;
+
+    /**
+     * The whole cut-outs of what was moved by hand before on this image, also the parts outside the frame.
+     *
+     * @var list<array{image: string, box: array{x: float, y: float, width: float, height: float}, thing: bool}>
+     */
+    private array $layers = [];
+
+    /** @var array{image: string, box: array{x: float, y: float, width: float, height: float}, thing: bool}|null after a move: the whole cut-out of what moved, where it lies now */
+    private ?array $movedLayer = null;
+
+    /** After a move: which of the layers it picked up, if any. */
+    private ?int $usedLayer = null;
+
+    /** Finds what can be moved in a redrawn image; without it, what differs from the place counts there. @var (Closure(string): string)|null */
+    private ?Closure $finder = null;
 
     /**
      * The same, finding people in the given mask instead of by what differs from the place: shoes and dark
      * trousers on a floor of nearly their colour then come along whole.
      */
-    public function withPeople(?string $mask): static
+    public function withTopLayer(?string $mask): static
     {
         $copy = clone $this;
-        $copy->peopleMask = $mask;
+        $copy->topLayerMask = $mask;
 
         return $copy;
     }
 
     /**
-     * The people in an image from the cut-out model, kept small, or null when it cannot be had.
+     * The same, picking up the whole cut-out of what was moved by hand before, also the part outside the frame,
+     * instead of cutting it out of the image again.
+     *
+     * @param  list<array{image: string, box: array{x: float, y: float, width: float, height: float}, thing: bool}>  $layers
      */
-    public function findPeople(string $image): ?string
+    public function withLayers(array $layers): static
     {
-        if (! ReplicateClient::configured()) {
+        $copy = clone $this;
+        $copy->layers = $layers;
+
+        return $copy;
+    }
+
+    /**
+     * The same, knowing which of what lies on top are things: those are moved without a shadow on the floor.
+     */
+    public function withThings(?string $mask): static
+    {
+        $copy = clone $this;
+        $copy->thingsMask = $mask;
+
+        return $copy;
+    }
+
+    /**
+     * The same, finding what can be moved in an image redrawn after a move with the given finder, which
+     * makes the mask the same way the composite does.
+     *
+     * @param  Closure(string): string  $finder  from the path of an image to its mask
+     */
+    public function withFinder(Closure $finder): static
+    {
+        $copy = clone $this;
+        $copy->finder = $finder;
+
+        return $copy;
+    }
+
+    /**
+     * What can be moved in an image, by the finder; null without one or when it fails, and then what differs from the place counts.
+     */
+    private function findIn(string $image): ?string
+    {
+        if ($this->finder === null) {
             return null;
         }
 
         try {
-            return self::keptSmall($this->cutout->people((string) file_get_contents($image)));
+            return ($this->finder)($image);
         } catch (Throwable $exception) {
             report($exception);
 
@@ -91,27 +159,29 @@ class PersonCutout
     }
 
     /**
-     * A people mask made small enough to keep on a version.
+     * A top-layer mask made small enough to keep on a version.
+     *
+     * @param  list<string>  $also  masks of what else came from the drawing, joined into it
      */
-    public static function keptSmall(string $mask): string
+    public static function keptSmall(string $mask, array $also = []): string
     {
-        $image = new Imagick();
-        $image->readImageBlob($mask);
-        $image->setImageAlphaChannel(Imagick::ALPHACHANNEL_REMOVE);
-        $image->transformImageColorspace(Imagick::COLORSPACE_GRAY);
-        $image->resizeImage(self::MASK_WIDTH, (int) round(self::MASK_WIDTH * $image->getImageHeight() / max(1, $image->getImageWidth())), Imagick::FILTER_TRIANGLE, 1);
-        $image->setImageFormat('png');
+        $image = Masks::grey($mask);
 
-        return $image->getImageBlob();
+        // What else came from the drawing in this keyframe, such as a helicopter flying in or a phone lifted off its hook, can be moved like a person.
+        return Masks::small(Masks::union([$image, ...array_map(fn(string $area) => Masks::grey($area), $also)]), self::MASK_WIDTH);
     }
 
     /**
      * The shape at a point given as a share of the width and height, or null when nothing was added there.
      *
-     * @return array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}}|null
+     * @return array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing: bool, layer?: int}|null
      */
     public function select(string $plate, string $render, float $x, float $y): ?array
     {
+        if (($layer = $this->layerAt($render, $x, $y)) !== null) {
+            return $layer;
+        }
+
         [$width, $height, $added] = $this->added($plate, $render);
         $labels = $this->label($added, $width, $height);
         $label = $this->labelAt($labels, $width, $height, (int) round($x * ($width - 1)), (int) round($y * ($height - 1)));
@@ -140,17 +210,100 @@ class PersonCutout
         return [
             'box' => ['x' => $left / $width, 'y' => $top / $height, 'width' => ($right - $left + 1) / $width, 'height' => ($bottom - $top + 1) / $height],
             'small' => ['width' => $width, 'height' => $height, 'shape' => $shape],
+            'thing' => $this->isThing($shape, $width, $height),
         ];
+    }
+
+    /**
+     * The layer at a point, as a shape: its whole box, also outside the frame, and the part of it in the frame.
+     *
+     * @return array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing: bool, layer: int}|null
+     */
+    private function layerAt(string $render, float $x, float $y): ?array
+    {
+        foreach ($this->layers as $index => $layer) {
+            $box = $layer['box'];
+
+            if ($x < $box['x'] || $y < $box['y'] || $x > $box['x'] + $box['width'] || $y > $box['y'] + $box['height']) {
+                continue;
+            }
+
+            $alpha = $this->alphaOf($layer['image']);
+            $px = (int) floor(($x - $box['x']) / $box['width'] * ($alpha->getImageWidth() - 1));
+            $py = (int) floor(($y - $box['y']) / $box['height'] * ($alpha->getImageHeight() - 1));
+
+            if ($alpha->getImagePixelColor($px, $py)->getColorValue(Imagick::COLOR_RED) < 0.5) {
+                continue;
+            }
+
+            $size = new Imagick();
+            $size->pingImage($render);
+            $width = self::SMALL;
+            $height = max(1, (int) round(self::SMALL * $size->getImageHeight() / max(1, $size->getImageWidth())));
+            $alpha->resizeImage(max(1, (int) round($box['width'] * $width)), max(1, (int) round($box['height'] * $height)), Imagick::FILTER_TRIANGLE, 1);
+            $small = Masks::black($width, $height);
+            $small->compositeImage($alpha, Imagick::COMPOSITE_COPY, (int) round($box['x'] * $width), (int) round($box['y'] * $height));
+            $shape = array_map(fn(int $value) => $value > 127, $small->exportImagePixels(0, 0, $width, $height, 'I', Imagick::PIXEL_CHAR));
+
+            return ['box' => $box, 'small' => ['width' => $width, 'height' => $height, 'shape' => $shape], 'thing' => $layer['thing'], 'layer' => $index];
+        }
+
+        return null;
+    }
+
+    /**
+     * How opaque a cut-out is, as grey: white where it is solid.
+     */
+    private function alphaOf(string $image): Imagick
+    {
+        $alpha = new Imagick();
+        $alpha->readImageBlob($image);
+        $alpha->setImageAlphaChannel(Imagick::ALPHACHANNEL_EXTRACT);
+        $alpha->transformImageColorspace(Imagick::COLORSPACE_GRAY);
+
+        return $alpha;
+    }
+
+    /**
+     * Whether a shape is mostly a thing, such as a helicopter, rather than a person with what they hold.
+     *
+     * @param  list<bool>  $shape
+     */
+    private function isThing(array $shape, int $width, int $height): bool
+    {
+        if ($this->thingsMask === null) {
+            return false;
+        }
+
+        $things = $this->maskAt($width, $height, $this->thingsMask)->exportImagePixels(0, 0, $width, $height, 'I', Imagick::PIXEL_CHAR);
+        $inside = array_keys(array_filter($shape));
+        $onThing = count(array_filter($inside, fn(int $index) => $things[$index] > 127));
+
+        return $inside !== [] && $onThing * 2 > count($inside);
     }
 
     /**
      * The shape as a translucent overlay and as a cut-out, both cropped to its box, as data URLs for the editor.
      *
-     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}}  $shape
+     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing?: bool, layer?: int}  $shape
      * @return array{overlay: string, cutout: string}
      */
     public function previews(string $plate, string $render, array $shape): array
     {
+        // A layer is shown whole, also what lies outside the frame, so it can be dragged back in.
+        if (isset($shape['layer'])) {
+            $cutout = new Imagick();
+            $cutout->readImageBlob($this->layers[$shape['layer']]['image']);
+            $overlay = new Imagick();
+            $overlay->newImage($cutout->getImageWidth(), $cutout->getImageHeight(), new ImagickPixel('rgb(154,140,255)'));
+            $alpha = $this->alphaOf($this->layers[$shape['layer']]['image']);
+            $alpha->evaluateImage(Imagick::EVALUATE_MULTIPLY, 0.5);
+            $overlay->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+            $overlay->compositeImage($alpha, Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+
+            return ['overlay' => $this->dataUrl($overlay), 'cutout' => $this->dataUrl($cutout)];
+        }
+
         $image = new Imagick($render);
         [$x, $y, $w, $h] = $this->pixels($shape['box'], $image->getImageWidth(), $image->getImageHeight());
         $matte = $this->matte($this->placeAt($plate, $image->getImageWidth(), $image->getImageHeight()), $image, $shape);
@@ -191,19 +344,32 @@ class PersonCutout
         $image = new Imagick($render);
         [$width, $height] = [$image->getImageWidth(), $image->getImageHeight()];
         $place = $this->placeAt($plate, $width, $height);
-        [$bx, $by, $bw, $bh] = $this->pixels($shape['box'], $width, $height);
 
-        $matte = $this->matte($place, $image, $shape);
-        $cutout = clone $image;
-        $cutout->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
-        $cutout->compositeImage($matte, Imagick::COMPOSITE_COPYOPACITY, 0, 0);
-        $cutout->cropImage($bw, $bh, $bx, $by);
-        $cutout->setImagePage(0, 0, 0, 0);
+        if (isset($shape['layer'])) {
+            // Picked up whole, as it was put down before, also what lies outside the frame.
+            $cutout = new Imagick();
+            $cutout->readImageBlob($this->layers[$shape['layer']]['image']);
+            [$bw, $bh] = [$cutout->getImageWidth(), $cutout->getImageHeight()];
+            [$bx, $by] = [(int) round($shape['box']['x'] * $width), (int) round($shape['box']['y'] * $height)];
+            $piece = $this->alphaOf($this->layers[$shape['layer']]['image']);
+        } else {
+            [$bx, $by, $bw, $bh] = $this->pixels($shape['box'], $width, $height);
+            $matte = $this->matte($place, $image, $shape);
+            $cutout = clone $image;
+            $cutout->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+            $cutout->compositeImage($matte, Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+            $cutout->cropImage($bw, $bh, $bx, $by);
+            $cutout->setImagePage(0, 0, 0, 0);
+            $piece = clone $matte;
+            $piece->setImageAlphaChannel(Imagick::ALPHACHANNEL_OFF);
+            $piece->cropImage($bw, $bh, $bx, $by);
+            $piece->setImagePage(0, 0, 0, 0);
+        }
 
-        // Where the person stood, the empty place shows again, a little wider than them so no trace of the shadow stays.
+        // Where the person stood, the empty place shows again, a little wider than them, and their shadow with it.
         $hole = clone $place;
         $hole->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
-        $hole->compositeImage($this->fillMask($shape, $width, $height), Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+        $hole->compositeImage($this->holeMask($place, $image, $shape, $width, $height), Imagick::COMPOSITE_COPYOPACITY, 0, 0);
         $image->compositeImage($hole, Imagick::COMPOSITE_OVER, 0, 0);
 
         $scaledWidth = max(1, (int) round($bw * $scale));
@@ -214,46 +380,95 @@ class PersonCutout
         $feetY = $by + $bh + $dy * $height;
         $left = (int) round($feetX - $scaledWidth / 2);
         $top = (int) round($feetY - $scaledHeight);
+        // Kept whole, before anything in front hides part of it and before the frame cuts it off.
+        $whole = clone $cutout;
+        $whole->setImageFormat('png');
+
         if ($depth !== null) {
             $this->hideBehind($cutout, $depth, $left, $top, $width, $height, $depth->at($feetX / $width, min(0.999, $feetY / $height)));
         }
 
-        // The person's own shadow stayed behind with the place; a soft one goes under the feet at the new spot.
-        $this->contactShadow($image, $feetX, $feetY - $scaledHeight * 0.02, $scaledWidth * 0.6);
+        // The person's own shadow stayed behind with the place; a soft one goes under the feet at the new spot. A thing may fly or hang, so it gets none.
+        if (! $shape['thing']) {
+            $this->contactShadow($image, $feetX, $feetY - $scaledHeight * 0.02, $scaledWidth * 0.6);
+        }
+
         $image->compositeImage($cutout, Imagick::COMPOSITE_OVER, $left, $top);
         $image->setImageFormat('png');
         $image->writeImage($output);
-        $this->movedPeople = $this->peopleMask === null ? null : $this->movedMask($shape, $matte, [$bx, $by, $bw, $bh], [$left, $top, $scaledWidth, $scaledHeight], $width, $height);
+        $this->movedTopLayer = $this->topLayerMask === null ? null : $this->movedMask($this->topLayerMask, true, $shape, $piece, [$left, $top, $scaledWidth, $scaledHeight], $width, $height);
+        $this->movedThing = $shape['thing'];
+        $this->movedThings = $this->thingsMask === null ? null : $this->movedMask($this->thingsMask, $shape['thing'], $shape, $piece, [$left, $top, $scaledWidth, $scaledHeight], $width, $height);
+        $this->movedLayer = ['image' => $whole->getImageBlob(), 'box' => ['x' => $left / $width, 'y' => $top / $height, 'width' => $scaledWidth / $width, 'height' => $scaledHeight / $height], 'thing' => $shape['thing']];
+        $this->usedLayer = $shape['layer'] ?? null;
 
         return ['x' => $left / $width, 'y' => $top / $height, 'width' => $scaledWidth / $width, 'height' => $scaledHeight / $height];
     }
 
     /**
-     * The people mask of the image the last move made: the person taken out where they stood and put in where they
-     * were put, so the next click finds them without the cut-out model.
+     * The top-layer mask of the image the last move made: what moved taken out where it stood and put in where it
+     * was put, so the next click finds it without the cut-out model.
      */
-    public function movedPeople(): ?string
+    public function movedTopLayer(): ?string
     {
-        return $this->movedPeople;
+        return $this->movedTopLayer;
     }
 
     /**
-     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}}  $shape
-     * @param  array{int, int, int, int}  $from  where the person was: left, top, width, height
-     * @param  array{int, int, int, int}  $to  where they were put
+     * The whole cut-out of what the last move moved, where it lies now, also outside the frame.
+     *
+     * @return array{image: string, box: array{x: float, y: float, width: float, height: float}, thing: bool}|null
      */
-    private function movedMask(array $shape, Imagick $matte, array $from, array $to, int $width, int $height): string
+    public function movedLayer(): ?array
     {
-        $mask = $this->maskAt($width, $height);
+        return $this->movedLayer;
+    }
+
+    /**
+     * Which of the layers the last move picked up, if any: it is replaced by the moved one.
+     */
+    public function usedLayer(): ?int
+    {
+        return $this->usedLayer;
+    }
+
+    /**
+     * Whether the last move moved a thing, such as a helicopter, rather than a person.
+     */
+    public function movedThing(): bool
+    {
+        return $this->movedThing;
+    }
+
+    /**
+     * The things mask of the image the last move made, the same way.
+     */
+    public function movedThings(): ?string
+    {
+        return $this->movedThings;
+    }
+
+    /**
+     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing?: bool}  $shape
+     * @param  bool  $putDown  whether what was moved belongs in this mask at its new spot
+     * @param  Imagick  $piece  how solid what was moved is, grey, at its own size
+     * @param  array{int, int, int, int}  $to  where it was put: left, top, width, height
+     */
+    private function movedMask(string $source, bool $putDown, array $shape, Imagick $piece, array $to, int $width, int $height): string
+    {
+        $mask = $this->maskAt($width, $height, $source);
         $gone = $this->fillMask($shape, $width, $height);
         $gone->negateImage(false);
         $mask->compositeImage($gone, Imagick::COMPOSITE_MULTIPLY, 0, 0);
 
-        // The person's own matte, moved and scaled as they were.
-        $person = clone $matte;
-        $person->setImageAlphaChannel(Imagick::ALPHACHANNEL_OFF);
-        $person->cropImage($from[2], $from[3], $from[0], $from[1]);
-        $person->setImagePage(0, 0, 0, 0);
+        if (! $putDown) {
+            $mask->setImageFormat('png');
+
+            return self::keptSmall($mask->getImageBlob());
+        }
+
+        // Its own matte, moved and scaled as it was.
+        $person = clone $piece;
         $person->resizeImage(max(1, $to[2]), max(1, $to[3]), Imagick::FILTER_TRIANGLE, 1);
         $mask->compositeImage($person, Imagick::COMPOSITE_LIGHTEN, $to[0], $to[1]);
         $mask->setImageFormat('png');
@@ -347,7 +562,7 @@ class PersonCutout
         try {
             $centre = [$box['x'] + $box['width'] / 2, $box['y'] + $box['height'] * 0.6];
             $before = $this->select($plate, $moved, ...$centre);
-            $redrawnCutout = $this->peopleMask !== null ? $this->withPeople($this->findPeople($redrawnPath)) : $this;
+            $redrawnCutout = $this->topLayerMask !== null ? $this->withTopLayer($this->findIn($redrawnPath)) : $this;
             $after = $redrawnCutout->select($plate, $redrawnPath, ...$centre);
 
             if ($before === null || $after === null) {
@@ -361,7 +576,7 @@ class PersonCutout
             // Where the person stood before the redraw, the place shows again.
             $hole = clone $place;
             $hole->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
-            $hole->compositeImage($this->fillMask($before, $width, $height), Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+            $hole->compositeImage($this->holeMask($place, $image, $before, $width, $height), Imagick::COMPOSITE_COPYOPACITY, 0, 0);
             $image->compositeImage($hole, Imagick::COMPOSITE_OVER, 0, 0);
 
             // The redrawn person alone, moved so their feet land where they were put.
@@ -419,7 +634,7 @@ class PersonCutout
         $image = new Imagick($render);
         $height = max(1, (int) round(self::SMALL * $image->getImageHeight() / max(1, $image->getImageWidth())));
 
-        if ($this->peopleMask !== null) {
+        if ($this->topLayerMask !== null) {
             $mask = $this->maskAt(self::SMALL, $height);
             $pixels = $mask->exportImagePixels(0, 0, self::SMALL, $height, 'I', Imagick::PIXEL_CHAR);
 
@@ -506,43 +721,22 @@ class PersonCutout
     private function label(array $added, int $width, int $height): array
     {
         $labels = array_fill(0, $width * $height, 0);
-        $next = 0;
         $minimum = (int) ceil(self::MIN_AREA * $width * $height);
+        $next = 0;
 
-        foreach ($added as $start => $on) {
-            if (! $on || $labels[$start] !== 0) {
+        foreach (Masks::parts($added, $width, $height) as $part) {
+            if (count($part) < $minimum) {
                 continue;
             }
 
             $next++;
-            $queue = [$start];
-            $labels[$start] = $next;
-            $members = [];
 
-            while ($queue !== []) {
-                $index = array_pop($queue);
-                $members[] = $index;
-                $px = $index % $width;
-                $py = intdiv($index, $width);
-
-                foreach ([[$px - 1, $py], [$px + 1, $py], [$px, $py - 1], [$px, $py + 1]] as [$nx, $ny]) {
-                    $neighbour = $ny * $width + $nx;
-
-                    if ($nx >= 0 && $ny >= 0 && $nx < $width && $ny < $height && $added[$neighbour] && $labels[$neighbour] === 0) {
-                        $labels[$neighbour] = $next;
-                        $queue[] = $neighbour;
-                    }
-                }
-            }
-
-            if (count($members) < $minimum) {
-                foreach ($members as $index) {
-                    $labels[$index] = -1;
-                }
+            foreach ($part as $index) {
+                $labels[$index] = $next;
             }
         }
 
-        return array_map(fn(int $label) => max(0, $label), $labels);
+        return $labels;
     }
 
     /**
@@ -572,7 +766,7 @@ class PersonCutout
      * from the place, so floor around them falls away and soft edges stay soft. The core of the shape stays
      * solid, so a person the colour of the floor behind them gets no holes.
      *
-     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}}  $shape
+     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing?: bool}  $shape
      */
     private function matte(Imagick $place, Imagick $render, array $shape): Imagick
     {
@@ -580,7 +774,7 @@ class PersonCutout
         [$width, $height] = [$render->getImageWidth(), $render->getImageHeight()];
 
         // With the cut-out model's mask: that mask, only around this person, so others in the image stay.
-        if ($this->peopleMask !== null) {
+        if ($this->topLayerMask !== null) {
             $around = new Imagick();
             $around->newImage($smallWidth, $smallHeight, new ImagickPixel('black'));
             $around->importImagePixels(0, 0, $smallWidth, $smallHeight, 'I', Imagick::PIXEL_CHAR, array_map(fn(bool $on) => $on ? 255 : 0, $this->dilate($small, $smallWidth, $smallHeight, 1)));
@@ -690,9 +884,76 @@ class PersonCutout
     }
 
     /**
+     * Where the empty place goes back in when a shape is lifted: the shape itself, and every shadow around its old
+     * feet, such as the one it was drawn with or the one an earlier move gave it. Neither is part of the shape, so
+     * it would stay on the floor and stand still in the video while the person walks off. What else lies on top,
+     * such as someone standing next to them, keeps its own shadow.
+     *
+     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing?: bool}  $shape
+     */
+    private function holeMask(Imagick $place, Imagick $image, array $shape, int $width, int $height): Imagick
+    {
+        $mask = $this->fillMask($shape, $width, $height);
+
+        if ($shape['thing'] ?? false) {
+            return $mask;
+        }
+
+        // Around the old feet, as far as a low sun throws a shadow, to either side.
+        [$bx, $by, $bw, $bh] = $this->pixels($shape['box'], $width, $height);
+        $left = max(0, (int) round($bx - $bw * self::SHADOW_REACH));
+        $right = min($width, (int) round($bx + $bw * (1 + self::SHADOW_REACH)));
+        $top = max(0, (int) round($by + $bh * 0.55));
+        $bottom = min($height, (int) round($by + $bh * 1.25));
+
+        if ($right <= $left || $bottom <= $top) {
+            return $mask;
+        }
+
+        [$w, $h] = [$right - $left, $bottom - $top];
+        $imagePixels = $image->exportImagePixels($left, $top, $w, $h, 'RGB', Imagick::PIXEL_CHAR);
+        $placePixels = $place->exportImagePixels($left, $top, $w, $h, 'RGB', Imagick::PIXEL_CHAR);
+        $others = $this->topLayerMask !== null ? $this->othersOnTop($shape, $width, $height)->exportImagePixels($left, $top, $w, $h, 'I', Imagick::PIXEL_CHAR) : null;
+        $shadow = [];
+
+        for ($i = 0; $i < $w * $h; $i++) {
+            $j = $i * 3;
+            $shadow[] = ($others === null || $others[$i] < 128) && $this->isShadow($imagePixels[$j], $imagePixels[$j + 1], $imagePixels[$j + 2], $placePixels[$j], $placePixels[$j + 1], $placePixels[$j + 2]) ? 255 : 0;
+        }
+
+        $found = new Imagick();
+        $found->newImage($w, $h, new ImagickPixel('black'));
+        $found->importImagePixels(0, 0, $w, $h, 'I', Imagick::PIXEL_CHAR, $shadow);
+        // Its soft fringe, which is barely darker than the floor, goes too.
+        $found->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '3'));
+        $found->blurImage(0, 2);
+        $found->setImageAlphaChannel(Imagick::ALPHACHANNEL_OFF);
+        $mask->compositeImage($found, Imagick::COMPOSITE_LIGHTEN, $left, $top);
+        $mask->setImageColorspace(Imagick::COLORSPACE_GRAY);
+
+        return $mask;
+    }
+
+    /**
+     * What else lies on top of the place than the shape, at full size.
+     *
+     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing?: bool}  $shape
+     */
+    private function othersOnTop(array $shape, int $width, int $height): Imagick
+    {
+        $others = $this->maskAt($width, $height);
+        $gone = $this->fillMask(['small' => $shape['small'], 'box' => $shape['box'], 'thing' => true], $width, $height);
+        $gone->negateImage(false);
+        $others->compositeImage($gone, Imagick::COMPOSITE_MULTIPLY, 0, 0);
+        $others->thresholdImage(0.5 * Imagick::getQuantum());
+
+        return $others;
+    }
+
+    /**
      * Where the empty place goes back in: the shape grown a few small pixels with a soft edge, so the whole shadow goes.
      *
-     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}}  $shape
+     * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing?: bool}  $shape
      */
     private function fillMask(array $shape, int $width, int $height): Imagick
     {
@@ -704,13 +965,16 @@ class PersonCutout
         $mask->importImagePixels(0, 0, $smallWidth, $smallHeight, 'I', Imagick::PIXEL_CHAR, array_map(fn(bool $on) => $on ? 255 : 0, $grown));
         $mask->resizeImage($width, $height, Imagick::FILTER_TRIANGLE, 1);
 
-        // The shadow the person cast on the floor goes too: an ellipse under their feet.
-        [$x, $y, $w, $h] = $this->pixels($shape['box'], $width, $height);
-        $draw = new ImagickDraw();
-        $draw->setFillColor(new ImagickPixel('white'));
-        // Whole pixels: ImageMagick's drawing language reads a locale's decimal comma as an error.
-        $draw->ellipse($x + intdiv($w, 2), $y + $h - intdiv($h, 40), max(4, intdiv($w * 7, 10)), max(3, intdiv($h, 22)), 0, 360);
-        $mask->drawImage($draw);
+        // The shadow the person cast on the floor goes too: an ellipse under their feet. A thing may fly or hang, with no floor under it.
+        if (! ($shape['thing'] ?? false)) {
+            [$x, $y, $w, $h] = $this->pixels($shape['box'], $width, $height);
+            $draw = new ImagickDraw();
+            $draw->setFillColor(new ImagickPixel('white'));
+            // Whole pixels: ImageMagick's drawing language reads a locale's decimal comma as an error.
+            $draw->ellipse($x + intdiv($w, 2), $y + $h - intdiv($h, 40), max(4, intdiv($w * 7, 10)), max(3, intdiv($h, 22)), 0, 360);
+            $mask->drawImage($draw);
+        }
+
         // Drawing gives the mask transparency, which a copy of its opacity would read instead of its grey: off again.
         $mask->setImageAlphaChannel(Imagick::ALPHACHANNEL_OFF);
         $mask->blurImage(0, 3);
@@ -720,17 +984,11 @@ class PersonCutout
     }
 
     /**
-     * The people mask at a size, grey.
+     * The top-layer mask, or the given one, at a size, grey.
      */
-    private function maskAt(int $width, int $height): Imagick
+    private function maskAt(int $width, int $height, ?string $source = null): Imagick
     {
-        $mask = new Imagick();
-        $mask->readImageBlob((string) $this->peopleMask);
-        $mask->setImageAlphaChannel(Imagick::ALPHACHANNEL_REMOVE);
-        $mask->transformImageColorspace(Imagick::COLORSPACE_GRAY);
-        $mask->resizeImage($width, $height, Imagick::FILTER_TRIANGLE, 1);
-
-        return $mask;
+        return Masks::grey((string) ($source ?? $this->topLayerMask), $width, $height);
     }
 
     private function placeAt(string $plate, int $width, int $height): Imagick

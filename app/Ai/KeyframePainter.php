@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Ai;
 
+use App\Ai\Agents\CutInBriefWriter;
 use App\Ai\Agents\KeyframeChecker;
+use App\Ai\Agents\MovingThingsJudge;
+use App\Ai\Agents\PlaceChangeChecker;
 use App\Ai\Agents\ShotReviewer;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Enums\ElementType;
+use App\Enums\ShotKind;
 use App\Jobs\CheckKeyframe;
 use App\Models\Element;
 use App\Models\Keyframe;
@@ -15,13 +19,17 @@ use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Images\BackgroundDrift;
 use App\Support\Images\Cutout;
+use App\Support\Images\Masks;
 use App\Support\Images\OpenRouterImageClient;
-use App\Support\Images\PersonCutout;
 use App\Support\Images\PlaceComposite;
+use App\Support\Images\PlaceDepth;
 use App\Support\Images\PlaceObjects;
 use App\Support\Images\ReplicateClient;
+use App\Support\Images\TopLayerCutout;
 use App\Support\Shots\SequencePlaces;
+use finfo;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Ai\Files\Image as ImageFile;
@@ -37,6 +45,15 @@ use Throwable;
  */
 class KeyframePainter
 {
+    /** On the storyline of a shot that cuts in on a keyframe of another shot: what its own camera sees, with what it was written for. */
+    public const CUT_IN_BRIEF = 'cut_in_brief';
+
+    /** On the emptied place: by element id, the mask of each thing taken out of the place, small. */
+    public const EMPTIED_MASKS = 'masks';
+
+    /** Raised when what goes on top of the place is decided differently, so movable masks made before are made again. */
+    private const int MOVABLE_RULE = 2;
+
     public function __construct(
         private readonly BackgroundDrift $drift,
         private readonly Cutout $cutout,
@@ -547,6 +564,7 @@ class KeyframePainter
             previous: $previous ? $this->referenceFor($previous) : null,
             firstShowsCast: $missing->isEmpty(),
             castNames: $missing->pluck('name')->all(),
+            thingNames: $plate !== null ? $this->listedNotIn($plate, $keyframe)->pluck('name')->all() : [],
             firstIsPlate: $plate !== null,
             setting: $setting['image'] ?? null,
             settingLabel: $setting['label'] ?? '',
@@ -581,11 +599,7 @@ class KeyframePainter
         }
 
         $source = $from['shot'];
-        $position = $from['keyframe'] === Shot::LAST_KEYFRAME ? (int) $source->keyframes()->max('position') : $from['keyframe'];
-        $keyframe = $position > 0 ? $source->keyframes()->with('media')->where('position', $position)->first() : null;
-        $image = $position > 0
-            ? $keyframe?->render()
-            : ($this->chosenPlate($source) ?? $source->keyframes()->with('media')->where('position', 1)->first()?->render());
+        $image = $this->settingImage($shot);
 
         if ($image === null) {
             return null;
@@ -597,8 +611,77 @@ class KeyframePainter
             $from['keyframe'] === 0 => "the place of {$source->code()}",
             default => "keyframe {$from['keyframe']} of {$source->code()}",
         };
+        $cutIn = $shot->storyline[self::CUT_IN_BRIEF] ?? null;
+
+        // Cutting in on that moment from its own camera: what that camera sees is spelled out, so the picture's viewpoint is not copied.
+        if (is_array($cutIn) && ($cutIn['for'] ?? null) === $this->cutInKey($shot, $image)) {
+            $label .= ". This shot cuts in on that moment from its own camera: {$cutIn['text']} Draw what this camera sees, with what lies behind the subject from here; never copy the viewpoint of the attached picture, use it only for how the people, things and place look";
+        }
 
         return ['image' => $this->referenceFor($image), 'label' => $label];
+    }
+
+    /**
+     * The picture a shot takes its setting from: a keyframe of another shot, or that shot's place.
+     */
+    private function settingImage(Shot $shot): ?Media
+    {
+        $from = $shot->settingFrom();
+
+        if ($from === null) {
+            return null;
+        }
+
+        $source = $from['shot'];
+        $position = $from['keyframe'] === Shot::LAST_KEYFRAME ? (int) $source->keyframes()->max('position') : $from['keyframe'];
+
+        return $position > 0
+            ? $source->keyframes()->with('media')->where('position', $position)->first()?->render()
+            : ($this->chosenPlate($source) ?? $source->keyframes()->with('media')->where('position', 1)->first()?->render());
+    }
+
+    /**
+     * Writes out what the camera of a shot that cuts in on a keyframe of another shot sees, such as a close-up at
+     * a truck window after the wide shot of the gate: where it stands in that scene and what lies behind its
+     * subject from there. Kept until the picture or the plan changes; without it the picture's viewpoint is copied.
+     */
+    public function writeCutInBrief(Shot $shot): void
+    {
+        $from = $shot->settingFrom();
+        $image = $from !== null && $from['keyframe'] !== 0 ? $this->settingImage($shot) : null;
+        $first = $shot->storylineKeyframes()[0] ?? null;
+
+        if ($image === null || $first === null || (($shot->storyline[self::CUT_IN_BRIEF]['for'] ?? null) === $this->cutInKey($shot, $image))) {
+            return;
+        }
+
+        $writer = new CutInBriefWriter($from['shot']->code(), $shot->kindOrScene() === ShotKind::CLOSE_UP ? 'close-up' : "{$shot->shotSize()->value} shot", (string) ($shot->storylineFraming()['spot'] ?? ''), Keyframe::joined((string) $first['description'], $first['spatial'] ?? null));
+
+        try {
+            /** @var StructuredAgentResponse $response */
+            $response = $writer->prompt($writer->promptFor(), attachments: [$this->referenceFor($image)], provider: 'openrouter', model: (string) Config::get('pipeline.models.text'));
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return;
+        }
+
+        $text = trim((string) ($response->toArray()['brief'] ?? ''));
+        $key = $this->cutInKey($shot, $image);
+
+        if ($text !== '') {
+            $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), self::CUT_IN_BRIEF => ['for' => $key, 'text' => $text]]);
+        }
+    }
+
+    /**
+     * What a cut-in brief was written for: the picture and this shot's first keyframe.
+     */
+    private function cutInKey(Shot $shot, Media $image): string
+    {
+        $first = $shot->storylineKeyframes()[0] ?? [];
+
+        return $image->id . ':' . hash('xxh3', (string) ($shot->storylineFraming()['spot'] ?? '') . '|' . ($first['description'] ?? ''));
     }
 
     /**
@@ -619,8 +702,10 @@ class KeyframePainter
     public function paintPlateOption(Shot $shot, int $variation, string $extra = ''): Media
     {
         $names = collect($shot->storylineKeyframes())->flatMap(fn(array $keyframe) => (array) ($keyframe['elements'] ?? []))->unique()->all();
+        // Handled in keyframe 1 are the things that move by themselves in this shot: left out of the place, so their pictures are not attached.
+        $moving = array_map(fn(mixed $name) => mb_strtolower(trim((string) $name)), (array) ($shot->storylineKeyframes()[0]['handled'] ?? []));
         $elementImages = $shot->project->elements()->with('media')->get()
-            ->filter(fn(Element $element) => in_array($element->name, $names, true) && $element->type !== ElementType::PERSON && $element->reference() !== null)
+            ->filter(fn(Element $element) => in_array($element->name, $names, true) && $element->type !== ElementType::PERSON && $element->reference() !== null && ! in_array(mb_strtolower($element->name), $moving, true))
             ->take((int) Config::get('pipeline.keyframes.max_element_references', 3))
             ->map(fn(Element $element) => ['element' => $element, 'image' => $this->referenceFor($element->reference())])
             ->values()
@@ -641,8 +726,10 @@ class KeyframePainter
      */
     public function paintSequencePlaceOption(Shot $owner, array $place, int $variation): Media
     {
+        $moving = $this->movingAt($owner, $place);
         $elementImages = $owner->project->elements()->with('media')->get()
-            ->filter(fn(Element $element) => in_array($element->name, $place['elements'], true) && $element->type !== ElementType::PERSON && $element->reference() !== null)
+            // What moves in these shots, such as a truck that drives off, is left out of the place: the image model draws whatever it gets a picture of.
+            ->filter(fn(Element $element) => in_array($element->name, $place['elements'], true) && $element->type !== ElementType::PERSON && $element->reference() !== null && ! in_array(mb_strtolower($element->name), $moving, true))
             ->take((int) Config::get('pipeline.keyframes.max_element_references', 3))
             ->map(fn(Element $element) => ['element' => $element, 'image' => $this->referenceFor($element->reference())])
             ->values()
@@ -655,6 +742,36 @@ class KeyframePainter
             ->usingFileName('sequence-place.' . ($result['mime'] === 'image/jpeg' ? 'jpg' : 'png'))
             ->withCustomProperties(['place' => $place['key'], Keyframe::SENT => ['model' => $result['model'], 'prompt' => $prompt, 'images' => $references->labels()]])
             ->toMediaCollection(Shot::SEQUENCE_PLACE_OPTIONS);
+    }
+
+    /**
+     * The things of a place of a sequence that move in its shots, in lower case, judged once from what happens there.
+     *
+     * @param  array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}  $place
+     * @return list<string>
+     */
+    private function movingAt(Shot $owner, array $place): array
+    {
+        $objects = $owner->project->elements()->where('type', ElementType::OBJECT)->whereIn('name', $place['elements'])->pluck('name')->unique()->values()->all();
+
+        if ($objects === []) {
+            return [];
+        }
+
+        return Cache::remember('moving-things:' . hash('xxh3', json_encode([$objects, $place['ideas']], JSON_THROW_ON_ERROR)), now()->addWeek(), function () use ($objects, $place): array {
+            $judge = new MovingThingsJudge($objects, array_values(array_filter($place['ideas'])));
+
+            try {
+                /** @var StructuredAgentResponse $response */
+                $response = $judge->prompt($judge->promptFor(), provider: 'openrouter', model: (string) Config::get('pipeline.models.text'));
+            } catch (Throwable $exception) {
+                report($exception);
+
+                return [];
+            }
+
+            return array_values(array_map(fn(mixed $name) => mb_strtolower(trim((string) $name)), (array) ($response->toArray()['moving'] ?? [])));
+        });
     }
 
     /**
@@ -727,6 +844,130 @@ class KeyframePainter
         $keyframe->forceFill(['render_id' => $render->id, 'rendering' => false, 'render_error' => null, 'render_stage' => null])->save();
 
         return $render;
+    }
+
+    /**
+     * Whether a version is the chosen place used as it is, for a keyframe 1 without people.
+     */
+    public function isChosenPlateCopy(Media $render): bool
+    {
+        return ($render->getCustomProperty(Keyframe::SENT)['prompt'] ?? null) === 'The chosen place, used as it is.';
+    }
+
+    /**
+     * The thing of the place at a point given as shares of the image, such as a
+     * landed helicopter: one of the keyframe's objects that the place has, with
+     * its mask in the place, from the emptied place when it is made. Null when
+     * the point is on none of them.
+     *
+     * @return array{element: Element, mask: string}|null
+     */
+    public function placeObjectAt(Keyframe $keyframe, Media $place, float $x, float $y): ?array
+    {
+        $emptied = (array) ($this->emptiedPlate($keyframe->shot, $place)?->getCustomProperty(self::EMPTIED_MASKS) ?? []);
+
+        foreach ($keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
+            $mask = isset($emptied[(string) $object->id]) ? base64_decode((string) $emptied[(string) $object->id]) : null;
+
+            if ($mask === null && (! $this->placeObjects->isIn($place, $object) || ($mask = $this->placeObjects->maskIn($place, $object)) === null)) {
+                continue;
+            }
+
+            $image = Masks::grey($mask);
+            [$width, $height] = [$image->getImageWidth(), $image->getImageHeight()];
+            $pixel = $image->getImagePixelColor((int) round($x * ($width - 1)), (int) round($y * ($height - 1)))->getColor();
+
+            if ($pixel['r'] > 127) {
+                return ['element' => $object, 'mask' => $mask];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether the chosen place is still being made ready for moving things by hand: its depth is being measured or
+     * its named things are being taken out. Null when nothing is to be done, otherwise what is still missing.
+     *
+     * @return array{plate: Media, depth: bool, emptied: bool}|null
+     */
+    public function placeToPrepare(Shot $shot): ?array
+    {
+        $plate = $this->composites() && ! $shot->drawsStandalone() ? $this->chosenPlate($shot) : null;
+
+        if ($plate === null) {
+            return null;
+        }
+
+        $depth = ! is_array($plate->getCustomProperty(PlaceDepth::DEPTH)) && $plate->getCustomProperty(PlaceDepth::TRIED) !== true;
+        $emptied = $plate->getCustomProperty(Shot::PLATE_EMPTIED_DONE) !== true;
+
+        return $depth || $emptied ? ['plate' => $plate, 'depth' => $depth, 'emptied' => $emptied] : null;
+    }
+
+    public function preparingPlace(Shot $shot): bool
+    {
+        return $this->placeToPrepare($shot) !== null;
+    }
+
+    /**
+     * The chosen place without the named things it has, made once for it, or null while it is not made.
+     */
+    public function emptiedPlate(Shot $shot, Media $plate): ?Media
+    {
+        $emptied = $shot->getFirstMedia(Shot::PLATE_EMPTIED);
+
+        return $emptied !== null && (int) $emptied->getCustomProperty(Keyframe::FROM_RENDER) === $plate->id ? $emptied : null;
+    }
+
+    /**
+     * Makes the chosen place without the things of the cast it has, such as a
+     * landed helicopter and a bin, so each can be moved by hand at once later:
+     * the edit model takes them all out in one go, and only where they stood,
+     * and a little around, its result is used. Each keeps its mask, with the
+     * edges of the cut-out model. Walls, railings and what is not in the cast
+     * stay. Null when the place has none of them.
+     *
+     * @throws Throwable when the image model fails
+     */
+    public function emptyPlate(Shot $shot, Media $plate): ?Media
+    {
+        $names = collect($shot->storylineKeyframes())->flatMap(fn(array $keyframe) => (array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => mb_strtolower(trim((string) $name)))->unique();
+        $objects = $shot->project->elements()->with('media')->where('type', ElementType::OBJECT)->get()->filter(fn(Element $element) => $names->contains(mb_strtolower($element->name)));
+        $image = $this->bytes($plate);
+        $masks = [];
+
+        foreach ($objects as $object) {
+            if (! $this->placeObjects->isIn($plate, $object) || ($mask = $this->placeObjects->maskIn($plate, $object)) === null) {
+                continue;
+            }
+
+            try {
+                $mask = $this->cutout->refined($image, $mask);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+
+            $masks[(string) $object->id] = ['name' => $object->name, 'mask' => $mask];
+        }
+
+        if ($masks === []) {
+            return null;
+        }
+
+        $found = array_values($masks);
+        $prompt = KeyframeImageBrief::withoutThing(implode(' and the ', array_column($found, 'name')));
+        $emptied = $this->drawForShot($shot, $prompt, [$this->referenceFor($plate)], (string) Config::get('pipeline.models.keyframe_edit'));
+        $union = TopLayerCutout::keptSmall($found[0]['mask'], array_column(array_slice($found, 1), 'mask'));
+
+        return $shot->addMediaFromString($this->composite->withoutPeople($image, $emptied['content'], $union))
+            ->usingFileName('place-emptied.png')
+            ->withCustomProperties([
+                Keyframe::FROM_RENDER => $plate->id,
+                self::EMPTIED_MASKS => array_map(fn(array $thing) => base64_encode(TopLayerCutout::keptSmall($thing['mask'])), $masks),
+                Keyframe::SENT => ['model' => $emptied['model'], 'prompt' => $prompt, 'images' => ['The chosen place']],
+            ])
+            ->toMediaCollection(Shot::PLATE_EMPTIED);
     }
 
     /**
@@ -850,14 +1091,12 @@ class KeyframePainter
         $drawn = $this->bytes($render);
 
         try {
-            $people = $this->cutout->people($drawn);
+            ['people' => $people, 'areas' => $areas, 'movable' => $movable, 'missing' => $missing] = $this->topLayer($keyframe, $place, $drawn);
         } catch (Throwable $exception) {
             report($exception);
 
             return $render;
         }
-
-        ['areas' => $areas, 'missing' => $missing] = $this->drawnAreas($place, $keyframe, $people, $drawn);
 
         if ($missing !== null) {
             $render->setCustomProperty(Keyframe::NOT_COMPOSITED, __(':name could not be found in the place, so the keyframe is kept as it was drawn.', ['name' => $missing]))->save();
@@ -876,7 +1115,7 @@ class KeyframePainter
         $kept = $keyframe
             ->addMediaFromString($composite)
             ->usingFileName("keyframe-{$keyframe->position}.png")
-            ->withCustomProperties([...$render->custom_properties, Keyframe::COMPOSITED => true, Keyframe::PEOPLE_MASK => base64_encode(PersonCutout::keptSmall($people))])
+            ->withCustomProperties([...$render->custom_properties, Keyframe::COMPOSITED => true, ...$this->movableProperties($keyframe, $people, $movable)])
             ->toMediaCollection(Keyframe::RENDERS);
         $render->delete();
         $keyframe->load('media');
@@ -885,51 +1124,171 @@ class KeyframePainter
     }
 
     /**
-     * Where the drawing is used for an object of the place instead of the place
-     * itself: only for what someone changes in this keyframe, such as a handset
-     * off its cradle, as the plan says. Standing in front of something is not
-     * changing it: the place keeps it, and the person is put in front of it.
-     * Something handled that is not in the place, such as a helicopter that
-     * flies in, is found in the drawing itself. Plans from before they said
-     * what is handled fall back on what the people touch. Names the object
-     * when it cannot be found in the place.
+     * What a keyframe drawn on a place keeps on top of it, as the plan says:
+     * its people, found by name with the edges of the cut-out model, and the
+     * things it handles. Of those, what can be moved by hand: the people and
+     * the handled things that are not in the place. Throws when the people
+     * cannot be found.
      *
-     * @return array{areas: list<string>, missing: string|null}
+     * @return array{people: string, areas: list<string>, movable: list<string>, missing: string|null}
+     */
+    public function topLayer(Keyframe $keyframe, Media $place, string $image): array
+    {
+        $people = $this->mayHavePeople($keyframe) ? $this->cutout->people($image) : Cutout::nobody($image);
+
+        return ['people' => $people, ...$this->drawnAreas($place, $keyframe, $people, $image)];
+    }
+
+    /**
+     * What can be moved by hand in an image of a keyframe, kept small enough to store on a version:
+     * all of it, and of that the things, such as a helicopter flying in, which move without a shadow.
+     *
+     * @return array{all: string, things: string|null}
+     */
+    public function movableMasks(Keyframe $keyframe, Media $place, string $image): array
+    {
+        ['people' => $people, 'movable' => $movable] = $this->topLayer($keyframe, $place, $image);
+
+        return ['all' => TopLayerCutout::keptSmall($people, $movable), 'things' => $movable !== [] ? TopLayerCutout::keptSmall($movable[0], array_slice($movable, 1)) : null];
+    }
+
+    /**
+     * The movable masks as stored on a version, with what they were made from.
+     *
+     * @param  list<string>  $movable
+     * @return array<string, string|null>
+     */
+    public function movableProperties(Keyframe $keyframe, string $people, array $movable): array
+    {
+        return [
+            Keyframe::TOP_LAYER_MASK => base64_encode(TopLayerCutout::keptSmall($people, $movable)),
+            Keyframe::THINGS_MASK => $movable !== [] ? base64_encode(TopLayerCutout::keptSmall($movable[0], array_slice($movable, 1))) : null,
+            Keyframe::TOP_LAYER_KEY => $this->movableKey($keyframe),
+        ];
+    }
+
+    /**
+     * What a stored movable mask was made from: the cast and what is handled. A mask
+     * made from another, or before this was kept, is made again.
+     */
+    public function movableKey(Keyframe $keyframe): string
+    {
+        $plan = $keyframe->shot->storylineKeyframes()[$keyframe->position - 1] ?? [];
+        $cast = $keyframe->elements->pluck('id')->sort()->values()->all();
+
+        return hash('xxh3', json_encode([self::MOVABLE_RULE, $cast, $plan['handled'] ?? null], JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * The things a keyframe lists that the place does not have, such as a
+     * helicopter that flies in: drawn on the place, they are added like the
+     * people. None for a plan from before it said what is handled.
+     *
+     * @return Collection<int, Element>
+     */
+    private function listedNotIn(Media $place, Keyframe $keyframe): Collection
+    {
+        if ($this->handledIn($keyframe) === null) {
+            return collect();
+        }
+
+        return $keyframe->elements
+            ->filter(fn(Element $element) => $element->type === ElementType::OBJECT)
+            ->reject(fn(Element $object) => $this->placeObjects->isIn($place, $object))
+            ->values();
+    }
+
+    /**
+     * Whether a keyframe may have people in it: when its cast has a person, and
+     * when it has no cast at all, as with a plan from before casts were kept.
+     * Otherwise the name finder often takes part of what stands in front, such
+     * as a parked helicopter, for a person.
+     */
+    private function mayHavePeople(Keyframe $keyframe): bool
+    {
+        return $keyframe->elements->isEmpty() || $keyframe->elements->contains(fn(Element $element) => $element->type === ElementType::PERSON);
+    }
+
+    /**
+     * Where the drawing is used for an object instead of the place itself.
+     * What the keyframe lists that the place does not have, such as a
+     * helicopter that flies in, a badge carried in or a helicopter landed in
+     * a shot whose sequence sees it take off later, can only come from the
+     * drawing: it is found there, and can be moved by hand. Of what the place
+     * has, only what someone changes in this keyframe, such as a handset off
+     * its cradle, as the plan says, both at its spot in the place and where
+     * the drawing has it now, such as a truck that drives off; standing in front of something is not
+     * changing it, and a thing the place has would show twice if it were
+     * moved. Plans from before they said what is handled fall back on what
+     * the people touch, and leave what the place lacks to the person holding
+     * it. Names the object when it cannot be found in the place.
+     *
+     * @return array{areas: list<string>, movable: list<string>, missing: string|null}
      */
     private function drawnAreas(Media $place, Keyframe $keyframe, string $people, string $drawn): array
     {
-        $plan = $keyframe->shot->storylineKeyframes()[$keyframe->position - 1] ?? [];
-        $handled = array_key_exists('handled', $plan) ? array_map(fn(mixed $name) => mb_strtolower(trim((string) $name)), (array) $plan['handled']) : null;
+        $handled = $this->handledIn($keyframe);
         $areas = [];
+        $movable = [];
 
         foreach ($keyframe->elements->filter(fn(Element $element) => $element->type === ElementType::OBJECT) as $object) {
-            if ($handled !== null && ! in_array(mb_strtolower($object->name), $handled, true)) {
-                continue;
-            }
-
-            // Not in the place, such as a badge carried in or a helicopter flying in: handled, it is found in the drawing; otherwise it comes along with the person who holds it.
             if (! $this->placeObjects->isIn($place, $object)) {
                 $inDrawing = $handled !== null ? $this->placeObjects->maskInDrawing($drawn, $object) : null;
 
                 if ($inDrawing !== null) {
+                    // Found by name, its edge from the cut-out model, the same as a person.
+                    try {
+                        $inDrawing = $this->cutout->refined($drawn, $inDrawing);
+                    } catch (Throwable $exception) {
+                        report($exception);
+                    }
+
                     $areas[] = $inDrawing;
+                    $movable[] = $inDrawing;
                 }
 
+                continue;
+            }
+
+            if ($handled !== null && ! in_array(mb_strtolower($object->name), $handled, true)) {
                 continue;
             }
 
             $area = $this->placeObjects->maskIn($place, $object);
 
             if ($area === null) {
-                return ['areas' => [], 'missing' => $object->name];
+                return ['areas' => [], 'movable' => [], 'missing' => $object->name];
             }
 
             if ($handled !== null || $this->composite->touches($area, $people)) {
                 $areas[] = $area;
             }
+
+            // Handled, it may have moved away from its spot in the place, such as a truck that drives off: where it is now comes from the drawing too.
+            if ($handled !== null && ($moved = $this->placeObjects->maskInDrawing($drawn, $object)) !== null) {
+                try {
+                    $moved = $this->cutout->refined($drawn, $moved);
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+
+                $areas[] = $moved;
+            }
         }
 
-        return ['areas' => $areas, 'missing' => null];
+        return ['areas' => $areas, 'movable' => $movable, 'missing' => null];
+    }
+
+    /**
+     * The names of what the plan handles in a keyframe, in lower case; null for a plan from before it said.
+     *
+     * @return list<string>|null
+     */
+    private function handledIn(Keyframe $keyframe): ?array
+    {
+        $plan = $keyframe->shot->storylineKeyframes()[$keyframe->position - 1] ?? [];
+
+        return array_key_exists('handled', $plan) ? array_map(fn(mixed $name) => mb_strtolower(trim((string) $name)), (array) $plan['handled']) : null;
     }
 
     /**
@@ -1020,14 +1379,12 @@ class KeyframePainter
         $current = $this->bytes($render);
 
         try {
-            $people = $this->cutout->people($current);
+            ['people' => $people, 'areas' => $areas, 'movable' => $movable, 'missing' => $missing] = $this->topLayer($keyframe, $place, $current);
         } catch (Throwable $exception) {
             report($exception);
 
             return null;
         }
-
-        ['areas' => $areas, 'missing' => $missing] = $this->drawnAreas($place, $keyframe, $people, $current);
 
         if ($missing !== null) {
             return null;
@@ -1044,7 +1401,7 @@ class KeyframePainter
         $kept = $keyframe
             ->addMediaFromString($composite)
             ->usingFileName("keyframe-{$keyframe->position}.png")
-            ->withCustomProperties([...$render->custom_properties, Keyframe::PEOPLE_MASK => base64_encode(PersonCutout::keptSmall($people))])
+            ->withCustomProperties([...$render->custom_properties, ...$this->movableProperties($keyframe, $people, $movable)])
             ->toMediaCollection(Keyframe::RENDERS);
         $keyframe->forceFill(['render_id' => $kept->id])->save();
         $render->delete();
@@ -1066,25 +1423,33 @@ class KeyframePainter
      */
     private function drawPlaceState(Shot $shot, Media $place, array $change, string $key): ?Media
     {
-        try {
-            $result = $this->drawForShot($shot, KeyframeImageBrief::placeState($change['change']), [$this->referenceFor($place)], (string) Config::get('pipeline.models.keyframe_edit'));
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return null;
-        }
-
         $before = $this->bytes($place);
-        $image = $result['content'];
-        $composited = false;
 
-        // Only the changed thing comes from the edit, found in the place before and after, so both its old and new shape are covered.
-        if ($this->composites() && $change['part'] !== '') {
+        // Drawn once more when the change does not show, such as a barrier arm still across the road.
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
             try {
-                $image = $this->composite->state($before, $image, [$this->cutout->thing($before, $change['part']), $this->cutout->thing($image, $change['part'])]);
-                $composited = true;
+                $result = $this->drawForShot($shot, KeyframeImageBrief::placeState($change['change']), [$this->referenceFor($place)], (string) Config::get('pipeline.models.keyframe_edit'));
             } catch (Throwable $exception) {
                 report($exception);
+
+                return null;
+            }
+
+            $image = $result['content'];
+            $composited = false;
+
+            // Only the changed thing comes from the edit, found in the place before and after, so both its old and new shape are covered.
+            if ($this->composites() && $change['part'] !== '') {
+                try {
+                    $image = $this->composite->state($before, $image, [$this->cutout->thing($before, $change['part']), $this->cutout->thing($image, $change['part'])]);
+                    $composited = true;
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+            }
+
+            if ($this->changeShows($before, $image, $change['change'])) {
+                break;
             }
         }
 
@@ -1098,6 +1463,25 @@ class KeyframePainter
                 Keyframe::SENT => ['model' => $result['model'], 'prompt' => KeyframeImageBrief::placeState($change['change']), 'images' => ['The place before this change']],
             ])
             ->toMediaCollection(Shot::PLACE_STATES);
+    }
+
+    /**
+     * Whether a new version of the place shows the change asked for, judged by a vision model; without an answer it counts as shown.
+     */
+    private function changeShows(string $before, string $after, string $change): bool
+    {
+        $checker = new PlaceChangeChecker($change);
+
+        try {
+            /** @var StructuredAgentResponse $response */
+            $response = $checker->prompt($checker->promptFor(), attachments: array_map(fn(string $image) => ImageFile::fromBase64(base64_encode($image), (string) (new finfo(FILEINFO_MIME_TYPE))->buffer($image)), [$before, $after]), provider: 'openrouter', model: (string) Config::get('pipeline.models.keyframe_check'));
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return true;
+        }
+
+        return (bool) ($response->toArray()['shown'] ?? true);
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots;
 
+use App\Ai\KeyframePainter;
 use App\Enums\ShotKind;
 use App\Enums\ShotTransition;
 use App\Http\Resources\Public\ElementResource;
@@ -11,6 +12,8 @@ use App\Http\Resources\Public\KeyframeResource;
 use App\Http\Resources\Public\ProjectResource;
 use App\Http\Resources\Public\ShotListItemResource;
 use App\Http\Resources\Public\ShotResource;
+use App\Jobs\EmptyPlace;
+use App\Jobs\MeasurePlaceDepth;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
@@ -20,11 +23,17 @@ use Inertia\Inertia;
 
 class ViewController
 {
-    public function view(Project $project, Shot $shot)
+    public function view(Project $project, Shot $shot, KeyframePainter $painter)
     {
         Gate::authorize(ShotPolicy::VIEW, $shot);
 
         $shot->setRelation('project', $project);
+
+        // Normally started on choosing the place; for a place chosen before, or a job that got lost, now, once.
+        if (($prepare = $painter->placeToPrepare($shot)) !== null) {
+            $prepare['depth'] && MeasurePlaceDepth::dispatch($prepare['plate']);
+            $prepare['emptied'] && EmptyPlace::dispatch($shot, $prepare['plate']);
+        }
 
         return Inertia::render('shots/view', [
             'project' => fn() => ProjectResource::make($project),

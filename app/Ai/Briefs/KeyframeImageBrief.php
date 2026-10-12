@@ -70,7 +70,7 @@ class KeyframeImageBrief
         }
 
         if (($rules = $shot->project->rulesBrief()) !== '') {
-            $lines[] = "Project rules, always follow them:\n{$rules}";
+            $lines[] = "Project rules, always follow them where this keyframe shows what they are about; never add something only because a rule names it:\n{$rules}";
         }
 
         $closeUp = $shot->kindOrScene() === ShotKind::CLOSE_UP;
@@ -177,7 +177,7 @@ class KeyframeImageBrief
     /**
      * The prompt for a keyframe after the first: an edit of keyframe 1, which
      * is attached first, so the place, the camera and the style cannot shift.
-     * Only the people, their poses and the objects they handle change.
+     * Only the people, their poses and the objects that are handled change.
      *
      * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
      */
@@ -190,7 +190,7 @@ class KeyframeImageBrief
                 ? 'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move.'
                 : 'Edit the first attached image. It is keyframe 1 of this shot: the place, seen from a camera that does not move.',
             // The place stays put; what the story changes in it, such as a door that is shut by now, follows the story.
-            'Change only what this keyframe needs: the people, their poses and positions, and the objects they handle. The place itself stays exactly as it is in the first image: the walls, the floor and every line on it, signs, windows, fixed machines and the background, at the same place, size and angle, with the same framing, camera, light and style.',
+            'Change only what this keyframe needs: the people, their poses and positions, the objects they handle and what moves by itself in this keyframe, such as a helicopter flying in. The place itself stays exactly as it is in the first image: the walls, the floor and every line on it, signs, windows, fixed machines and the background, at the same place, size and angle, with the same framing, camera, light and style.',
             'The state of things follows the story: open or closed, on or off, full or empty, smoke or none, held or in its place, as this keyframe shows and the keyframe before, even when the first image or a picture shows it otherwise. Whatever is picked up or taken out leaves its spot empty: a handset lifted off its hook leaves the cradle empty, and the object is never drawn twice.',
             match (true) {
                 $references->firstShowsCast => 'The people already in the first image move and change pose as described; never add a second copy of anyone.',
@@ -201,9 +201,14 @@ class KeyframeImageBrief
                     . ($references->firstIsPlate && $references->previous !== null ? ' The keyframe before shows how they look in this shot.' : ''),
         ];
 
-        // Only the people are kept from this drawing; an object moved in it would leave its spot in the place empty.
+        if ($references->thingNames !== []) {
+            $things = implode(' and ', $references->thingNames);
+            $lines[] = "{$things} " . (count($references->thingNames) > 1 ? 'are' : 'is') . ' not in the first image either: add ' . (count($references->thingNames) > 1 ? 'them' : 'it') . ' where and as large as this keyframe describes, once, like the people.';
+        }
+
+        // Only the people and what is handled are kept from this drawing; an object moved in it would leave its spot in the place empty.
         if ($references->firstIsPlate) {
-            $lines[] = 'An object that is already in the first image, such as a bin, a sign or a machine, stays exactly where it is there, at the same size, even when the description puts it on another side of the frame: place the people around it so they stand as the description says relative to it. Only an object a person picks up, carries or pushes moves.';
+            $lines[] = 'An object that is already in the first image, such as a bin, a sign or a machine, stays exactly where it is there, at the same size, even when the description puts it on another side of the frame: place the people around it so they stand as the description says relative to it. Only an object a person picks up, carries or pushes moves, and one that moves by itself in this keyframe, such as a helicopter flying in.';
         }
 
         $lines[] = '';
@@ -228,7 +233,7 @@ class KeyframeImageBrief
         }
 
         if (($rules = $shot->project->rulesBrief()) !== '') {
-            $lines[] = "Project rules, always follow them:\n{$rules}";
+            $lines[] = "Project rules, always follow them where this keyframe shows what they are about; never add something only because a rule names it:\n{$rules}";
         }
 
         $ordinals = ['second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
@@ -273,10 +278,10 @@ class KeyframeImageBrief
 
         array_push(
             $lines,
-            'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later, and anything that moves during the shot, such as a vehicle, a helicopter, a forklift or a hanging load, also when step 1 shows it: it is added in every keyframe, like the people. What an earlier shot left standing in the place, as the setting says, does belong in it.',
+            'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later, and anything that moves during the shot, such as a vehicle, a helicopter, a forklift or a hanging load, also when step 1 shows it: it is added in every keyframe, like the people. What an earlier shot left standing in the place, as the setting says, does belong in it. A vehicle that stands in the place, such as a truck waiting at a barrier, stands lined up with its lane or road, its nose pointing the way it drives next, as the steps say, such as straight at the barrier it will drive through; never turned across the lane.',
             'Draw everything in its state at step 1, such as a door open or closed as step 1 says; later changes to the place are made on this picture.',
             'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. A logo already on the place in its picture may stay, exactly as it is there.',
-            self::plateVariation($variation),
+            self::plateVariation($variation, filled($shot->sequenceView()) ? $shot->shotSize() : null),
         );
 
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth'];
@@ -297,7 +302,7 @@ class KeyframeImageBrief
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it, at its place in the scene.');
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it where it stands still in this shot; when it moves during the shot, such as a vehicle that drives in or off, leave it out: the picture only shows how it looks.');
         }
 
         return implode("\n", $lines);
@@ -336,7 +341,7 @@ class KeyframeImageBrief
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it, at its place in the scene.');
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it where it stands still in all of these shots; when it moves in any of them, such as a vehicle that drives in or off, leave it out: the picture only shows how it looks.');
         }
 
         return implode("\n", $lines);
@@ -374,11 +379,23 @@ class KeyframeImageBrief
     }
 
     /**
-     * A camera direction per place option, so the places offer a real choice.
-     * The directions repeat for further rounds.
+     * What sets one option of a place apart from the others. Where the shot's
+     * own view already fixes where the camera stands, a different angle is
+     * ignored and the options come out the same, so they differ a little in
+     * distance, never so much that the shot size changes.
      */
-    public static function plateVariation(int $index): string
+    public static function plateVariation(int $index, ?ShotSize $cameraSetAt = null): string
     {
+        if ($cameraSetAt !== null) {
+            $distances = [
+                'The camera stands a step further back than described, so more of the place shows around the spot.',
+                'The camera stands at the distance described.',
+                'The camera stands a step closer than described, so the spot and what the story turns on fill more of the frame.',
+            ];
+
+            return 'Camera for this option: keep the position and direction of this shot\'s camera exactly as described, only its distance differs from the other options: ' . $distances[$index % count($distances)] . " Only a small step: it stays a {$cameraSetAt->value} shot, with the people at the size the framing above gives them.";
+        }
+
         $directions = [
             'The camera faces the spot straight on, at eye level, as described.',
             'The camera stands further to one side of the spot, at a clear angle, so another part of the place is behind it; what the plan puts on the left of the frame stays on the left.',
@@ -415,6 +432,19 @@ class KeyframeImageBrief
             'Keep everything else exactly as it is: the place, the framing, the camera, the blur, the light, the colours and the style.',
             'Do not add people or anything else in their spot.',
             'Do not add text, captions, brand names, logos or watermarks.',
+        ]);
+    }
+
+    /**
+     * The prompt for the empty place without one of its things, such as a landed helicopter moved elsewhere by hand.
+     */
+    public static function withoutThing(string $name): string
+    {
+        return implode("\n", [
+            "Edit the attached image. Remove the {$name} completely, with its shadow, and show what is behind it, as the place would look if it had never been there.",
+            'Keep everything else exactly as it is: the place, the framing, the camera, the light, the colours and the style.',
+            'Do not add people or anything else in its spot.',
+            'Do not add text, captions, brand names, logos or watermarks. Markings already on the floor continue where it stood.',
         ]);
     }
 

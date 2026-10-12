@@ -99,14 +99,14 @@ class VideoLimitsBrief
                 'instead' => 'people who clearly differ, such as a hi-vis vest against a striped shirt, and each on their own side of the frame throughout the shot',
             ],
             [
-                'risk' => 'Someone ends up on the other side of a person standing between where they start and where they end, such as an officer who stands right of the visitor and leaves on the left',
-                'why' => 'the video model takes the shortest way between two keyframes and walks them straight through the person in between',
+                'risk' => 'Someone or something that moves ends up on the other side of a person standing between where it starts and where it ends, such as an officer who stands right of the visitor and leaves on the left, or a forklift that drives past someone in its path',
+                'why' => 'the video model takes the shortest way between two keyframes and moves them straight through the person in between',
                 'instead' => 'have them leave or move on their own side, out of the frame on that side, or have the person in between step aside first in a keyframe of its own',
             ],
             [
-                'risk' => 'Someone appears in a later keyframe without being seen to come in, such as an officer who is suddenly standing beside the visitor',
+                'risk' => 'Someone or something that moves appears in a later keyframe without being seen to come in, such as an officer who is suddenly standing beside the visitor, or a helicopter that is suddenly on the deck',
                 'why' => 'the video model has to make up where they come from, so they pop up out of nothing or walk in from a random side, through a wall or from behind someone',
-                'instead' => 'have them in the frame from keyframe 1, such as further back walking towards the others, or show them entering in a keyframe of their own, mid-step at a named edge of the frame or in a doorway, before they stand with the others',
+                'instead' => 'have them in the frame from keyframe 1, such as further back walking towards the others or small in the sky, or show them entering in a keyframe of their own, mid-step or mid-flight at a named edge of the frame or in a doorway, before they stand with the others',
             ],
         ];
     }

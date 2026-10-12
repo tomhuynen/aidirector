@@ -1,10 +1,14 @@
 <template>
-  <!-- Lies over the keyframe image: click a person to pick them, drag them, let go to put them down. -->
+  <!-- Lies over the keyframe image: click a person or something that moves to pick it, drag it, let go to put it down. -->
   <div
     ref="surface"
     class="absolute inset-0 overflow-hidden rounded-xl"
     :class="mover.state.picked ? 'cursor-default' : 'cursor-pointer'"
-    :title="mover.state.picked ? undefined : $t('Click a person to move them')"
+    :title="
+      mover.state.picked
+        ? undefined
+        : $t('Click a person or something that moves to move it, or to say in the chat what should change')
+    "
     @click="click"
   >
     <template v-if="mover.state.picked">
@@ -18,7 +22,7 @@
       />
       <img
         :src="mover.state.picked.cutout"
-        :alt="$t('The person to move')"
+        :alt="$t('What to move')"
         class="absolute cursor-grab touch-none drop-shadow-lg active:cursor-grabbing"
         :style="boxStyle(mover.state.picked.box, mover.state.offset.dx, mover.state.offset.dy, mover.scale.value)"
         draggable="false"
@@ -36,7 +40,13 @@
       v-if="mover.state.picked && !mover.state.applying"
       class="pointer-events-none absolute inset-x-4 bottom-4 rounded-lg border border-border bg-background/90 px-4 py-2 text-center text-sm"
     >
-      {{ $t('Drag them to the new spot and let go. Esc cancels.') }}
+      {{
+        mover.state.picked.placeObject
+          ? $t(':name is part of the place: it moves in this keyframe only. Drag it and let go. Esc cancels.', {
+              name: mover.state.picked.placeObject,
+            })
+          : $t('Drag it to the new spot and let go, or say in the chat what should change. Esc cancels.')
+      }}
     </p>
     <p
       v-else-if="mover.state.error"

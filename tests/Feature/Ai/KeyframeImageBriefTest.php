@@ -119,6 +119,14 @@ it('adds the people that keyframe 1 does not show yet', function () {
         ->not->toContain('never add a second copy of anyone');
 });
 
+it('adds what moves by itself and is not in the empty place, such as a helicopter flying in', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'On the flight deck.']);
+
+    expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('first.png'), firstShowsCast: false, castNames: ['Deck officer'], thingNames: ['Site helicopter'], firstIsPlate: true)))
+        ->toContain('Site helicopter is not in the first image either: add it where and as large as this keyframe describes, once, like the people.')
+        ->toContain('and one that moves by itself in this keyframe, such as a helicopter flying in');
+});
+
 it('takes the people from their pictures and the state of things from the keyframe before', function () {
     $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
     $engineer = Element::factory()->for($shot->project)->create(['type' => 'person', 'name' => 'Female engineer']);
@@ -147,8 +155,8 @@ it('plans around what the image and video models cannot do, and has the plan dir
         ->toContain('What the image and video models cannot do in one shot')
         ->toContain('The place changes within the shot, such as driving through a gate')
         ->toContain('One person does two things with their hands at the same time')
-        ->toContain('17. Someone ends up on the other side of a person standing between')
-        ->toContain('18. Someone appears in a later keyframe without being seen to come in')
+        ->toContain('17. Someone or something that moves ends up on the other side of a person standing between')
+        ->toContain('18. Someone or something that moves appears in a later keyframe without being seen to come in')
         ->and((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
         ->toContain('tell the director in plain words why it will not work')
         ->toContain('Never write a plan that runs into one of these limits');
@@ -247,6 +255,19 @@ it('names the setting among the attached images of an empty place, in the order 
         ->toContain('The second attached image is the place of SH010. Draw this same place, without its people');
 });
 
+it('varies the distance of the place options when the shot\'s own view already sets the camera', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the landing circle.']);
+    $angles = KeyframeImageBrief::plate($shot, new KeyframeReferences(), 0);
+
+    $shot->forceFill(['storyline' => [...$shot->storyline, 'sequence_view' => 'From deck level at an angle to the landing circle.']])->save();
+    $options = collect(range(0, 2))->map(fn(int $index) => KeyframeImageBrief::plate($shot, new KeyframeReferences(), $index));
+
+    expect($angles)->toContain('it must look clearly different from the other options in where the camera stands')
+        ->and($options[0])->toContain('only its distance differs from the other options')->toContain('a step further back')
+        ->not->toContain('it must look clearly different from the other options in where the camera stands')
+        ->and($options[2])->toContain('a step closer')->toContain('it stays a full shot');
+});
+
 it('tells the checks, the review and the video about a change to the place the plan makes at a keyframe', function () {
     $shot = Shot::factory()->for(Project::factory())->create(['storyline' => ['keyframes' => [
         ['title' => 'Open', 'description' => 'She stands by the open door.'],
@@ -294,4 +315,16 @@ it('lets the description take off or put on gear a person wears in their picture
         ->and((string) (new App\Ai\Agents\KeyframeChecker($keyframe, []))->instructions())->toContain('then it is not an issue that it differs from their picture')
         ->and((new App\Ai\Agents\ShotReviewer($shot, collect([$keyframe])))->instructions())->toContain('Gear the plan has them put on or take off, such as a helmet, is not an issue.')
         ->and((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain('say in every keyframe whether they wear it');
+});
+
+it('leaves a pictured thing out of the place when it moves, such as a truck that drives off later in the sequence', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the gate.']);
+    $truck = App\Models\Element::factory()->object()->for($shot->project)->create(['name' => 'Visitor delivery truck']);
+    $references = new KeyframeReferences(elementImages: [['element' => $truck, 'image' => new StoredImage('truck.png')]]);
+    $place = ['key' => 'gate', 'name' => 'entrance gate lane', 'shots' => ['SH170', 'SH200'], 'ideas' => ['The truck stops at the barrier.', 'The truck drives off.'], 'elements' => ['Visitor delivery truck']];
+
+    expect(KeyframeImageBrief::sequencePlace($shot, $place, $references, 0))
+        ->toContain('shows Visitor delivery truck (object): draw it exactly like it where it stands still in all of these shots; when it moves in any of them, such as a vehicle that drives in or off, leave it out')
+        ->and(KeyframeImageBrief::plate($shot, $references, 0))
+        ->toContain('where it stands still in this shot; when it moves during the shot, such as a vehicle that drives in or off, leave it out');
 });

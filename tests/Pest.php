@@ -29,6 +29,8 @@ pest()
         App\Ai\Agents\VoiceOverWriter::fake(fn() => ['text' => 'A short voice-over.']);
         // Timing a shot again changes nothing unless a test fakes the timer itself.
         App\Ai\Agents\ShotTimer::fake(fn() => throw new RuntimeException('Shots are not timed again in tests.'));
+        // A change to the place shows unless a test says otherwise.
+        App\Ai\Agents\PlaceChangeChecker::fake(fn() => ['shown' => true]);
 
         $this->withoutVite();
     });

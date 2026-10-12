@@ -33,18 +33,19 @@ class ShotPlan
 
         $keyframes = collect($proposal['keyframes'])->filter(fn(mixed $keyframe) => is_array($keyframe))->values()->map(fn(array $keyframe) => array_filter([
             'title' => trim((string) ($keyframe['title'] ?? '')),
+            'beat' => trim((string) ($keyframe['beat'] ?? '')),
             'description' => trim((string) ($keyframe['description'] ?? '')),
             'spatial' => trim((string) ($keyframe['spatial'] ?? '')),
             'place_change' => trim((string) ($keyframe['place_change'] ?? '')),
             'place_part' => trim((string) ($keyframe['place_part'] ?? '')),
         ]) + [
             'elements' => collect((array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
-            // What someone changes in this keyframe: only those objects are taken from the drawing when it is put onto the place.
+            // What someone changes in this keyframe, and what moves by itself in it: only those objects are taken from the drawing when it is put onto the place.
             'handled' => collect((array) ($keyframe['handled'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
         ])->all();
         $keyframes = self::withNamedPeople($shot, $keyframes);
 
-        $storyline = trim((string) ($proposal['storyline'] ?? ''));
+        $storyline = self::storylineFrom($keyframes, (string) ($proposal['storyline'] ?? ''));
         $takeaway = trim((string) ($proposal['takeaway'] ?? ''));
         $seconds = Shot::clampSeconds((int) ($proposal['seconds'] ?? $shot->durationInSeconds()));
         $source = self::settingSource($shot, $proposal['setting_from'] ?? null);
@@ -96,7 +97,7 @@ class ShotPlan
 
         $descriptions = collect($proposal['keyframes'])->map(fn(mixed $keyframe) => trim((string) (is_array($keyframe) ? ($keyframe['description'] ?? '') : '')))->all();
 
-        return trim((string) ($proposal['storyline'] ?? '')) === trim((string) ($shot->chosen_storyline['storyline'] ?? ''))
+        return self::storylineFrom(array_values(array_filter($proposal['keyframes'], is_array(...))), (string) ($proposal['storyline'] ?? '')) === trim((string) ($shot->chosen_storyline['storyline'] ?? ''))
             && $descriptions === array_map(fn(array $keyframe) => trim((string) $keyframe['description']), $shot->storylineKeyframes())
             && (string) ($proposal['kind'] ?? '') === (string) $shot->kind?->value;
     }
@@ -163,13 +164,28 @@ class ShotPlan
     }
 
     /**
+     * The storyline as the beats of the keyframes in order, so each sentence belongs to one keyframe; the written
+     * storyline when a keyframe has no beat, as in a plan from before beats.
+     *
+     * @param  list<array<string, mixed>>  $keyframes
+     */
+    public static function storylineFrom(array $keyframes, string $written): string
+    {
+        $beats = array_map(fn(array $keyframe) => trim((string) ($keyframe['beat'] ?? '')), $keyframes);
+
+        return $beats !== [] && ! in_array('', $beats, true) ? implode(' ', $beats) : trim($written);
+    }
+
+    /**
      * Makes the people of each keyframe the ones its description names: a
      * person named but left out of its cast list is added, so the image model
      * gets their picture instead of making them up, often as a copy of someone
      * else; a person in the list whom the description never names, while it
      * names someone else, is dropped, because the image model would put them
      * in the picture anyway, standing there with nothing to do. Places and
-     * objects stay as listed.
+     * objects stay as listed, and anything handled but left out of the list
+     * is added: only what is listed is cut out of the drawing and can be
+     * moved, so a helicopter flying in that is only handled would vanish.
      *
      * @param  list<array<string, mixed>>  $keyframes
      * @return list<array<string, mixed>>
@@ -196,7 +212,10 @@ class ShotPlan
             $listed = collect((array) ($keyframe['elements'] ?? []));
             // Only when the description names someone: "she" alone may well be the person listed.
             $kept = $named->isEmpty() ? $listed : $listed->reject(fn(mixed $name) => $isPerson($name) && ! $isNamed($name));
-            $missing = $named->reject(fn(string $name) => $listed->contains(fn(mixed $listedName) => mb_strtolower(trim((string) $listedName)) === mb_strtolower($name)));
+            $isListed = fn(string $name) => $listed->contains(fn(mixed $listedName) => mb_strtolower(trim((string) $listedName)) === mb_strtolower(trim($name)));
+            $handled = collect((array) ($keyframe['handled'] ?? []))->map(fn(mixed $name) => trim((string) $name))->filter()
+                ->map(fn(string $name) => $elements->first(fn($element) => mb_strtolower($element->name) === mb_strtolower($name))?->name)->filter();
+            $missing = $named->concat($handled)->reject($isListed)->unique(fn(string $name) => mb_strtolower($name));
 
             return $missing->isEmpty() && $kept->count() === $listed->count() ? $keyframe : [...$keyframe, 'elements' => $kept->concat($missing)->values()->all()];
         }, $keyframes);

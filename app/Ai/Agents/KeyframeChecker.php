@@ -105,7 +105,7 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             The shot teaches: {$this->keyframe->shot->takeaway}
 
             Work in three steps, using each reference only for what it is the reference for.
-            1. Inventory of the references. List what must stay the same: each person (face, hair, headwear and any lettering on it, glasses, clothing and colours), each object and its state (what it holds, what is in it, where it hangs or stands), and the fixed parts of the place with where they are: floor markings and painted lines (their position and angle), doors, signs, windows, machines, vehicles and any lettering on them. Gear a person wears, such as a helmet, safety glasses, gloves or a vest, follows the description instead when it says they are not wearing it yet, take it off or put it on: then it is not an issue that it differs from their picture.
+            1. Inventory of the references. List what must stay the same: each person (face, hair, headwear and any lettering on it, glasses, clothing and colours), each object and its state (what it holds, what is in it, where it hangs or stands), and the fixed parts of the place with where they are: floor markings and painted lines (their position and angle), doors, signs, windows, machines, vehicles and any lettering on them. Gear a person wears, such as a helmet, safety glasses, gloves or a vest, follows the description instead when it says they are not wearing it yet, take it off or put it on: then it is not an issue that it differs from their picture. A picture of the cast decides how someone or something looks, not the loose things shown with it, such as a card hanging in a vehicle's window or something in a hand: one missing is never an issue unless the description has it.
             2. Compare the keyframe to check with that inventory: what disappeared, what changed in look, position, shape, angle or state.
             3. Look the other way: what is in the keyframe to check that is in none of the references, such as an extra object, person, lettering, logo or numbers. A person who is in the keyframe to check but not in the first reference is fine when the description has them; compare them with their own reference.
 
@@ -167,7 +167,7 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
         $rules = $this->keyframe->shot->project->rulesBrief();
 
         return implode("\n", array_filter([
-            $rules === '' ? null : "Also check the rules the director confirmed for this project; breaking one is a high issue:\n{$rules}",
+            $rules === '' ? null : "Also check the rules the director confirmed for this project; breaking one is a high issue. A rule only holds for a keyframe whose description shows what it is about, such as a permit or a badge: never ask for something the description does not have, such as a permit holder in a keyframe without a permit:\n{$rules}",
         ]));
     }
 }

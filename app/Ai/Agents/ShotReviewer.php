@@ -6,9 +6,11 @@ namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Contracts\HasReasoningEffort;
+use App\Ai\KeyframePainter;
 use App\Enums\ShotKind;
 use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Support\Shots\SequenceOverview;
 use App\Support\Shots\SequencePlaces;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Collection;
@@ -46,6 +48,8 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             - Is what each keyframe's description says about positions and distances, such as where someone stands relative to a line or a hazard, clearly visible and readable?
             - Does every keyframe show a step a viewer can see? Two keyframes in a row that look almost the same, where only a small detail such as a hand angle changes, is an issue: name the step that cannot be seen.
             - Does the movement go the way the storyline says? Someone who enters a place moves into it, someone who leaves moves out of it, someone who walks towards something ends up nearer to it. Moving the opposite way, such as walking out towards the camera while the storyline says she walks into the hall, is an issue.
+            - A shot that cuts in on the moment the shot before ends, from its own camera, such as a close-up at a truck window after the wide shot of the gate, shows what lies behind its subject from where its camera stands. When its background repeats the view of the shot before from the same direction, such as the booth and the barrier behind the driver while the camera stands where the officer stood next to that booth, it is an issue: the camera cannot see what is beside or behind it. What its camera sees is given below when it was written out.
+            - When the shot is part of a sequence, judge it only on its own part of the story: what another shot of the sequence shows, such as the permit in the close-up after this shot, is never an issue here, also when the takeaway names it. The sequence below says what each shot shows.
             - When the shot is part of a sequence, it may show only its part of the place: a danger or goal out of the frame is not an issue when the shot before shows where it is and this shot keeps that side, such as her looking back to the left where the fire was. It is an issue when nothing in the shot or its direction says where the danger is while the point is the distance to it.
             - Is everything that matters large enough to read at a glance on a phone? The people should be big in the frame and the object the story turns on, such as a cigarette, a key or a buckle, clearly visible. People that are small in a wide view with a lot of empty space, or an object of a few pixels, is an issue; name the keyframes.
             - Does the storyline happen in the keyframes? A step it names, such as someone entering, leaving or noticing something, that only happens between two keyframes or cannot be seen is an issue.
@@ -138,6 +142,14 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
         $view = fn(Shot $shot) => ($place = app(SequencePlaces::class)->of($shot)) === null ? '' : " It plays in {$place['name']}" . ($place['view'] !== null ? ", showing {$place['view']}" : '') . '.';
         $plan = collect($before->storylineKeyframes())->map(fn(array $keyframe) => $keyframe['description'])->last() ?? (trim((string) $before->notes) ?: $before->takeaway);
 
-        return "\n\nThis shot is part of a sequence. The shot before, {$before->code()}, ends with: {$plan}{$view($before)}\nThis shot:{$view($this->shot)}";
+        $cutIn = trim((string) ($this->shot->storyline[KeyframePainter::CUT_IN_BRIEF]['text'] ?? ''));
+        // Every shot of the sequence with what it shows, so a part of the takeaway another shot shows is not asked of this one.
+        $overview = collect(SequenceOverview::of($this->shot))
+            ->map(fn(array $row) => "- {$row['code']} ({$row['kind']})" . ($row['current'] ? ', this shot' : '') . ': ' . implode(' ', $row['beats']))
+            ->join("\n");
+
+        return "\n\nThis shot is part of a sequence. The shot before, {$before->code()}, ends with: {$plan}{$view($before)}\nThis shot:{$view($this->shot)}"
+            . ($cutIn !== '' ? " It cuts in on that moment from its own camera: {$cutIn}" : '')
+            . "\nThe shots of the sequence:\n{$overview}";
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Public;
 
+use App\Ai\KeyframePainter;
 use App\Models\Keyframe;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -19,12 +20,21 @@ class KeyframeResource extends JsonResource
     {
         $render = $this->render();
         $rendered = $render !== null;
+        $preparing = $this->movable($rendered) && app(KeyframePainter::class)->preparingPlace($this->shot);
 
         return [
             'id' => $this->sqid,
+            /**
+             * The place is being made ready for moving things by hand: until then the image waits.
+             *
+             * @var bool
+             */
+            'placePreparing' => $preparing,
             /** @var int */
             'position' => $this->position,
             'title' => $this->title,
+            /** This keyframe's part of the storyline, read under its image; null for a plan from before beats. */
+            'beat' => ($this->shot->storylineKeyframes()[$this->position - 1]['beat'] ?? null) ?: null,
             'description' => $this->description,
             /** The one fact a viewer must be able to check at a glance; sent as the last sentence of the description. */
             'spatial' => $this->spatial,
@@ -75,11 +85,11 @@ class KeyframeResource extends JsonResource
                 'update' => route('public.shots.keyframes.update', [$this->shot->project, $this->shot, $this->resource]),
                 'tweak' => route('public.shots.keyframes.tweak', [$this->shot->project, $this->shot, $this->resource]),
                 /** @var string|null Moving a person by hand; only for a keyframe drawn on a chosen place. */
-                'move' => $this->movable($rendered) ? route('public.shots.keyframes.move', [$this->shot->project, $this->shot, $this->resource]) : null,
+                'move' => $this->movable($rendered) && ! $preparing ? route('public.shots.keyframes.move', [$this->shot->project, $this->shot, $this->resource]) : null,
                 /** @var string|null */
-                'moveSelect' => $this->movable($rendered) ? route('public.shots.keyframes.move.select', [$this->shot->project, $this->shot, $this->resource]) : null,
-                /** @var string|null Fitting the pose of a person moved by hand to their new spot: only on a version where someone was moved. */
-                'moveFit' => $this->movable($rendered) && is_array($render?->getCustomProperty(Keyframe::MOVED_BOX)) ? route('public.shots.keyframes.move.fit', [$this->shot->project, $this->shot, $this->resource]) : null,
+                'moveSelect' => $this->movable($rendered) && ! $preparing ? route('public.shots.keyframes.move.select', [$this->shot->project, $this->shot, $this->resource]) : null,
+                /** @var string|null Fitting the pose of a person moved by hand to their new spot: only on a version where someone, not a thing, was moved. */
+                'moveFit' => $this->movable($rendered) && is_array($render?->getCustomProperty(Keyframe::MOVED_BOX)) && $render->getCustomProperty(Keyframe::MOVED_THING) !== true ? route('public.shots.keyframes.move.fit', [$this->shot->project, $this->shot, $this->resource]) : null,
                 'chooseRender' => route('public.shots.keyframes.render', [$this->shot->project, $this->shot, $this->resource]),
                 'destroy' => route('public.shots.keyframes.destroy', [$this->shot->project, $this->shot, $this->resource]),
                 'copy' => route('public.shots.keyframes.copy', [$this->shot->project, $this->shot, $this->resource]),

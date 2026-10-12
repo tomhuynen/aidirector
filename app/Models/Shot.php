@@ -68,6 +68,15 @@ class Shot extends Model implements HasMedia
     /** The place in a later state, such as a door that is closed by now: the keyframe it starts at and later ones are drawn on it. */
     public const PLACE_STATES = 'place_states';
 
+    /** The chosen place without the named things it has, such as a landed helicopter, with a mask of each: so one can be moved by hand at once. */
+    public const PLATE_EMPTIED = 'plate_emptied';
+
+    /** On the storyline: the plan is written and waits for the director's go before anything is drawn. */
+    public const AWAITS_GO = 'awaits_go';
+
+    /** On the chosen place: its named things were taken out, or it has none, or that failed; until then nothing can be moved in its keyframes. */
+    public const PLATE_EMPTIED_DONE = 'emptied';
+
     /** On a place state: the place and the changes up to its keyframe it was made for, so a new plan or place makes it unused. */
     public const PLACE_STATE_KEY = 'key';
 
@@ -271,9 +280,12 @@ class Shot extends Model implements HasMedia
      * Adds a message from the plan director to the conversation about the
      * shot, such as that the places are ready to choose from.
      */
-    public function say(string $text): void
+    /**
+     * @param  list<string>  $answers  short answers the director can click instead of typing
+     */
+    public function say(string $text, array $answers = []): void
     {
-        $this->updateStoredJson('plan_chat', fn(?array $chat) => [...array_values($chat ?? []), ['role' => 'assistant', 'text' => $text]]);
+        $this->updateStoredJson('plan_chat', fn(?array $chat) => [...array_values($chat ?? []), array_filter(['role' => 'assistant', 'text' => $text, 'answers' => $answers])]);
     }
 
     /**
@@ -315,9 +327,9 @@ class Shot extends Model implements HasMedia
      *
      * Older plans also carry a `prompt`: an image instruction no longer written or used; the description goes to the image model.
      *
-     * `handled` lists the objects someone changes in that keyframe; plans from before it was asked for have none.
+     * `handled` lists the objects someone changes in that keyframe and those that move by themselves in it; plans from before it was asked for have none.
      *
-     * @return list<array{title: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, handled?: list<string>, copied?: bool}>
+     * @return list<array{title: string, beat?: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, handled?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
@@ -483,15 +495,23 @@ class Shot extends Model implements HasMedia
     public function drawKeyframes(): void
     {
         if ($this->waitsFor() !== null) {
-            $this->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'draw_when_ready' => true]);
+            $this->updateStoredJson('storyline', fn(?array $storyline) => [...array_diff_key($storyline ?? [], [self::AWAITS_GO => true]), 'draw_when_ready' => true]);
 
             return;
         }
 
-        $this->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['draw_when_ready' => true]));
+        $this->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['draw_when_ready' => true, self::AWAITS_GO => true]));
         $this->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_PENDING, 'storyline_error' => null])->save();
 
         GenerateKeyframes::dispatch($this);
+    }
+
+    /**
+     * Whether the plan is written and its keyframes wait for the director's go on the overview of the sequence.
+     */
+    public function awaitsGo(): bool
+    {
+        return ($this->storyline[self::AWAITS_GO] ?? false) === true;
     }
 
     /**
@@ -848,6 +868,7 @@ class Shot extends Model implements HasMedia
         $this->addMediaCollection(self::SEQUENCE_PLACE_OPTIONS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::SEQUENCE_PLACES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PLACE_STATES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::PLATE_EMPTIED)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }

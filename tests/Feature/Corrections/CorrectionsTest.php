@@ -155,6 +155,19 @@ describe('rules', function () {
             ->toContain("Rules the director confirmed for this project, always follow them:\n- People stand within two steps of the hazard.")
             ->not->toContain('Always sunny.')
             ->and(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences()))
-            ->toContain("Project rules, always follow them:\n- People stand within two steps of the hazard.");
+            ->toContain("Project rules, always follow them where this keyframe shows what they are about; never add something only because a rule names it:\n- People stand within two steps of the hazard.");
+
+        // The check holds a keyframe only to the rules about what it shows, such as no permit holder asked for where there is no permit.
+        $keyframe = App\Models\Keyframe::factory()->for($shot)->create(['position' => 1]);
+        expect((string) (new App\Ai\Agents\KeyframeChecker($keyframe->load('shot.project'), []))->instructions())
+            ->toContain('never ask for something the description does not have');
     });
+});
+
+it('does not hold a keyframe to the loose things a cast picture shows, such as a card in a truck window', function () {
+    $shot = readyShot(Project::factory()->create())->load('project');
+    $keyframe = App\Models\Keyframe::factory()->for($shot)->create(['position' => 1]);
+
+    expect((string) (new App\Ai\Agents\KeyframeChecker($keyframe->load('shot.project'), []))->instructions())
+        ->toContain('not the loose things shown with it, such as a card hanging in a vehicle\'s window');
 });

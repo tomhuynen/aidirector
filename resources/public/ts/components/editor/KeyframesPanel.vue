@@ -37,6 +37,13 @@
             {{ $t('Render again') }}
           </DropdownMenuItem>
         </VideoActions>
+        <!-- Starting the shot over, from the places or from the plan; the video has its own menu here. -->
+        <ShotActions
+          v-if="!showVideo && restart && (restart.placeUrl || restart.planUrl)"
+          :place-url="restart.placeUrl"
+          :plan-url="restart.planUrl"
+          class="absolute top-4 right-4 z-10"
+        />
         <FirstKeyframeChooser
           v-if="choosing.active && keyframes[0] && !checkingFirst"
           :options="choosing.plates ?? keyframes[0]?.renders ?? []"
@@ -85,7 +92,10 @@
               :src="selected.imageUrl"
               :alt="selected.title"
               :class="
-                cn('size-full rounded-xl border border-border bg-card object-cover', drawing(selected) && 'opacity-50')
+                cn(
+                  'size-full rounded-xl border border-border bg-card object-cover',
+                  (drawing(selected) || selected.placePreparing) && 'opacity-50',
+                )
               "
             />
             <KeyframeScan v-if="scanning(selected)" :label="scanLabel()" large class="rounded-xl" />
@@ -109,11 +119,17 @@
               {{ $t('Use this keyframe') }}
             </Button>
             <p
-              v-if="drawing(selected)"
+              v-if="drawing(selected) || selected.placePreparing"
               class="absolute bottom-4 mx-4 flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
             >
               <LoaderCircle class="size-4 shrink-0 animate-spin" />
-              {{ finishing(selected) ? $t('Finishing…') : $t('Generating image…') }}
+              {{
+                drawing(selected)
+                  ? finishing(selected)
+                    ? $t('Finishing…')
+                    : $t('Generating image…')
+                  : $t('Getting the place ready for moving things…')
+              }}
             </p>
           </div>
           <Placeholder v-else class="max-h-full max-w-full rounded-xl bg-card" :style="frameSize">
@@ -161,6 +177,7 @@
       >
         <PlanChat
           :key="`chat`"
+          v-model:draft="chatDraft"
           :chat-url="chat.url"
           :conversation="chat.conversation"
           :kinds="chat.kinds"
@@ -171,7 +188,11 @@
           :sequence-place="chat.sequencePlace ?? null"
           :sequence-place-url="chat.sequencePlaceUrl"
           :sequence-place-drawing="chat.sequencePlaceDrawing ?? null"
+          :aspect-ratio="aspectRatio"
+          :render-seconds="renderSeconds?.keyframe"
           :target="chatTarget"
+          :takeaway="chat.takeaway"
+          @sent="mover.cancel()"
         />
       </aside>
       <FirstKeyframeInspector
@@ -359,6 +380,7 @@
                   {{ finishing(keyframe) ? $t('Finishing…') : $t('Generating image…') }}
                 </p>
                 <p v-else class="text-xs text-muted-foreground tabular-nums">{{ timeAt(i) }}</p>
+                <p v-if="keyframe.beat" class="mt-1 line-clamp-3 text-xs text-muted-foreground">{{ keyframe.beat }}</p>
               </div>
             </div>
           </li>
@@ -515,6 +537,7 @@ import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import PlanChat, { type ChatTarget, type PlanChatTurn } from './PlanChat.vue'
 import RenderProgress from './RenderProgress.vue'
+import ShotActions from './ShotActions.vue'
 import VideoActions from './VideoActions.vue'
 
 export type PanelIssueGroup = {
@@ -535,6 +558,10 @@ export type PanelKeyframe = {
   needsDescription?: boolean
   /** Moving a person by hand: picking them, and putting them down. Only on a keyframe drawn on a place. */
   moveSelectUrl?: string | null
+  /** This keyframe's part of the storyline, read under its image. */
+  beat?: string | null
+  /** The place is being made ready for moving things by hand: until then the image waits. */
+  placePreparing?: boolean
   moveUrl?: string | null
   /** Fitting the pose of a person moved by hand to their new spot; only after a move. */
   moveFitUrl?: string | null
@@ -620,7 +647,11 @@ const props = defineProps<{
     sequencePlace?: { name: string; shots: string[]; options: { id: number; imageUrl: string }[] } | null
     sequencePlaceUrl?: string
     sequencePlaceDrawing?: { name: string; shots: string[]; count: number } | null
+    /** What the viewer should learn from the shot, kept in view above the conversation. */
+    takeaway?: string | null
   }
+  /** Starting the shot over: another place for the same plan, or a new plan; null while it cannot be done. */
+  restart?: { placeUrl?: string | null; planUrl?: string | null }
   keyframes: PanelKeyframe[]
   aspectRatio: string
   duration: number
@@ -661,11 +692,49 @@ const chatTarget = computed<ChatTarget>(() =>
         kind: 'keyframe',
         keyframe: selected.value.id,
         label: $t('About keyframe :n · :title', { n: String(selectedIndex.value + 1), title: selected.value.title }),
+        // Who was clicked goes along, so the chat knows exactly who is meant.
+        box: mover.state.picked?.box ?? null,
       }
     : null,
 )
 /** Moving a person in the selected keyframe by hand; stops when another keyframe is selected. */
 const mover = createKeyframeMover()
+
+/** What is typed in the chat; clicking someone in the image starts it with who that is. */
+const chatDraft = ref('')
+
+/** Who was clicked, in words: a thing of the place by its name, a person by where they stand. */
+const clickedName = (picked: NonNullable<typeof mover.state.picked>) => {
+  if (picked.placeObject) return picked.placeObject
+
+  const middle = picked.box.x + picked.box.width / 2
+
+  return middle < 0.36
+    ? $t('the person on the left')
+    : middle > 0.64
+      ? $t('the person on the right')
+      : $t('the person in the middle')
+}
+
+let filledIn = ''
+
+watch(
+  () => mover.state.picked,
+  (picked) => {
+    // Put down or let go without typing anything: the started sentence goes again.
+    if (!picked) {
+      if (filledIn !== '' && chatDraft.value === filledIn) chatDraft.value = ''
+      filledIn = ''
+
+      return
+    }
+
+    if (!props.chat || (chatDraft.value.trim() !== '' && chatDraft.value !== filledIn)) return
+
+    filledIn = $t('Keyframe :n, :who: ', { n: String(selectedIndex.value + 1), who: clickedName(picked) })
+    chatDraft.value = filledIn
+  },
+)
 
 const showVideo = ref(Boolean(props.video.url || props.video.pending))
 

@@ -141,7 +141,18 @@ describe('create', function () {
             && str_contains((string) $prompt->agent->instructions(), 'The idea is already a small story'));
     });
 
-    it('talks first, then puts the agreed plan into the shot and draws it', function () {
+    it('keeps up to three short answers to click under a reply, and leaves out empty or long ones', function () {
+        PlanDirector::fake([directorReply([
+            'reply' => 'Shall I draw the places?',
+            'answers' => ['Yes, draw the places', ' ', 'Yes, draw the places', 'Change the storyline', str_repeat('a', 61), 'Keep it', 'One more'],
+        ])]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'the plan is fine')
+            ->assertJsonPath('messages.1.answers', ['Yes, draw the places', 'Change the storyline', 'Keep it']);
+    });
+
+    it('talks first, then puts the agreed plan into the shot, shows the overview and draws it once the director agrees', function () {
         Queue::fake();
         $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
         PlanDirector::fake([
@@ -151,6 +162,7 @@ describe('create', function () {
                 'storyline' => 'She pulls the cord and the badge comes round to her chest.',
                 'keyframes' => [['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['female engineer']]],
             ])]),
+            directorReply(['reply' => 'Drawing it now.', 'draw' => true]),
         ]);
         $shot = planShot($this->project, [
             'chosen_storyline' => ['title' => 'Badge', 'storyline' => 'She wears her badge.'],
@@ -165,7 +177,16 @@ describe('create', function () {
 
         talkTo($this, $shot, 'yes, in front of her')
             ->assertJsonPath('messages.3.proposal', ['kind' => 'close-up', 'settingFrom' => null])
+            ->assertJsonPath('messages.3.overview.0.beats', ['Badge Behind'])
             ->assertJsonPath('reload', true);
+
+        // Nothing is drawn before the director agrees on the overview.
+        expect($shot->fresh()->status)->toBe(ShotStatus::STORYLINE_READY)
+            ->and($shot->fresh()->awaitsGo())->toBeTrue();
+        Queue::assertNotPushed(App\Jobs\GenerateKeyframes::class);
+
+        // Drawing starts: the page reloads to show the keyframes being drawn.
+        talkTo($this, $shot->fresh(), 'draw it')->assertJsonPath('reload', true);
 
         $shot->refresh();
 
@@ -173,7 +194,8 @@ describe('create', function () {
             ->and($shot->chosenStoryline()['storyline'])->toBe('She pulls the cord and the badge comes round to her chest.')
             ->and($shot->storylineKeyframes())->toEqual([['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['Female engineer'], 'handled' => []]])
             ->and($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
-            ->and($shot->plan_chat)->toHaveCount(4);
+            ->and($shot->awaitsGo())->toBeFalse()
+            ->and($shot->plan_chat)->toHaveCount(6);
         Queue::assertPushed(App\Jobs\GenerateKeyframes::class);
         // The conversation and the plan as saved are sent along every turn; nothing becomes a rule.
         PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Director: the badge starts on her back')
@@ -215,6 +237,22 @@ describe('create', function () {
         expect($replies[$replies->count() - 3]['cast'])->toEqualCanonicalizing([$visitor->sqid, $bin->sqid])
             ->and($replies[$replies->count() - 2])->not->toHaveKey('cast')
             ->and($replies[$replies->count() - 1]['cast'])->toBe([$visitor->sqid]);
+    });
+
+    it('shows the cast made while the director was answering, such as a truck made from an offer', function () {
+        $visitor = App\Models\Element::factory()->for($this->project)->create(['name' => 'Helmeted visitor', 'type' => 'person']);
+        $truck = null;
+        PlanDirector::fake(function () use (&$truck) {
+            // Made from its offer in another request while this answer is on its way.
+            $truck = App\Models\Element::factory()->for($this->project)->create(['name' => 'Visitor delivery truck', 'type' => 'object']);
+
+            return directorReply(['reply' => 'I use these.', 'stage' => 'cast', 'cast' => ['Visitor delivery truck', 'Helmeted visitor']]);
+        });
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'ok');
+
+        expect(collect($shot->fresh()->plan_chat)->where('role', 'assistant')->last()['cast'])->toEqualCanonicalizing([$visitor->sqid, $truck->sqid]);
     });
 
     it('asks again when an idea is proposed without checking its story and places', function () {
@@ -463,10 +501,14 @@ describe('create', function () {
     it('waits to draw until new cast pictures are ready, then draws by itself', function () {
         Queue::fake();
         $clip = Element::factory()->for($this->project)->create(['name' => 'Badge clip', 'rendering' => true]);
-        PlanDirector::fake([directorReply(['proposal' => agreedPlan(['keyframes' => [['title' => 'Clip', 'description' => 'The Badge clip on the vest.', 'spatial' => '', 'elements' => ['Badge clip']]]])])]);
+        PlanDirector::fake([
+            directorReply(['proposal' => agreedPlan(['keyframes' => [['title' => 'Clip', 'description' => 'The Badge clip on the vest.', 'spatial' => '', 'elements' => ['Badge clip']]]])]),
+            directorReply(['draw' => true]),
+        ]);
         $shot = planShot($this->project);
 
         talkTo($this, $shot, 'yes');
+        talkTo($this, $shot->fresh(), 'draw it');
 
         expect($shot->fresh())->status->toBe(ShotStatus::STORYLINE_READY)
             ->and($shot->fresh()->waitsFor())->toBe('the pictures of the new cast and sets');

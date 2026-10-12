@@ -56,3 +56,31 @@ it('keeps the plan when the answer does not have the same keyframes', function (
     expect($this->shot->fresh()->storylineKeyframes()[0]['description'])->toBe('The bin burns on the right of the frame.')
         ->and($this->shot->fresh()->plan_chat)->toBeNull();
 });
+
+it('checks the plan against the layout of the place, and says what cannot work from this camera', function () {
+    App\Ai\Agents\PlaceMapper::fake([[
+        'map' => 'The lane runs away from the camera; the booth stands on its right.',
+        'things' => [['name' => 'Guard booth', 'side' => 'right', 'distance' => 'middle', 'faces' => 'its window faces the lane']],
+        'routes' => [['name' => 'Entrance lane', 'runs' => 'from the near middle away from the camera to the barrier']],
+    ]]);
+    PlanPlaceAligner::fake([[
+        'keyframes' => [
+            ['description' => 'The bin burns on the right of the frame.', 'spatial' => ''],
+            ['description' => 'She walks away to the left of the frame.', 'spatial' => 'Two steps from the bin.'],
+        ],
+        'note' => '',
+        'problem' => 'The truck in the lane hides the guard and his booth; a camera across the lane would show both.',
+    ]]);
+
+    app(PlanToPlace::class)->align($this->shot, $this->place);
+    app(PlanToPlace::class)->align($this->shot->fresh(), $this->place->fresh());
+
+    $last = collect($this->shot->fresh()->plan_chat)->last();
+
+    expect($this->place->fresh()->getCustomProperty(App\Support\Images\PlaceLayout::KEY)['routes'][0]['name'])->toBe('Entrance lane')
+        ->and($last['text'])->toBe('From this camera one thing cannot work: The truck in the lane hides the guard and his booth; a camera across the lane would show both.')
+        ->and($last['answers'])->toBe(['Fix the plan', 'Use another camera', 'Keep it']);
+    PlanPlaceAligner::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "Routes through the place:\n- Entrance lane: from the near middle away from the camera to the barrier")
+        && str_contains((string) $prompt->agent->instructions(), 'Seen: from this camera, nothing that must be seen is hidden behind something nearer the camera'));
+    App\Ai\Agents\PlaceMapper::assertPromptedTimes(1);
+});

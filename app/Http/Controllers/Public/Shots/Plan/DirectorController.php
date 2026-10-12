@@ -24,6 +24,7 @@ use App\Support\Findings\FindingsReport;
 use App\Support\Findings\ShotIssues;
 use App\Support\Shots\DrawnPlan;
 use App\Support\Shots\FirstKeyframeChoice;
+use App\Support\Shots\SequenceOverview;
 use App\Support\Shots\SequencePlaces;
 use App\Support\Shots\ShotPlan;
 use Illuminate\Http\JsonResponse;
@@ -73,7 +74,7 @@ class DirectorController
         // Before the keyframes are drawn, the places or options waiting for a choice are attached in order; after, the selected image.
         // The places of a sequence come first: they are chosen in the chat of its first shot before anything else.
         $waiting = $sequencePlaces->waiting($shot) ?? $choice->waiting($shot);
-        [$selected, $image] = $keyframes->isEmpty() || $waiting !== null ? ['', null] : $this->selected($keyframes, $request);
+        [$selected, $image, $about] = $keyframes->isEmpty() || $waiting !== null ? ['', null, ''] : $this->selected($keyframes, $request);
         $images = $waiting !== null ? $waiting['options']->take(self::MAX_OPTIONS_SHOWN)->values()->all() : array_filter([$image]);
         // What the checks found and was reported in the chat, waiting for the director's answer.
         $findings = $keyframes->isEmpty() ? null : $report->waiting($shot, $keyframes);
@@ -135,6 +136,8 @@ class DirectorController
 
         $data = $response->toArray();
         $stage = in_array($data['stage'] ?? null, PlanDirector::STAGES, true) ? $data['stage'] : null;
+        // Cast and sets made while it was answering, such as a truck made from an offer, are part of its answer too.
+        $elements = $project->elements()->get();
         $sqids = fn(array $names) => $elements->filter(fn(Element $element) => in_array(mb_strtolower($element->name), array_map(fn(mixed $name) => mb_strtolower((string) $name), $names), true))->pluck('sqid')->values()->all();
 
         // What it offers to make for the cast and sets; an earlier offer lapses once the conversation moves on.
@@ -151,8 +154,11 @@ class DirectorController
         $cast = collect($cast)->sort()->values()->all() === collect($shownCast)->sort()->values()->all() ? [] : $cast;
         $adjusted = $this->adjustElements($elements, $data['adjust_elements'] ?? null);
 
+        // The written plan waits for the director's go on the overview; agreeing draws it, also when the same plan is given again.
+        $go = $shot->awaitsGo() && $keyframes->isEmpty() && (($data['draw'] ?? false) === true || ShotPlan::isCurrent($shot, $data['proposal'] ?? null));
+
         // The same plan again for a drawn shot draws nothing new: what is drawn stays.
-        $proposal = $keyframes->isNotEmpty() && ShotPlan::isCurrent($shot, $data['proposal'] ?? null) ? null : $data['proposal'] ?? null;
+        $proposal = $go || ($keyframes->isNotEmpty() && ShotPlan::isCurrent($shot, $data['proposal'] ?? null)) ? null : $data['proposal'] ?? null;
 
         // A new plan for a drawn shot keeps the keyframes that stay the same; when what they are all drawn from changes, or the director asks, it starts over.
         $planned = $shot->storylineKeyframes();
@@ -182,10 +188,15 @@ class DirectorController
         $spoken = [...$spoken, ...$this->changeView($shot, $data['view'] ?? null)];
         $changes = ['made' => [...$redrawn, ...$chosen['made'], ...$judged['made'], ...$spoken, ...$changes['made']], 'waiting' => $chosen['waiting'] ?? $judged['waiting'] ?? $changes['waiting']];
 
+        // A new plan waits for the director's go on the overview of the sequence before anything is drawn.
+        if ($plan !== null && ! $keepsDrawn) {
+            $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), Shot::AWAITS_GO => true]);
+        }
+
         $turns = [
             ...$conversation,
-            ...($continuing ? [] : [array_filter(['role' => 'director', 'text' => $message, 'made' => $made, 'about' => $selected])]),
-            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'chosen_place' => $chosen['place'] ?? null, 'rules_check' => self::rulesCheck($data['rules_check'] ?? null)]),
+            ...($continuing ? [] : [array_filter(['role' => 'director', 'text' => $message, 'made' => $made, 'about' => $about])]),
+            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'answers' => self::answers($data['answers'] ?? null), 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'chosen_place' => $chosen['place'] ?? null, 'rules_check' => self::rulesCheck($data['rules_check'] ?? null)]),
         ];
 
         $shot->forceFill(['plan_chat' => $turns])->save();
@@ -199,6 +210,12 @@ class DirectorController
             $turns[$last]['changes'] = [...($turns[$last]['changes'] ?? []), ...$sequenceNotes];
             $shot->forceFill(['plan_chat' => $turns])->save();
         }
+
+        // The overview of the sequence, every shot with its kind and beats, under a new plan or newly agreed shots.
+        if (($plan !== null && ! $keepsDrawn) || $sequenceNotes !== []) {
+            $turns[array_key_last($turns)]['overview'] = SequenceOverview::of($shot->fresh());
+            $shot->forceFill(['plan_chat' => $turns])->save();
+        }
         $removed = $this->removeShots($project, $shot, $data['remove_shots'] ?? null);
         $visit = $this->removeThisShot($project, $shot, $data['remove_shots'] ?? null);
 
@@ -206,12 +223,29 @@ class DirectorController
             return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'reload' => false, 'visit' => $visit]);
         }
 
-        // Agreed: drawn now, or as soon as the pictures or the setting it needs are there.
-        if ($plan !== null && ! $keepsDrawn) {
+        // Agreed on the overview: drawn now, or as soon as the pictures or the setting it needs are there.
+        if ($go) {
             $shot->drawKeyframes();
         }
 
-        return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'reload' => $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $removed !== [] || $offered]);
+        return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'reload' => $go || $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $removed !== [] || $offered]);
+    }
+
+    /**
+     * The short answers the director can click instead of typing, under the
+     * last reply only.
+     *
+     * @return list<string>
+     */
+    private static function answers(mixed $answers): array
+    {
+        return collect(is_array($answers) ? $answers : [])
+            ->map(fn(mixed $answer) => trim((string) $answer))
+            ->filter(fn(string $answer) => $answer !== '' && mb_strlen($answer) <= 60)
+            ->unique()
+            ->take(3)
+            ->values()
+            ->all();
     }
 
     /**
@@ -236,18 +270,35 @@ class DirectorController
     }
 
     /**
-     * What the director has selected among the drawn images, in words, and its image.
+     * What the director has selected among the drawn images, in words for the
+     * plan director, its image, and the keyframe as shown with the message.
      *
      * @param  Collection<int, Keyframe>  $keyframes
-     * @return array{0: string, 1: Media|null}
+     * @return array{0: string, 1: Media|null, 2: string}
      */
     private function selected(Collection $keyframes, PlanDirectorRequest $request): array
     {
         $keyframe = $keyframes->firstWhere('sqid', (string) $request->validated('keyframe'));
 
-        return $keyframe !== null
-            ? [__('keyframe :n, :title', ['n' => $keyframe->position, 'title' => $keyframe->title]), $keyframe->render()]
-            : [__('nothing: the images are still being drawn'), null];
+        if ($keyframe === null) {
+            return [__('nothing: the images are still being drawn'), null, ''];
+        }
+
+        $about = __('keyframe :n, :title', ['n' => $keyframe->position, 'title' => $keyframe->title]);
+        $selected = $about;
+        $box = $request->validated('box');
+
+        // Clicked in the image: the one meant is the one standing there, whatever the words call them.
+        if (is_array($box)) {
+            $selected .= __('; the director clicked the one meant, who stands from :left% to :right% of the width from the left and from :top% to :bottom% of the height from the top', [
+                'left' => (int) round((float) $box['x'] * 100),
+                'right' => (int) round(min(1.0, (float) $box['x'] + (float) $box['width']) * 100),
+                'top' => (int) round((float) $box['y'] * 100),
+                'bottom' => (int) round(min(1.0, (float) $box['y'] + (float) $box['height']) * 100),
+            ]);
+        }
+
+        return [$selected, $keyframe->render(), $about];
     }
 
     /**
@@ -627,6 +678,7 @@ class DirectorController
                 'cast' => array_values(array_filter(array_map(fn(mixed $name) => trim((string) $name), (array) ($part['cast'] ?? [])), fn(string $name) => $name !== '')),
                 'place' => trim((string) ($part['place'] ?? '')),
                 'view' => trim((string) ($part['view'] ?? '')),
+                'beats' => array_values(array_filter(array_map(fn(mixed $beat) => trim((string) $beat), (array) ($part['beats'] ?? [])), fn(string $beat) => $beat !== '')),
             ])
             ->values();
 
@@ -662,6 +714,7 @@ class DirectorController
             $shot->updateStoredJson('storyline', fn(?array $storyline) => [
                 ...array_diff_key($storyline ?? [], ['sequence_place' => true, 'sequence_view' => true, ...$earlier]),
                 'sequence_cast' => $first['cast'],
+                SequenceOverview::BEATS => $first['beats'],
                 ...($placeOf(0) !== null ? ['sequence_place' => $placeOf(0)] : []),
                 ...($placeOf(0) !== null && $first['view'] !== '' ? ['sequence_view' => $first['view']] : []),
             ]);
@@ -671,10 +724,12 @@ class DirectorController
                 $opening = [[
                     'role' => 'assistant',
                     'stage' => 'idea',
-                    'text' => __('This shot is part of the sequence we planned: :idea Shall we go on from there?', ['idea' => $part['idea']]),
+                    'text' => __('This shot is part of the sequence we planned: :idea Its keyframes, cast and setting are agreed with the sequence. Shall I write its plan?', ['idea' => $part['idea']]),
+                    'answers' => [__('Yes, write the plan'), __('Change something first')],
                 ]];
                 $cast = [
                     'sequence_cast' => $part['cast'],
+                    SequenceOverview::BEATS => $part['beats'],
                     ...($placeOf($index + 1) !== null ? ['sequence_place' => $placeOf($index + 1)] : []),
                     ...($placeOf($index + 1) !== null && $part['view'] !== '' ? ['sequence_view' => $part['view']] : []),
                 ];

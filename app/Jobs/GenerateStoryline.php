@@ -69,13 +69,14 @@ class GenerateStoryline implements ShouldQueue
         $shot->forgetKeyframes();
 
         $title = trim((string) ($response['title'] ?? ''));
+        $storyline = ShotPlan::storylineFrom(array_values((array) $response['keyframes']), (string) ($response['storyline'] ?? ''));
 
         $shot->forceFill([
             // A shot still named after its takeaway gets the planner's title; a title someone gave it stays.
             'title' => $title !== '' && (blank($shot->title) || $shot->title === Str::limit((string) $shot->takeaway, 80)) ? $title : $shot->title,
             'chosen_storyline' => [
                 'title' => $title !== '' ? $title : (string) $shot->title,
-                'storyline' => trim((string) ($response['storyline'] ?? '')),
+                'storyline' => $storyline,
             ],
             'kind' => $shot->kind ?? ShotKind::tryFrom((string) ($response['kind'] ?? '')) ?? ShotKind::SCENE,
             'storyline' => [
@@ -92,7 +93,7 @@ class GenerateStoryline implements ShouldQueue
                 'stage' => 'plan',
                 'text' => __('I drafted this plan as a :kind: :storyline What would you like to change?', [
                     'kind' => mb_strtolower(($shot->kind ?? ShotKind::tryFrom((string) ($response['kind'] ?? '')) ?? ShotKind::SCENE)->label()),
-                    'storyline' => trim((string) ($response['storyline'] ?? '')),
+                    'storyline' => $storyline,
                 ]),
             ]],
             'voice_over' => null,

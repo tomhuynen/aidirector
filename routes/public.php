@@ -48,6 +48,7 @@ use App\Http\Controllers\Public\Shots\MergeController as ShotMergeController;
 use App\Http\Controllers\Public\Shots\Plan\DirectorController as ShotPlanDirectorController;
 use App\Http\Controllers\Public\Shots\Plan\ElementsController as ShotPlanElementsController;
 use App\Http\Controllers\Public\Shots\Plan\PlateController as ShotPlateController;
+use App\Http\Controllers\Public\Shots\Plan\RestartController as ShotRestartController;
 use App\Http\Controllers\Public\Shots\Plan\SequencePlaceController as ShotSequencePlaceController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
 use App\Http\Controllers\Public\Shots\RetryController as ShotRetryController;
@@ -146,6 +147,8 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/plate/choose', [ShotPlateController::class, 'choose'])->name('plate.choose');
             Route::post('{shot}/plate/reset', [ShotPlateController::class, 'reset'])->name('plate.reset');
             Route::post('{shot}/plate/adjust', [ShotPlateController::class, 'adjust'])->name('plate.adjust');
+            Route::post('{shot}/restart/place', [ShotRestartController::class, 'place'])->name('restart.place');
+            Route::post('{shot}/restart/plan', [ShotRestartController::class, 'plan'])->name('restart.plan');
             Route::post('{shot}/sequence-places/choose', [ShotSequencePlaceController::class, 'choose'])->name('sequence-places.choose');
             Route::post('{shot}/keyframes', [KeyframeStoreController::class, 'store'])->name('keyframes.store');
             Route::post('{shot}/keyframes/reorder', [KeyframeReorderController::class, 'store'])->name('keyframes.reorder');

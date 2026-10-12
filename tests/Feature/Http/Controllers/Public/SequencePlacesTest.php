@@ -115,6 +115,25 @@ it('draws a place of the sequence wide and empty, with what happens there in eac
         && $prompt->contains('- SH010: Smoke under the meeting-room door.'));
 });
 
+it('leaves the picture of a thing that moves in the shots there out of the place, such as a truck that drives off', function () {
+    Image::fake(fn() => base64_encode(sequencePng()));
+    App\Ai\Agents\MovingThingsJudge::fake(fn() => ['moving' => ['Delivery truck']]);
+    $shot = fireSequence($this->project);
+    $truck = App\Models\Element::factory()->object()->for($this->project)->create(['name' => 'Delivery truck']);
+    $truck->addMediaFromString(sequencePng())->usingFileName('truck.png')->toMediaCollection(App\Models\Element::REFERENCE);
+    $bin = App\Models\Element::factory()->object()->for($this->project)->create(['name' => 'Waste bin']);
+    $bin->addMediaFromString(sequencePng())->usingFileName('bin.png')->toMediaCollection(App\Models\Element::REFERENCE);
+    $place = [...app(SequencePlaces::class)->places($shot)[0], 'elements' => ['Delivery truck', 'Waste bin']];
+
+    $option = app(KeyframePainter::class)->paintSequencePlaceOption($shot->load('project'), $place, 0);
+    app(KeyframePainter::class)->paintSequencePlaceOption($shot, $place, 1);
+
+    expect($option->getCustomProperty(App\Models\Keyframe::SENT)['images'])->toContain('Picture of Waste bin')
+        ->not->toContain('Picture of Delivery truck');
+    // Judged once for the place.
+    App\Ai\Agents\MovingThingsJudge::assertPromptedTimes(1);
+});
+
 it('has the place chosen in the chat first, then the next place, and says so', function () {
     $shot = fireSequence($this->project);
 
@@ -280,7 +299,10 @@ it('tells the review where the shot before ended and which part of the place eac
 
     expect($prompt)->toContain('This shot is part of a sequence. The shot before, SH010, ends with: Smoke curls under the door. It plays in Meeting-room corridor, showing close on the door.')
         ->toContain('This shot: It plays in Meeting-room corridor, showing from the safe spot; the door is off the left of the frame.')
-        ->and((string) (new App\Ai\Agents\ShotReviewer($scene, collect()))->instructions())->toContain('a danger or goal out of the frame is not an issue when the shot before shows where it is');
+        // Every shot of the sequence with what it shows, so what another shot shows is not asked of this one.
+        ->toContain("The shots of the sequence:\n- SH010 (Close-up): Smoke\n- SH020 (Scene), this shot: She lowers the phone beside the door.\n- SH030 (Close-up): Her hand pockets the phone.")
+        ->and((string) (new App\Ai\Agents\ShotReviewer($scene, collect()))->instructions())->toContain('a danger or goal out of the frame is not an issue when the shot before shows where it is')
+        ->toContain('what another shot of the sequence shows, such as the permit in the close-up after this shot, is never an issue here');
 });
 
 it('leaves the place of its sequence when a new plan moves the shot to another place', function () {
@@ -452,4 +474,20 @@ it('tells a later shot already drawn when the shot before it ends differently no
     (new App\Jobs\ReadLeftBehind($first->fresh()))->handle(app(SequencePlaces::class));
 
     expect(collect($second->fresh()->plan_chat)->last()['text'])->toBe('SH010 ends differently now: The Site helicopter stands beside the landing circle, near the rail. This shot may no longer match it; ask me to draw it again if it does not.');
+});
+
+it('keeps the options there to choose from while more are drawn, and does not offer the extra ones once one was chosen', function () {
+    $shot = fireSequence($this->project);
+
+    app(SequencePlaces::class)->more($shot);
+
+    actingAs($this->director, 'director')
+        ->get(route('public.shots.view', [$this->project, $shot]))
+        ->assertInertia(fn($page) => $page->has('shot.sequencePlace.options', 2)->where('shot.sequencePlaceDrawing.name', 'Meeting-room corridor'));
+
+    app(SequencePlaces::class)->choose($shot->fresh(), $shot->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first(), say: false);
+    $said = count($shot->fresh()->plan_chat);
+    SequencePlaces::finish($shot->id, 'meeting-room-corridor');
+
+    expect($shot->fresh()->plan_chat)->toHaveCount($said);
 });

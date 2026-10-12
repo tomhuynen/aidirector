@@ -175,10 +175,12 @@ it('has the plan director offer a new place when the director wants another kind
         ->toContain('give the plan again in the proposal with the new place in the keyframes\' elements instead of the old one');
 });
 
-it('has the plan director prefer side views over a camera that looks straight back', function () {
+it('has the plan director keep the direction of the place\'s camera, and turn it only when the story needs it', function () {
     $shot = Shot::factory()->for($this->project)->create()->load('project');
 
-    expect((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())->toContain('Prefer views from the side or at an angle over a camera that looks straight back');
+    expect((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
+        ->toContain('By default a shot keeps the direction of the place\'s own camera')
+        ->toContain('Only when the story cannot be read from that direction');
 });
 
 it('has a tweak keep someone who backs away facing what they back away from', function () {
@@ -203,6 +205,6 @@ it('has the plan director draw the others again when they failed, not keyframe 1
 it('has the planner show where a person comes in, and the review catch someone who appears out of nothing', function () {
     $shot = Shot::factory()->for($this->project)->create()->load('project');
 
-    expect((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain('- Entrances: a person who is not in keyframe 1 is seen coming in')
+    expect((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain('- Entrances: a person or a thing that moves, such as a helicopter, that is not in keyframe 1 is seen coming in')
         ->and((string) (new ShotReviewer($shot, collect()))->instructions())->toContain('Nobody appears out of nothing');
 });

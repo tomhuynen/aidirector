@@ -20,6 +20,9 @@ class PlaceDepth
     /** On a place: its depth grid. */
     public const string DEPTH = 'depth';
 
+    /** On a place: its depth was measured, or tried and failed; then nothing waits for it any more. */
+    public const string TRIED = 'depth_tried';
+
     /** The width of the grid kept; the height follows the image. Fine enough for sizes and what stands in front. */
     private const int WIDTH = 48;
 
@@ -51,6 +54,16 @@ class PlaceDepth
         $place->setCustomProperty(self::DEPTH, $grid->toArray())->save();
 
         return $grid;
+    }
+
+    /**
+     * The depth of a place if it was measured already, without measuring it: a click must never wait for the model.
+     */
+    public function stored(Media $place): ?DepthGrid
+    {
+        $stored = $place->getCustomProperty(self::DEPTH);
+
+        return is_array($stored) ? DepthGrid::fromArray($stored) : null;
     }
 
     /**

@@ -241,7 +241,7 @@ describe('choosing in the chat', function () {
     });
 });
 
-it('starts the plan over when a new plan is agreed for a drawn shot', function () {
+it('starts the plan over when a new plan is agreed for a drawn shot, and waits for the go on the overview', function () {
     $shot = drawnShot($this->project);
     PlanDirector::fake([imagesReply(['proposal' => [
         'takeaway' => '', 'kind' => 'scene', 'storyline' => 'He waits behind the line.', 'seconds' => 3, 'setting_from' => null,
@@ -255,9 +255,10 @@ it('starts the plan over when a new plan is agreed for a drawn shot', function (
     $shot->refresh();
 
     expect($shot->plan_version)->toBe(1)
-        ->and($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
+        ->and($shot->awaitsGo())->toBeTrue()
+        ->and($shot->keyframes()->count())->toBe(0)
         ->and($shot->storylineKeyframes()[0]['title'])->toBe('Waits');
-    Bus::assertDispatched(GenerateKeyframes::class);
+    Bus::assertNotDispatched(GenerateKeyframes::class);
 });
 
 /**
@@ -332,8 +333,9 @@ it('starts over when the director asks for it, even when keyframe 1 stays the sa
         ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'start all over'])
         ->assertOk();
 
-    expect($shot->fresh()->plan_version)->toBe(1);
-    Bus::assertDispatched(GenerateKeyframes::class);
+    expect($shot->fresh()->plan_version)->toBe(1)
+        ->and($shot->fresh()->awaitsGo())->toBeTrue();
+    Bus::assertNotDispatched(GenerateKeyframes::class);
     Bus::assertNotDispatched(GenerateKeyframeImage::class);
 });
 
@@ -448,4 +450,74 @@ it('keeps the plan director\'s check against the rules on its turn, without show
     actingAs($this->director, 'director')
         ->get(route('public.shots.view', [$this->project, $shot]))
         ->assertInertia(fn($page) => $page->where('shot.planChat.3.text', 'The permit is too small to read here.')->missing('shot.planChat.3.rules_check'));
+});
+
+it('tells the plan director who the director clicked in the image, and shows the keyframe only with the message', function () {
+    $shot = drawnShot($this->project);
+    $second = $shot->keyframes()->where('position', 2)->firstOrFail();
+    PlanDirector::fake([imagesReply()]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), [
+            'message' => 'Keyframe 2, the person on the left: hands down',
+            'target' => 'keyframe',
+            'keyframe' => $second->sqid,
+            'box' => ['x' => 0.2, 'y' => 0.1, 'width' => 0.3, 'height' => 0.8],
+        ])
+        ->assertOk()
+        ->assertJsonPath('messages.2.about', 'keyframe 2, Badge shown');
+
+    PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'the director clicked the one meant, who stands from 20% to 50% of the width from the left and from 10% to 90% of the height from the top'));
+});
+
+describe('starting over from the menu', function () {
+    it('picks another place for the same plan: the drawn keyframes go and new places are drawn', function () {
+        $shot = drawnShot($this->project);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.restart.place', [$this->project, $shot]))
+            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+
+        $shot->refresh();
+
+        expect($shot->keyframes()->count())->toBe(0)
+            ->and($shot->storylineKeyframes())->toHaveCount(3)
+            ->and(collect($shot->plan_chat)->last()['text'])->toContain('Starting over from the places with the same plan');
+        Bus::assertDispatched(GenerateKeyframes::class);
+    });
+
+    it('starts over with a new plan and the same takeaway, and asks for the idea again', function () {
+        $shot = drawnShot($this->project);
+        $shot->forceFill(['takeaway' => 'Wear your badge', 'chosen_storyline' => ['title' => 'Badge', 'storyline' => 'He shows the badge.']])->save();
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.restart.plan', [$this->project, $shot]))
+            ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+
+        $shot->refresh();
+
+        expect($shot->keyframes()->count())->toBe(0)
+            ->and($shot->storylineKeyframes())->toBe([])
+            ->and($shot->chosen_storyline)->toBeNull()
+            ->and($shot->takeaway)->toBe('Wear your badge')
+            ->and($shot->status)->toBe(ShotStatus::STORYLINE_READY)
+            ->and(collect($shot->plan_chat)->last())->toMatchArray(['role' => 'assistant', 'stage' => 'idea']);
+        Bus::assertNotDispatched(GenerateKeyframes::class);
+    });
+
+    it('does neither while something is being drawn, and offers neither then', function () {
+        $shot = drawnShot($this->project);
+        $shot->keyframes()->where('position', 2)->update(['rendering' => true]);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.restart.plan', [$this->project, $shot]))
+            ->assertSessionHasErrors('restart');
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.restart.place', [$this->project, $shot]))
+            ->assertSessionHasErrors('restart');
+
+        expect($shot->keyframes()->count())->toBe(3)
+            ->and(App\Http\Resources\Public\ShotResource::make($shot->fresh())->resolve()['links'])
+            ->toMatchArray(['restartPlace' => null, 'restartPlan' => null]);
+    });
 });

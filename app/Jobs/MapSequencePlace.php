@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Ai\Agents\PlaceMapper;
 use App\Models\Shot;
+use App\Support\Images\PlaceLayout;
 use App\Support\Shots\SequencePlaces;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Config;
-use Laravel\Ai\Files\Image as ImageFile;
-use Laravel\Ai\Responses\StructuredAgentResponse;
 
 /**
  * Writes the map of a place of a sequence once it is chosen: where its fixed
@@ -42,11 +40,8 @@ class MapSequencePlace implements ShouldQueue
             return;
         }
 
-        $mapper = new PlaceMapper($place['name'], $place['elements']);
-
-        /** @var StructuredAgentResponse $response */
-        $response = $mapper->prompt($mapper->promptFor(), attachments: [ImageFile::fromStorage($chosen->getPathRelativeToRoot(), $chosen->disk)], provider: 'openrouter', model: (string) Config::get('pipeline.models.text'));
-        $map = trim((string) ($response->toArray()['map'] ?? ''));
+        // The layout is kept on the place itself; its map is also where the sequence reads it.
+        $map = app(PlaceLayout::class)->of($chosen, $place['name'], $place['elements'])['map'] ?? '';
 
         if ($map !== '') {
             $chosen->setCustomProperty(SequencePlaces::MAP, $map)->save();

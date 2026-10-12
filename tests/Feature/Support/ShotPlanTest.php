@@ -59,3 +59,35 @@ it('drops a person from a keyframe\'s cast when its description never names them
         ['Helmeted visitor'],
     ]);
 });
+
+it('lists what a keyframe handles among its elements, since only those are cut out of the drawing and can be moved', function () {
+    $project = Project::factory()->create();
+    Element::factory()->for($project)->create(['name' => 'Site helicopter', 'type' => ElementType::OBJECT]);
+    $shot = Shot::factory()->for($project)->create()->load('project');
+
+    $keyframes = ShotPlan::withNamedPeople($shot, [
+        ['description' => 'The helicopter flies in over the sea.', 'elements' => ['Flight deck'], 'handled' => ['site helicopter']],
+        ['description' => 'It lands.', 'elements' => ['Flight deck', 'Site helicopter'], 'handled' => ['Site helicopter', 'Unknown crate']],
+    ]);
+
+    expect(array_column($keyframes, 'elements'))->toBe([
+        ['Flight deck', 'Site helicopter'],
+        ['Flight deck', 'Site helicopter'],
+    ]);
+});
+
+it('makes the storyline the beats of the keyframes, so each sentence belongs to one keyframe', function () {
+    $shot = Shot::factory()->for(Project::factory())->create()->load('project');
+
+    ShotPlan::apply($shot, ['kind' => 'scene', 'storyline' => 'Something else entirely.', 'seconds' => 5, 'keyframes' => [
+        ['title' => 'Reach', 'beat' => 'She reaches for the handset.', 'description' => 'She stands by the wall phone.', 'elements' => []],
+        ['title' => 'Call', 'beat' => 'She calls reception.', 'description' => 'She holds the handset to her ear.', 'elements' => []],
+    ]]);
+
+    expect($shot->fresh()->chosen_storyline['storyline'])->toBe('She reaches for the handset. She calls reception.')
+        ->and(array_column($shot->fresh()->storylineKeyframes(), 'beat'))->toBe(['She reaches for the handset.', 'She calls reception.']);
+});
+
+it('keeps the written storyline for a plan without beats', function () {
+    expect(ShotPlan::storylineFrom([['title' => 'One', 'beat' => 'She waits.'], ['title' => 'Two']], 'She waits and waves.'))->toBe('She waits and waves.');
+});

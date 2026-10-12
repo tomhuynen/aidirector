@@ -160,6 +160,26 @@ it('lets the plan chat see the other shots and take the setting of one by its co
         && str_contains($prompt->prompt, '1. At The Counter: The visitor holds out the broken badge holder over the counter.'));
 });
 
+it('writes out what a cut-in sees from its own camera, so the picture of the shot before is not copied from its viewpoint', function () {
+    App\Ai\Agents\CutInBriefWriter::fake(fn() => ['brief' => 'The camera stands at her side, where the officer stood, looking at her chest; behind her is the far wall, and the desk is behind the camera.']);
+    shotBefore($this->project, 'group-1');
+    $shot = closeUpShot($this->project);
+    $shot->forceFill(['position' => 2, 'group_key' => 'group-1'])->save();
+    $painter = app(App\Ai\KeyframePainter::class);
+
+    $painter->writeCutInBrief($shot);
+    $painter->writeCutInBrief($shot->fresh());
+
+    $setting = $painter->settingFor($shot->fresh());
+
+    expect($setting['label'])->toContain('This shot cuts in on that moment from its own camera: The camera stands at her side, where the officer stood')
+        ->toContain('never copy the viewpoint of the attached picture');
+    // Written once for this picture and plan, with what its first keyframe shows.
+    App\Ai\Agents\CutInBriefWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'What its first keyframe shows: The vest pocket, the badge held in her right hand.'));
+    App\Ai\Agents\CutInBriefWriter::assertPromptedTimes(1);
+    expect((string) (new App\Ai\Agents\ShotReviewer($shot->fresh(), collect()))->instructions())->toContain('When its background repeats the view of the shot before from the same direction');
+});
+
 describe('sequences', function () {
     it('records where each shot of a split plays: continuing from the shot before, or in the place of an earlier one', function () {
         App\Ai\Agents\PlanDirector::fake([
@@ -182,6 +202,33 @@ describe('sequences', function () {
             ->and($shots[2]->storyline['setting_from'])->toEqual(['shot_id' => $shots[1]->id, 'keyframe' => Shot::LAST_KEYFRAME, 'sequence' => true])
             ->and($shots[3]->storyline['setting_from'])->toEqual(['shot_id' => $shot->id, 'keyframe' => 0, 'sequence' => true])
             ->and($shots[3]->settingWaitsFor())->toBe('the place of SH010');
+    });
+
+    it('shows the overview of the agreed sequence, every shot with its kind and what happens in each keyframe', function () {
+        App\Ai\Agents\PlanDirector::fake([
+            ['reply' => 'Two shots.', 'stage' => 'kind', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'proposal' => null, 'shots' => [
+                ['takeaway' => 'Report it', 'kind' => 'scene', 'idea' => 'He walks up to the counter.', 'setting' => 'new_place', 'same_place_as' => 0, 'beats' => ['He walks up to the counter.', 'He holds out the broken badge.']],
+                ['takeaway' => 'Hand it over', 'kind' => 'close-up', 'idea' => 'Hands pass the badge over.', 'setting' => 'continues', 'same_place_as' => 0, 'beats' => ['His hand lays the badge on the counter.', 'The officer takes it.']],
+            ]],
+        ]);
+        $shot = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => []]]);
+
+        $overview = $this->actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'yes, those two'])
+            ->json('messages.1.overview');
+
+        expect($overview)->toHaveCount(2)
+            ->and($overview[0])->toMatchArray(['code' => 'SH010', 'kind' => 'Scene', 'current' => true, 'planned' => false, 'beats' => ['He walks up to the counter.', 'He holds out the broken badge.']])
+            ->and($overview[1])->toMatchArray(['kind' => 'Close-up', 'current' => false, 'beats' => ['His hand lays the badge on the counter.', 'The officer takes it.']])
+            ->and($this->project->shots()->get()[1]->storyline['sequence_beats'])->toBe(['His hand lays the badge on the counter.', 'The officer takes it.'])
+            // Agreed with the sequence, so its chat goes straight to the plan instead of asking idea, kind, keyframes and cast again.
+            ->and($this->project->shots()->get()[1]->plan_chat[0])->toMatchArray(['answers' => ['Yes, write the plan', 'Change something first']])
+            ->and((string) (new App\Ai\Agents\PlanDirector($shot->fresh(), []))->instructions())->toContain('already has its idea, kind, cast, setting and keyframes from the sequence: never ask them again')
+            // Every beat changes something visible; a repeat of the same moment is left out.
+            ->toContain('fewer keyframes rather than one that repeats')
+            ->toContain('a scene 2 to 4, 2 only when its story has just two visible steps')
+            // A shot keeps the direction of the place's camera unless its story cannot be read from it.
+            ->toContain('By default a shot keeps the direction of the place\'s own camera');
     });
 
     it('waits to draw until the place of the earlier shot is chosen, then draws on that same place', function () {

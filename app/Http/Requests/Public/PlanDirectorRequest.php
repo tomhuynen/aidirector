@@ -28,6 +28,12 @@ class PlanDirectorRequest extends FormRequest
             'target' => ['nullable', 'string', 'in:keyframe'],
             /** The keyframe's id, when a keyframe is selected. */
             'keyframe' => ['nullable', 'string'],
+            /** Who the director clicked in the selected keyframe, as shares of the image width and height. */
+            'box' => ['nullable', 'array'],
+            'box.x' => ['required_with:box', 'numeric', 'between:0,1'],
+            'box.y' => ['required_with:box', 'numeric', 'between:0,1'],
+            'box.width' => ['required_with:box', 'numeric', 'between:0,1'],
+            'box.height' => ['required_with:box', 'numeric', 'between:0,1'],
         ];
     }
 }

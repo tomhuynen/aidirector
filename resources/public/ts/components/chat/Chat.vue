@@ -78,7 +78,7 @@
       </div>
     </div>
 
-    <form class="shrink-0 pt-2" @submit.prevent="submit">
+    <form ref="form" class="shrink-0 pt-2" @submit.prevent="submit">
       <ul v-if="uploads.pending.value.length" class="mb-3 flex flex-wrap gap-2" :aria-label="$t('Files to send')">
         <li
           v-for="upload in uploads.pending.value"
@@ -236,8 +236,10 @@ defineSlots<{
   'element-options'(props: { message: Extract<ChatMessage, { kind: 'element-options' }> }): unknown
 }>()
 
-const draft = ref('')
+/** What is typed; a page can fill it, such as with who was clicked in an image. */
+const draft = defineModel<string>('draft', { default: '' })
 const thread = ref<HTMLElement | null>(null)
+const form = ref<HTMLFormElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 let dragDepth = 0
@@ -331,4 +333,14 @@ const scrollToLatest = async () => {
 }
 
 watch(() => [props.messages.length, props.busy, props.error], scrollToLatest, { immediate: true })
+
+/** Filled from outside: the cursor goes to the end, ready to type the rest. */
+const focus = () => {
+  const textarea = form.value?.querySelector('textarea')
+
+  textarea?.focus()
+  textarea?.setSelectionRange(textarea.value.length, textarea.value.length)
+}
+
+defineExpose({ focus })
 </script>

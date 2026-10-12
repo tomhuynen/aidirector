@@ -62,19 +62,19 @@ class PlaceComposite
     public function keyframe(string $place, string $drawn, string $people, array $areas = []): string
     {
         [$placeImage, $drawnImage] = $this->pair($place, $drawn);
-        $peopleMask = $this->read($people, $placeImage);
+        $topLayerMask = $this->read($people, $placeImage);
         $margin = (string) max(1, (int) round(self::AREA_MARGIN * $placeImage->getImageWidth()));
-        $keep = $this->union([$peopleMask, ...array_map(function (string $area) use ($placeImage, $margin) {
+        $keep = Masks::union([$topLayerMask, ...array_map(function (string $area) use ($placeImage, $margin) {
             $mask = $this->read($area, $placeImage);
             $mask->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, $margin));
 
             return $mask;
         }, $areas)]);
-        [$shadows, $dark] = $this->shadows($placeImage, $drawnImage, $peopleMask);
+        [$shadows, $dark] = $this->shadows($placeImage, $drawnImage, $topLayerMask);
         $keep->compositeImage($shadows, Imagick::COMPOSITE_LIGHTEN, 0, 0);
 
         // Where the drawing has no shadow right under a sole, the place gets a soft one, so nobody floats.
-        $this->shadeUnderFeet($placeImage, $peopleMask, $dark);
+        $this->shadeUnderFeet($placeImage, $topLayerMask, $dark);
 
         // A little wider and closed, so hair, fingers and edges come along; soft, so no hard seam shows.
         $keep->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '2'));
@@ -91,12 +91,12 @@ class PlaceComposite
      */
     public function touches(string $area, string $people): bool
     {
-        $peopleMask = new Imagick();
-        $peopleMask->readImageBlob($people);
+        $topLayerMask = new Imagick();
+        $topLayerMask->readImageBlob($people);
         $width = 216;
-        $height = (int) max(1, round($width * $peopleMask->getImageHeight() / $peopleMask->getImageWidth()));
+        $height = (int) max(1, round($width * $topLayerMask->getImageHeight() / $topLayerMask->getImageWidth()));
 
-        $object = $this->read($area, $this->blank($width, $height));
+        $object = $this->read($area, Masks::black($width, $height));
         $object->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, (string) max(1, (int) round(self::TOUCH_MARGIN * $width))));
         $object->compositeImage($this->read($people, $object), Imagick::COMPOSITE_MULTIPLY, 0, 0);
 
@@ -113,7 +113,7 @@ class PlaceComposite
     public function state(string $place, string $edited, array $masks): string
     {
         [$placeImage, $editedImage] = $this->pair($place, $edited);
-        $keep = $this->changedParts($placeImage, $editedImage, $this->union(array_map(fn(string $mask) => $this->read($mask, $placeImage), $masks)));
+        $keep = $this->changedParts($placeImage, $editedImage, Masks::union(array_map(fn(string $mask) => $this->read($mask, $placeImage), $masks)));
         $keep->morphology(Imagick::MORPHOLOGY_CLOSE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '8'));
         $keep->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '3'));
         $keep->gaussianBlurImage(0, 1.5);
@@ -168,7 +168,7 @@ class PlaceComposite
 
         $inside = $small->exportImagePixels(0, 0, $width, $height, 'I', Imagick::PIXEL_CHAR);
         $difference = $before->exportImagePixels(0, 0, $width, $height, 'I', Imagick::PIXEL_CHAR);
-        $parts = $this->parts(array_map(fn(int $value) => $value > 127, $inside), $width, $height);
+        $parts = Masks::parts(array_map(fn(int $value) => $value > 127, $inside), $width, $height);
 
         // A change in the plan is about one thing: the part with the most change in total. A redrawn door further back changes
         // about as much per pixel, but it is smaller.
@@ -186,48 +186,6 @@ class PlaceComposite
         $small->thresholdImage(0.5 * Imagick::getQuantum());
 
         return $small;
-    }
-
-    /**
-     * The separate parts of a mask, each as the indexes of its pixels.
-     *
-     * @param  list<bool>  $inside
-     * @return list<list<int>>
-     */
-    private function parts(array $inside, int $width, int $height): array
-    {
-        $seen = [];
-        $parts = [];
-
-        foreach ($inside as $start => $in) {
-            if (! $in || isset($seen[$start])) {
-                continue;
-            }
-
-            $seen[$start] = true;
-            $queue = [$start];
-            $pixels = [];
-
-            while ($queue !== []) {
-                $pixel = array_pop($queue);
-                $pixels[] = $pixel;
-                $x = $pixel % $width;
-                $y = intdiv($pixel, $width);
-
-                foreach ([[$x - 1, $y], [$x + 1, $y], [$x, $y - 1], [$x, $y + 1]] as [$nx, $ny]) {
-                    $next = $ny * $width + $nx;
-
-                    if ($nx >= 0 && $nx < $width && $ny >= 0 && $ny < $height && $inside[$next] && ! isset($seen[$next])) {
-                        $seen[$next] = true;
-                        $queue[] = $next;
-                    }
-                }
-            }
-
-            $parts[] = $pixels;
-        }
-
-        return $parts;
     }
 
     /**
@@ -256,36 +214,10 @@ class PlaceComposite
      */
     private function read(string $mask, Imagick $place): Imagick
     {
-        $image = new Imagick();
-        $image->readImageBlob($mask);
-        $image->setImageAlphaChannel(Imagick::ALPHACHANNEL_REMOVE);
-        $image->transformImageColorspace(Imagick::COLORSPACE_GRAY);
-        $image->resizeImage($place->getImageWidth(), $place->getImageHeight(), Imagick::FILTER_TRIANGLE, 1);
+        $image = Masks::grey($mask, $place->getImageWidth(), $place->getImageHeight());
         $image->thresholdImage(0.5 * Imagick::getQuantum());
 
         return $image;
-    }
-
-    private function blank(int $width, int $height): Imagick
-    {
-        $image = new Imagick();
-        $image->newImage($width, $height, 'black');
-
-        return $image;
-    }
-
-    /**
-     * @param  non-empty-list<Imagick>  $masks
-     */
-    private function union(array $masks): Imagick
-    {
-        $union = clone $masks[0];
-
-        foreach (array_slice($masks, 1) as $mask) {
-            $union->compositeImage($mask, Imagick::COMPOSITE_LIGHTEN, 0, 0);
-        }
-
-        return $union;
     }
 
     /**

@@ -287,7 +287,8 @@ class SequencePlaces
 
     /**
      * What waits for the director's choice in this shot's chat: the options of
-     * the next place of its sequence, once drawn; null otherwise.
+     * the next place of its sequence, once any are drawn, also while more are
+     * drawn; null otherwise.
      *
      * @return array{step: string, options: Collection<int, Media>, place: array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}}|null
      */
@@ -295,10 +296,11 @@ class SequencePlaces
     {
         $place = $this->current($shot);
 
-        if ($place === null || $this->drawing($shot)) {
+        if ($place === null) {
             return null;
         }
 
+        // While more are drawn, the ones there stay to choose from.
         $options = $this->options($shot, $place['key']);
 
         return $options->isEmpty() ? null : ['step' => self::STEP, 'options' => $options, 'place' => $place];
@@ -385,6 +387,11 @@ class SequencePlaces
         $place = collect($places->places($owner))->firstWhere('key', $key);
         $drawn = $places->options($owner->load('media'), $key)->isNotEmpty();
         $url = route('public.shots.view', [$owner->project, $owner]);
+
+        // Chosen meanwhile from the ones already there: the extra ones are not offered.
+        if ($place !== null && $places->chosen($owner, $key) !== null) {
+            return;
+        }
 
         if (! $drawn || $place === null) {
             $owner->say(__('The places could not be drawn. Ask me to try again.'));

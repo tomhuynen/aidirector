@@ -6,6 +6,7 @@ namespace App\Http\Resources\Public;
 
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
+use App\Http\Controllers\Public\Shots\Plan\RestartController;
 use App\Http\Resources\Concerns\AuthorizesResource;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateVoiceOver;
@@ -63,7 +64,7 @@ class ShotResource extends JsonResource
             'seconds' => $this->durationInSeconds(),
             /** @var array{title: string, storyline: string}|null */
             'chosenStoryline' => $this->chosen_storyline,
-            /** @var array{keyframes: array<int, array{title: string, description: string, prompt?: string}>}|null */
+            /** @var array{keyframes: array<int, array{title: string, beat?: string, description: string, prompt?: string}>}|null */
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
@@ -195,6 +196,9 @@ class ShotResource extends JsonResource
                 'plateChoose' => route('public.shots.plate.choose', [$this->project, $this->resource]),
                 'plateReset' => route('public.shots.plate.reset', [$this->project, $this->resource]),
                 'plateAdjust' => route('public.shots.plate.adjust', [$this->project, $this->resource]),
+                // Only while it can be done, so the menu shows what is possible now.
+                'restartPlace' => RestartController::canPickPlace($this->resource) ? route('public.shots.restart.place', [$this->project, $this->resource]) : null,
+                'restartPlan' => RestartController::canStartOver($this->resource) ? route('public.shots.restart.plan', [$this->project, $this->resource]) : null,
                 'sequencePlaceChoose' => route('public.shots.sequence-places.choose', [$this->project, $this->resource]),
                 'issuesFixAll' => route('public.shots.issues.fix-all', [$this->project, $this->resource]),
                 'issuesDismissAll' => route('public.shots.issues.dismiss-all', [$this->project, $this->resource]),

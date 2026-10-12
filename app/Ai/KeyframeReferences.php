@@ -22,6 +22,7 @@ final class KeyframeReferences
      * @param  list<array{element: Element, image: StoredImage}>  $elementImages  the ones attached as images
      * @param  bool  $firstShowsCast  false when people in this keyframe are not in keyframe 1, such as someone who walks in later
      * @param  list<string>  $castNames  the people keyframe 1 does not show, who are added to it
+     * @param  list<string>  $thingNames  the objects of this keyframe the place does not have, such as a helicopter flying in, which are added to it
      * @param  bool  $firstIsPlate  `$first` is the place without people, made from keyframe 1
      * @param  StoredImage|null  $setting  a keyframe or the place of another shot this one plays in, for keyframe 1 and the places
      * @param  string  $settingLabel  what that image is, such as "the last keyframe of SH100, the shot before"
@@ -36,6 +37,7 @@ final class KeyframeReferences
         public readonly ?StoredImage $previous = null,
         public readonly bool $firstShowsCast = true,
         public readonly array $castNames = [],
+        public readonly array $thingNames = [],
         public readonly bool $firstIsPlate = false,
         public readonly ?StoredImage $setting = null,
         public readonly string $settingLabel = '',

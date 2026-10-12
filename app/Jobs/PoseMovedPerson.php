@@ -14,8 +14,8 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Support\Images\BackgroundDrift;
-use App\Support\Images\PersonCutout;
 use App\Support\Images\PlaceObjects;
+use App\Support\Images\TopLayerCutout;
 use App\Support\Media\LocalMediaFiles;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -63,7 +63,7 @@ class PoseMovedPerson implements ShouldQueue
         $this->followPlan($this->keyframe);
     }
 
-    public function handle(KeyframePainter $painter, PersonCutout $cutout, BackgroundDrift $drift): void
+    public function handle(KeyframePainter $painter, TopLayerCutout $cutout, BackgroundDrift $drift): void
     {
         $keyframe = $this->keyframe->load(['shot.project', 'media']);
         $shot = $keyframe->shot;
@@ -129,7 +129,7 @@ class PoseMovedPerson implements ShouldQueue
     /**
      * The pose redrawn on a tight crop around the person; only the person is put back into the moved version.
      */
-    private function redrawAround(KeyframePainter $painter, PersonCutout $cutout, Keyframe $keyframe, Media $moved, Media $plate): Media
+    private function redrawAround(KeyframePainter $painter, TopLayerCutout $cutout, Keyframe $keyframe, Media $moved, Media $plate): Media
     {
         $files = new LocalMediaFiles();
         $image = new \Imagick($files->path($moved));
@@ -156,14 +156,16 @@ class PoseMovedPerson implements ShouldQueue
 
         $output = storage_path('app/tmp/pose-' . Str::random(12) . '.png');
         @mkdir(dirname($output), 0755, true);
-        $mask = $moved->getCustomProperty(Keyframe::PEOPLE_MASK);
-        $cutout->withPeople(is_string($mask) ? base64_decode($mask) : null)->pastePerson($files->path($plate), $files->path($moved), $files->path($redrawn), $crop, $this->box, $output);
+        $mask = $moved->getCustomProperty(Keyframe::TOP_LAYER_MASK);
+        $finder = fn(string $path) => $painter->movableMasks($keyframe, $plate, (string) file_get_contents($path))['all'];
+        $cutout->withTopLayer(is_string($mask) ? base64_decode($mask) : null)->withFinder($finder)->pastePerson($files->path($plate), $files->path($moved), $files->path($redrawn), $crop, $this->box, $output);
         $sent = $redrawn->getCustomProperty(Keyframe::SENT);
         $redrawn->delete();
 
         return $keyframe->addMedia($output)
             ->usingFileName("keyframe-{$keyframe->position}.png")
-            ->withCustomProperties([Keyframe::SENT => $sent, Keyframe::MOVED_BOX => $this->box])
+            // Still a composite, so a change of the place later keeps it; what can be moved in it is found again on the next click.
+            ->withCustomProperties([Keyframe::SENT => $sent, Keyframe::MOVED_BOX => $this->box, ...array_filter([Keyframe::COMPOSITED => $moved->getCustomProperty(Keyframe::COMPOSITED)])])
             ->toMediaCollection(Keyframe::RENDERS);
     }
 
@@ -281,7 +283,7 @@ class PoseMovedPerson implements ShouldQueue
     /**
      * Whether the person in the redraw is still about where they were put and about as large.
      */
-    private function stayedPut(PersonCutout $cutout, Media $plate, Media $render): bool
+    private function stayedPut(TopLayerCutout $cutout, Media $plate, Media $render): bool
     {
         $files = new LocalMediaFiles();
         $found = $cutout->locate($files->path($plate), $files->path($render), $this->box);

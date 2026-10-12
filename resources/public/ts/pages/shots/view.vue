@@ -55,6 +55,9 @@
               :sequence-place="shot.sequencePlace"
               :sequence-place-url="shot.links?.sequencePlaceChoose"
               :sequence-place-drawing="shot.sequencePlaceDrawing"
+              :aspect-ratio="aspectRatio"
+              :render-seconds="shot.renderSeconds?.keyframe"
+              :takeaway="shot.takeaway"
             />
           </div>
           <PlanSkeleton v-else-if="planning" />
@@ -71,7 +74,9 @@
               sequencePlace: shot.sequencePlace,
               sequencePlaceUrl: shot.links?.sequencePlaceChoose,
               sequencePlaceDrawing: shot.sequencePlaceDrawing,
+              takeaway: shot.takeaway,
             }"
+            :restart="{ placeUrl: shot.links?.restartPlace, planUrl: shot.links?.restartPlan }"
             :keyframes="panelKeyframes"
             :aspect-ratio="aspectRatio"
             :duration="duration"
@@ -187,6 +192,8 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         chooseRenderUrl: keyframe.links.chooseRender,
         destroyUrl: keyframe.links.destroy,
         copyUrl: keyframe.links.copy,
+        placePreparing: keyframe.placePreparing,
+        beat: keyframe.beat,
         moveSelectUrl: keyframe.links.moveSelect,
         moveUrl: keyframe.links.move,
         moveFitUrl: keyframe.links.moveFit,
@@ -194,6 +201,7 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
     : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
         id: String(i),
         title: keyframe.title,
+        beat: keyframe.beat ?? null,
         description: keyframe.description,
         imageUrl: null,
         thumbnailUrl: null,
@@ -219,7 +227,9 @@ const busy = computed(
     props.shot.status === 'keyframes-pending' ||
     props.shot.status === 'video-pending' ||
     props.shot.reviewing ||
-    props.keyframes.some((keyframe) => keyframe.rendering || keyframe.renderStage === 'checking') ||
+    props.keyframes.some(
+      (keyframe) => keyframe.rendering || keyframe.renderStage === 'checking' || keyframe.placePreparing,
+    ) ||
     props.shot.voiceOverTracks.some((track) => track.status === 'pending'),
 )
 

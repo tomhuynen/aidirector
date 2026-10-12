@@ -30,6 +30,9 @@ class Keyframe extends Model implements HasMedia
      */
     public const RENDERS = 'renders';
 
+    /** The whole cut-out of what was moved by hand on a version, also the part outside the frame, so it comes back whole when moved again; with the version, where it lies and whether it is a thing. */
+    public const LAYERS = 'layers';
+
     public const THUMBNAIL = 'thumbnail';
 
     /** A presenter's keyframe without the presenter: the still background their video is put on, with the render it was made from. */
@@ -61,8 +64,20 @@ class Keyframe extends Model implements HasMedia
     /** On a version where a person was moved by hand: where they were put, as shares of the image, for fitting their pose to it. */
     public const MOVED_BOX = 'moved_box';
 
-    /** On a version: the people in it as found by the cut-out model, small, so a click can pick a person whole. */
-    public const PEOPLE_MASK = 'people_mask';
+    /** On a version: what lies on top of the place, small: the people as found by the cut-out model and the things taken from the drawing, such as a helicopter flying in, so a click can pick one whole. */
+    public const TOP_LAYER_MASK = 'people_mask';
+
+    /** On a version: what its top-layer mask was made from; a mask made from another cast or other handled things is made again. */
+    public const TOP_LAYER_KEY = 'top_layer_key';
+
+    /** On a version: of what lies on top of the place, only the things, such as a helicopter flying in, small; they move without a shadow on the floor. */
+    public const THINGS_MASK = 'things_mask';
+
+    /** On a version where a thing, not a person, was moved by hand: it has no pose to fit. */
+    public const MOVED_THING = 'moved_thing';
+
+    /** On a version where a thing of the place was moved by hand, in this keyframe only: it lies on the place without its named things, and is no composite of the place any more. */
+    public const ON_EMPTIED_PLACE = 'on_emptied_place';
 
     /** On a render drawn on a base image: the share of the background that stayed in place, from 0 to 1. */
     public const STILLNESS = 'stillness';
@@ -179,6 +194,7 @@ class Keyframe extends Model implements HasMedia
     {
         $this->addMediaCollection(self::RENDERS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PRESENTER_BACKGROUND)->singleFile()->acceptsMimeTypes(['image/png']);
+        $this->addMediaCollection(self::LAYERS)->acceptsMimeTypes(['image/png']);
     }
 
     public function registerMediaConversions(?Media $media = null): void

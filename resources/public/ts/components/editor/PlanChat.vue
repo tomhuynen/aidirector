@@ -1,6 +1,11 @@
 <template>
   <!-- The conversation about the shot: planned step by step, then about the drawn images, with what is selected. -->
   <div class="flex min-h-0 flex-1 flex-col gap-3">
+    <!-- What the viewer should learn, always in view, so it never has to be asked for. -->
+    <p v-if="takeaway" class="line-clamp-2 shrink-0 text-sm" :title="takeaway">
+      <span class="font-medium text-signal">{{ $t('Takeaway') }}</span>
+      <span class="text-muted-foreground"> · {{ takeaway }}</span>
+    </p>
     <p v-if="target !== undefined" class="shrink-0 text-xs font-medium tracking-wide text-muted-foreground uppercase">
       {{ target?.label ?? $t('The images are being drawn') }}
     </p>
@@ -21,6 +26,8 @@
       </li>
     </ol>
     <Chat
+      ref="chat"
+      v-model:draft="draft"
       class="min-h-0 flex-1"
       :messages="messages"
       :busy="busy"
@@ -50,12 +57,13 @@
             }}
           </p>
           <ul class="grid grid-cols-3 gap-2">
-            <li
-              v-for="n in sequencePlaceDrawing.count"
-              :key="n"
-              class="flex aspect-[9/16] items-center justify-center rounded-lg border border-border bg-muted"
-            >
-              <LoaderCircle class="size-6 animate-spin text-signal" />
+            <li v-for="n in sequencePlaceDrawing.count" :key="n">
+              <PlaceDrawingTile
+                :progress-key="`sequence-place:${sequencePlaceDrawing.name}:${n}`"
+                :aspect-ratio="frameRatio"
+                :seconds="placeSeconds"
+                :label="$t('Place :n', { n: String(n) })"
+              />
             </li>
           </ul>
         </div>
@@ -79,13 +87,37 @@
                   :src="option.imageUrl"
                   :alt="$t('Place :n', { n: String(o + 1) })"
                   class="w-full rounded-md object-cover"
+                  :style="{ aspectRatio: frameRatio }"
                 />
                 <span class="text-xs font-medium text-muted-foreground group-hover:text-foreground">{{
                   $t('Place :n', { n: String(o + 1) })
                 }}</span>
               </button>
             </li>
+            <!-- More being drawn: they appear right after these, the size of these, until they are ready. -->
+            <template v-if="sequencePlaceDrawing?.name === sequencePlace.name">
+              <li v-for="n in sequencePlaceDrawing.count" :key="`drawing-${n}`">
+                <PlaceDrawingTile
+                  :progress-key="`sequence-place:${sequencePlace.name}:${sequencePlace.options.length + n}`"
+                  :aspect-ratio="frameRatio"
+                  :seconds="placeSeconds"
+                  :label="$t('Place :n', { n: String(sequencePlace.options.length + n) })"
+                />
+              </li>
+            </template>
           </ul>
+          <!-- More of the same place to choose from, drawn after these; the same as asking for them in the chat. -->
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            class="self-start rounded-full"
+            :disabled="busy || choosingPlace || !!sequencePlaceDrawing || !chatUrl"
+            @click="send($t('More options'))"
+          >
+            <RefreshCw class="size-3.5" />
+            {{ $t('More options') }}
+          </Button>
         </div>
         <!-- Places and objects the plan needs that the cast and sets do not have yet. -->
         <div
@@ -143,6 +175,22 @@
               {{ change }}
             </li>
           </ul>
+
+          <!-- The overview of the sequence: every shot with its kind and what happens in each of its keyframes. -->
+          <ol
+            v-if="turnOf(message)?.overview?.length"
+            class="space-y-3 rounded-lg border border-border bg-card p-3 text-sm"
+          >
+            <li v-for="row in turnOf(message)?.overview ?? []" :key="row.id">
+              <p :class="cn('font-semibold', row.current && 'text-signal')">
+                {{ row.code }} · {{ row.kind }}
+                <span v-if="!row.planned" class="font-normal text-muted-foreground">· {{ $t('not planned yet') }}</span>
+              </p>
+              <ol class="mt-1 list-decimal space-y-0.5 pl-5 text-muted-foreground">
+                <li v-for="(beat, b) in row.beats" :key="b">{{ beat }}</li>
+              </ol>
+            </li>
+          </ol>
 
           <!-- The cast and sets made or redrawn here: drawn while the conversation goes on, then shown with their picture. -->
           <ul v-if="drawnHere(message).length" class="grid grid-cols-3 gap-2">
@@ -202,6 +250,21 @@
             </figcaption>
           </figure>
 
+          <!-- Short answers under the last reply: clicked, sent as the director's message; typing works as before. -->
+          <div v-if="answersOf(message).length" class="flex flex-wrap gap-2">
+            <Button
+              v-for="answer in answersOf(message)"
+              :key="answer"
+              type="button"
+              size="sm"
+              variant="outline"
+              class="h-auto rounded-full py-1.5 text-left whitespace-normal"
+              @click="send(answer)"
+            >
+              {{ answer }}
+            </Button>
+          </div>
+
           <!-- Agreed in the chat: written into the shot and drawn. -->
           <p v-if="turnOf(message)?.proposal" class="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Check class="size-3.5 text-signal" />
@@ -224,8 +287,10 @@ import Chat from '@public:components/chat/Chat.vue'
 import type { ChatMessage } from '@public:components/chat/types'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { Check, ChevronRight, LoaderCircle, TriangleAlert, Wand2 } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { Check, ChevronRight, LoaderCircle, RefreshCw, TriangleAlert, Wand2 } from 'lucide-vue-next'
+import { computed, nextTick, ref, watch } from 'vue'
+
+import PlaceDrawingTile from './PlaceDrawingTile.vue'
 
 /** What the chat shows of a plan it wrote into the shot. */
 export type PlanProposal = { kind: string; settingFrom?: string | null }
@@ -246,10 +311,20 @@ export type PlanChatTurn = {
   chosenPlace?: { name: string; imageUrl: string }
   /** What the checks found, reported in this turn, numbered as in its text. */
   findings?: { n: number }[]
+  /** Short answers the director can click instead of typing. */
+  answers?: string[]
+  /** The overview of the sequence under a new plan or newly agreed shots: each shot with its kind and keyframe beats. */
+  overview?: { id: string; code: string; kind: string; current: boolean; planned: boolean; beats: string[] }[]
 }
 
 /** The drawn keyframe the director has selected; while choosing a place or keyframe 1 the chat sees what is on screen instead. */
-export type ChatTarget = { kind: 'keyframe'; keyframe: string; label: string } | null
+export type ChatTarget = {
+  kind: 'keyframe'
+  keyframe: string
+  label: string
+  /** The person clicked in the image, as shares of its width and height. */
+  box?: { x: number; y: number; width: number; height: number } | null
+} | null
 
 const props = defineProps<{
   chatUrl?: string
@@ -270,6 +345,28 @@ const props = defineProps<{
   sequencePlaceUrl?: string
   /** A place of the sequence being drawn here, shown with placeholders while it waits. */
   sequencePlaceDrawing?: { name: string; shots: string[]; count: number } | null
+  /** What the viewer should learn from the shot, kept in view above the conversation. */
+  takeaway?: string | null
+  /** The shot's aspect ratio, such as "9:16", so places being drawn take the size of the ones beside them. */
+  aspectRatio?: string
+  /** How long drawing one image usually takes, for the progress of the places being drawn. */
+  renderSeconds?: number
+}>()
+
+const frameRatio = computed(() => (props.aspectRatio ?? '9:16').replace(':', ' / '))
+const placeSeconds = computed(() => props.renderSeconds ?? 60)
+
+/** What is typed; filled from outside, such as with who was clicked in the image. */
+const draft = defineModel<string>('draft', { default: '' })
+const chat = ref<InstanceType<typeof Chat> | null>(null)
+
+watch(draft, (text, before) => {
+  if (text !== '' && before === '') void nextTick(() => chat.value?.focus())
+})
+
+const emit = defineEmits<{
+  /** A message went out, so what was clicked for it is done. */
+  sent: []
 }>()
 
 const turns = ref<PlanChatTurn[]>([...(props.conversation ?? [])])
@@ -383,11 +480,13 @@ const messages = computed<ChatMessage[]>(() => [
         },
       ]
     : []),
-  ...(props.sequencePlaceDrawing
-    ? [{ id: 'sequence-place-drawing', role: 'assistant' as const, kind: 'text' as const, content: '' }]
-    : []),
+  // The options there stay to choose from while more are drawn below them.
   ...(props.sequencePlace
     ? [{ id: 'sequence-place', role: 'assistant' as const, kind: 'text' as const, content: '' }]
+    : []),
+  // The first places of the sequence being drawn; more of a place already shown are drawn in with its options.
+  ...(props.sequencePlaceDrawing && props.sequencePlaceDrawing.name !== props.sequencePlace?.name
+    ? [{ id: 'sequence-place-drawing', role: 'assistant' as const, kind: 'text' as const, content: '' }]
     : []),
   // Offered to make for the cast and sets: it waits below the conversation until added or left out.
   ...(props.newElements?.length
@@ -408,6 +507,15 @@ const findingLines = (message: ChatMessage) => {
     .map((line) => ({ text: line, finding: numbers.some((number) => line.startsWith(number)) }))
 }
 
+/** Only under the last reply, and not while something is asked: an older answer no longer fits. */
+const answersOf = (message: ChatMessage) => {
+  const turn = turnOf(message)
+
+  return turn?.role === 'assistant' && turn === turns.value[turns.value.length - 1] && !busy.value
+    ? (turn.answers ?? [])
+    : []
+}
+
 const drawnHere = (message: ChatMessage) => [...(turnOf(message)?.made ?? []), ...(turnOf(message)?.adjusted ?? [])]
 
 const send = async (text: string, extra: { made?: string[]; continue?: boolean } = {}) => {
@@ -421,7 +529,9 @@ const send = async (text: string, extra: { made?: string[]; continue?: boolean }
   if (!extra.continue)
     turns.value = [...turns.value, { role: 'director', text: message, about: props.target?.label, ...extra }]
 
-  const selection = props.target ? { target: 'keyframe', keyframe: props.target.keyframe } : {}
+  const selection = props.target
+    ? { target: 'keyframe', keyframe: props.target.keyframe, ...(props.target.box ? { box: props.target.box } : {}) }
+    : {}
 
   try {
     const {
@@ -434,6 +544,7 @@ const send = async (text: string, extra: { made?: string[]; continue?: boolean }
       ...selection,
     })
     turns.value = saved
+    emit('sent')
 
     // The director agreed to drop this shot: go on to the shot that took its place.
     if (visit) return router.visit(visit)

@@ -28,6 +28,8 @@ export function createKeyframeMover() {
       x: number
       y: number
       depth: MoverDepth | null
+      /** A thing of the place, such as a landed helicopter: it moves in this keyframe only. */
+      placeObject: string | null
     } | null,
     offset: { dx: 0, dy: 0 },
     selecting: false,
@@ -67,13 +69,16 @@ export function createKeyframeMover() {
     Object.assign(state, { ...urls, selecting: true })
 
     try {
-      const found = await postJson<{ box: MoverBox; overlay: string; cutout: string; depth: MoverDepth | null }>(
-        state.selectUrl,
-        point,
-      )
+      const found = await postJson<{
+        box: MoverBox
+        overlay: string
+        cutout: string
+        depth: MoverDepth | null
+        placeObject: string | null
+      }>(state.selectUrl, point)
       state.picked = { ...found, ...point }
     } catch (caught) {
-      state.error = caught instanceof PostJsonError ? caught.message : $t('The person could not be found. Try again.')
+      state.error = caught instanceof PostJsonError ? caught.message : $t('Nothing to move was found there. Try again.')
     } finally {
       state.selecting = false
     }
@@ -91,8 +96,13 @@ export function createKeyframeMover() {
         preserveScroll: true,
         onSuccess: reset,
         onError: (errors) => {
-          state.error = Object.values(errors)[0] ?? null
-          state.applying = false
+          // Dropped, so the drag hint gives way to what went wrong.
+          Object.assign(state, {
+            picked: null,
+            offset: { dx: 0, dy: 0 },
+            applying: false,
+            error: Object.values(errors)[0] ?? null,
+          })
         },
       },
     )

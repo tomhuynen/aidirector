@@ -33,9 +33,9 @@ class MovedPersonDescriber implements Agent, HasReasoningEffort, HasStructuredOu
     public function instructions(): Stringable|string
     {
         return <<<'INSTRUCTIONS'
-            A director moved a person in a keyframe of an animated shot by hand, and the pose may have been redrawn for the new spot. You see the keyframe as it is now. Keep its plan true to the image.
+            A director moved a person, or a thing that moves in the shot such as a helicopter or a vehicle, in a keyframe of an animated shot by hand, and the pose may have been redrawn for the new spot. You see the keyframe as it is now. Keep its plan true to the image.
 
-            - description: the keyframe's description rewritten so it says what the image shows now. Keep its wording and style, and change only what the move changed: where the person stands, where they face or look, their pose and gesture. Say where things are from the camera's point of view: left or right in the frame, nearer or further.
+            - description: the keyframe's description rewritten so it says what the image shows now. Keep its wording and style, and change only what the move changed: where the person or thing stands, where they face or look, their pose and gesture. Say where things are from the camera's point of view: left or right in the frame, nearer or further.
             - spatial: the keyframe's spatial fact, the one sentence about where the person is relative to the line, zone, door or object, rewritten for where they stand now; empty when it had none.
             - storyline: the shot's storyline with the part about this moment changed as little as the move asks, for example "steps into the red zone" becoming "steps to the edge of the red zone". Every other word stays the same. The same text when the storyline already fits.
             - title: the keyframe's title, changed only when it no longer fits what the image shows; otherwise the same title. Two to four words.
