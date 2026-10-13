@@ -76,6 +76,8 @@ class GenerateRemainingKeyframes implements ShouldQueue
         }
 
         if ($this->onlyFirst) {
+            // A shot that starts with the place as an earlier shot of its sequence left it, such as with the barrier up: that version first.
+            $painter->ensurePlaceStates($shot, $siblings);
             $this->drawFirst($painter, $shot, $siblings, $first);
 
             return;

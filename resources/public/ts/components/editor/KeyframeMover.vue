@@ -36,8 +36,33 @@
     >
       <LoaderCircle class="size-6 animate-spin" />
     </span>
+    <!-- Let go at a new spot: keep it there as it is, draw it again there with its own shadow and light, or put it back. -->
+    <div
+      v-if="mover.state.picked && mover.state.dropped && !mover.state.applying"
+      class="absolute inset-x-4 bottom-4 flex flex-wrap justify-center gap-2"
+      @click.stop
+    >
+      <Button type="button" class="shadow-lg" @click="mover.apply(false)">
+        <Check class="size-4" />
+        {{ $t('Confirm') }}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        class="bg-background/90 shadow-lg"
+        :title="$t('Draw it again at this spot, with its own shadow and light')"
+        @click="mover.apply(true)"
+      >
+        <Sparkles class="size-4" />
+        {{ $t('Redraw') }}
+      </Button>
+      <Button type="button" variant="outline" class="bg-background/90 shadow-lg" @click="mover.cancel()">
+        <X class="size-4" />
+        {{ $t('Cancel') }}
+      </Button>
+    </div>
     <p
-      v-if="mover.state.picked && !mover.state.applying"
+      v-else-if="mover.state.picked && !mover.state.applying"
       class="pointer-events-none absolute inset-x-4 bottom-4 rounded-lg border border-border bg-background/90 px-4 py-2 text-center text-sm"
     >
       {{
@@ -58,7 +83,8 @@
 </template>
 <script setup lang="ts">
 import { $t } from '@public/ts/shared/i18n'
-import { LoaderCircle } from 'lucide-vue-next'
+import { Button } from '@shared:ui/button'
+import { Check, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import { onBeforeUnmount, onMounted, useTemplateRef } from 'vue'
 
 import type { KeyframeMoverState, MoverBox } from './keyframeMover'

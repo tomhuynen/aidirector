@@ -152,6 +152,25 @@ describe('create', function () {
             ->assertJsonPath('messages.1.answers', ['Yes, draw the places', 'Change the storyline', 'Keep it']);
     });
 
+    it('draws the plan of a shot straight away once the director agreed to the overview of its sequence, without asking again', function () {
+        Queue::fake();
+        Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
+        PlanDirector::fake([directorReply(['reply' => 'I draw it now.', 'proposal' => agreedPlan([
+            'kind' => 'close-up',
+            'storyline' => 'She pulls the cord and the badge comes round to her chest.',
+            'keyframes' => [['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['female engineer']]],
+        ])])]);
+        $shot = planShot($this->project);
+        App\Support\Shots\SequenceOverview::agree($shot);
+
+        talkTo($this, $shot->fresh(), 'ok')->assertJsonPath('reload', true);
+
+        expect($shot->fresh()->awaitsGo())->toBeFalse()
+            ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING);
+        Queue::assertPushed(App\Jobs\GenerateKeyframes::class);
+        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Sequence agreed'));
+    });
+
     it('talks first, then puts the agreed plan into the shot, shows the overview and draws it once the director agrees', function () {
         Queue::fake();
         $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
@@ -192,7 +211,7 @@ describe('create', function () {
 
         expect($shot->kind)->toBe(App\Enums\ShotKind::CLOSE_UP)
             ->and($shot->chosenStoryline()['storyline'])->toBe('She pulls the cord and the badge comes round to her chest.')
-            ->and($shot->storylineKeyframes())->toEqual([['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['Female engineer'], 'handled' => []]])
+            ->and($shot->storylineKeyframes())->toEqual([['title' => 'Badge Behind', 'description' => 'The Female engineer, the cord over her shoulder.', 'spatial' => 'Only the cord shows on her chest.', 'elements' => ['Female engineer'], 'handled' => [], 'moving_parts' => []]])
             ->and($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($shot->awaitsGo())->toBeFalse()
             ->and($shot->plan_chat)->toHaveCount(6);
@@ -315,6 +334,26 @@ describe('create', function () {
             ->and(PlanDirector::sequenceProblems($sequence(['full', 6])))->toBe([])
             ->and(PlanDirector::sequenceProblems(['rules_check' => []]))->toBe([])
             ->and((string) (new PlanDirector(planShot($this->project), []))->instructions())->toContain('no two shots in a row have the same framing');
+    });
+
+    it('shows the overview again only when it changed since it was last shown', function () {
+        Queue::fake();
+        $plan = agreedPlan(['keyframes' => [['title' => 'Waits', 'beat' => 'He waits at the gate.', 'description' => 'He waits at the gate.', 'spatial' => '', 'elements' => []], ['title' => 'Goes', 'beat' => 'He walks through.', 'description' => 'He walks through the gate.', 'spatial' => '', 'elements' => []]]]);
+        PlanDirector::fake([directorReply(['proposal' => $plan]), directorReply(['proposal' => $plan])]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'write it')->assertJsonPath('messages.1.overview.0.beats', ['He waits at the gate.', 'He walks through.']);
+        talkTo($this, $shot->fresh(), 'write it again')->assertJsonMissingPath('messages.3.overview');
+    });
+
+    it('reworks a sequence where a scene or close-up has only one beat, which leaves nothing to move between', function () {
+        $answer = ['shots' => [
+            ['kind' => 'scene', 'place' => 'gate', 'view' => 'wide', 'setting' => 'new_place', 'beats' => ['The truck stops at the barrier.', 'The officer steps to the window.']],
+            ['kind' => 'scene', 'place' => 'gate', 'view' => 'close on the booth', 'setting' => 'new_place', 'beats' => ['The barrier is open and the officer gives a thumbs-up.']],
+        ]];
+
+        expect(PlanDirector::sequenceProblems($answer))->toBe(['Shot 2 has 1 beat; give it at least two, where it starts and where it ends, splitting a beat with two changes into the moment before and after.'])
+            ->and((string) (new PlanDirector(planShot($this->project), []))->instructions())->toContain('A scene or a close-up has at least two beats');
     });
 
     it('tells the story in several shots right after this one, grouped together', function () {
@@ -508,7 +547,8 @@ describe('create', function () {
         $shot = planShot($this->project);
 
         talkTo($this, $shot, 'yes');
-        talkTo($this, $shot->fresh(), 'draw it');
+        // The answer says what it waits for, so the chat shows it with a loader at once and "drawing now" is not taken for drawing.
+        talkTo($this, $shot->fresh(), 'draw it')->assertJsonPath('waitingFor', 'the pictures of the new cast and sets');
 
         expect($shot->fresh())->status->toBe(ShotStatus::STORYLINE_READY)
             ->and($shot->fresh()->waitsFor())->toBe('the pictures of the new cast and sets');
@@ -616,5 +656,48 @@ describe('reorder and destroy', function () {
         actingAs($this->director, 'director')
             ->delete(route('public.shots.destroy', [$this->project, $first]))
             ->assertRedirect(route('public.shots.create', $this->project));
+    });
+
+    it('destroys the ticked shots, closes the gaps and stays on the open shot', function () {
+        [$first, $second, $third, $fourth] = Shot::factory()->for($this->project)->count(4)->sequence(
+            ['position' => 1],
+            ['position' => 2],
+            ['position' => 3],
+            ['position' => 4],
+        )->create();
+
+        actingAs($this->director, 'director')
+            ->delete(route('public.shots.destroy.many', $this->project), ['shots' => [$second->sqid, $fourth->sqid], 'current' => $third->sqid])
+            ->assertRedirect(route('public.shots.view', [$this->project, $third]));
+
+        $this->assertSoftDeleted($second);
+        $this->assertSoftDeleted($fourth);
+        expect($first->fresh()->position)->toBe(1)
+            ->and($third->fresh()->position)->toBe(2);
+    });
+
+    it('opens the shot that took the place of the first deleted one when the open shot is deleted too', function () {
+        [$first, $second, $third] = Shot::factory()->for($this->project)->count(3)->sequence(
+            ['position' => 1],
+            ['position' => 2],
+            ['position' => 3],
+        )->create();
+
+        actingAs($this->director, 'director')
+            ->delete(route('public.shots.destroy.many', $this->project), ['shots' => [$first->sqid, $second->sqid], 'current' => $second->sqid])
+            ->assertRedirect(route('public.shots.view', [$this->project, $third]));
+
+        expect($third->fresh()->position)->toBe(1);
+    });
+
+    it('deletes no shots when one of them is not in the project', function () {
+        $shot = Shot::factory()->for($this->project)->create(['position' => 1]);
+        $other = Shot::factory()->create();
+
+        actingAs($this->director, 'director')
+            ->delete(route('public.shots.destroy.many', $this->project), ['shots' => [$shot->sqid, $other->sqid]])
+            ->assertSessionHasErrors('shots');
+
+        $this->assertNotSoftDeleted($shot);
     });
 });

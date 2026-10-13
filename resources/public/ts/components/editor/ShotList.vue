@@ -5,16 +5,16 @@
       <div class="flex items-center gap-2">
         <span class="text-sm text-muted-foreground tabular-nums">{{ shots.length }}</span>
         <Button
-          v-if="mergeUrl && shots.length > 1"
+          v-if="(mergeUrl || destroyUrl) && shots.length > 0"
           type="button"
-          :variant="merging ? 'secondary' : 'outline'"
+          :variant="editing ? 'secondary' : 'outline'"
           size="icon-sm"
-          :aria-label="$t('Merge shots')"
-          :aria-pressed="merging"
-          :title="$t('Merge shots')"
-          @click="toggleMerging"
+          :aria-label="$t('Edit shots')"
+          :aria-pressed="editing"
+          :title="$t('Edit shots')"
+          @click="toggleEditing"
         >
-          <Combine class="size-4" />
+          <SquarePen class="size-4" />
         </Button>
         <!-- Plays the shots that have a video one after another, from the open shot onwards. -->
         <Button
@@ -34,8 +34,8 @@
       </div>
     </div>
 
-    <p v-if="merging" class="px-5 pb-2 text-xs leading-relaxed text-muted-foreground">
-      {{ $t('Tick shots that follow each other and have a video.') }}
+    <p v-if="editing" class="px-5 pb-2 text-xs leading-relaxed text-muted-foreground">
+      {{ $t('Tick shots to delete them, or to merge shots that follow each other and have a video.') }}
     </p>
 
     <p v-if="shots.length === 0" class="px-4 py-6 text-xs leading-relaxed text-muted-foreground">
@@ -45,21 +45,15 @@
     <ol v-else ref="list" scroll-region class="flex-1 space-y-1 overflow-y-auto p-2" @scroll.passive="rememberScroll">
       <li v-for="(shot, i) in shots" :key="shot.id" :data-shot="shot.id" :class="cn('group relative', groupOutline(i))">
         <label
-          v-if="merging"
+          v-if="editing"
           :class="
             cn(
-              'flex items-center gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors',
-              canMerge(shot) ? 'cursor-pointer hover:bg-card' : 'cursor-not-allowed opacity-50',
+              'flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors hover:bg-card',
               selected.includes(shot.id) && 'border-signal bg-signal-soft/60',
             )
           "
-          :title="mergeBlocker(shot) ?? undefined"
         >
-          <Checkbox
-            :model-value="selected.includes(shot.id)"
-            :disabled="!canMerge(shot)"
-            @update:model-value="toggle(shot)"
-          />
+          <Checkbox :model-value="selected.includes(shot.id)" @update:model-value="toggle(shot)" />
           <img
             v-if="shot.thumbnailUrl"
             :src="shot.thumbnailUrl"
@@ -100,7 +94,7 @@
           </Button>
         </div>
         <Link
-          v-if="!merging"
+          v-if="!editing"
           :href="shot.url"
           preserve-scroll
           :class="
@@ -188,15 +182,36 @@
       </li>
     </ol>
 
-    <div v-if="merging" class="shrink-0 space-y-2 border-t border-border p-3">
-      <p v-if="selectionProblem" class="text-xs text-muted-foreground">{{ selectionProblem }}</p>
-      <div class="flex items-center justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" @click="toggleMerging">{{ $t('Cancel') }}</Button>
-        <Button type="button" size="sm" :disabled="selectionProblem !== null" @click="dialogOpen = true">
-          <Combine class="size-4" />
-          {{ $t('Merge :count shots', { count: String(selected.length) }) }}
-        </Button>
-      </div>
+    <div v-if="editing" class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border p-3">
+      <Button type="button" variant="ghost" size="sm" class="mr-auto" @click="toggleEditing">{{ $t('Done') }}</Button>
+      <ConfirmDelete
+        v-if="destroyUrl && selected.length > 0"
+        :action="destroyUrl"
+        :data="{ shots: selected, current: currentId ?? null }"
+        :title="
+          selected.length === 1
+            ? $t('Delete this shot?')
+            : $t('Delete :count shots?', { count: String(selected.length) })
+        "
+        :description="
+          $t(
+            'The shots are removed from the sequence with their storylines, keyframes, videos and audio tracks. This cannot be undone.',
+          )
+        "
+        :confirm-label="$t('Delete')"
+        @deleted="toggleEditing"
+      >
+        <template #trigger>
+          <Button type="button" variant="outline" size="sm" class="text-destructive hover:text-destructive">
+            <Trash2 class="size-4" />
+            {{ $t('Delete :count', { count: String(selected.length) }) }}
+          </Button>
+        </template>
+      </ConfirmDelete>
+      <Button v-if="mergeUrl && canMergeSelection" type="button" size="sm" @click="dialogOpen = true">
+        <Combine class="size-4" />
+        {{ $t('Merge :count', { count: String(selected.length) }) }}
+      </Button>
     </div>
 
     <SequencePlayer v-model:index="playing" :queue="playQueue" />
@@ -206,7 +221,7 @@
       :shots="selectedShots"
       :transitions="transitions ?? []"
       :merge-url="mergeUrl"
-      @merged="toggleMerging"
+      @merged="toggleEditing"
     />
   </aside>
 </template>
@@ -214,10 +229,11 @@
 import { Link, router } from '@inertiajs/vue3'
 import { useReadyShots } from '@public/ts/composables/useReadyShots'
 import { $t } from '@public/ts/shared/i18n'
+import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Checkbox } from '@shared:ui/checkbox'
-import { ArrowDown, ArrowUp, Check, Clock, Combine, LoaderCircle, Play, Plus } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Check, Clock, Combine, LoaderCircle, Play, Plus, SquarePen, Trash2 } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import MergeShotsDialog from './MergeShotsDialog.vue'
@@ -260,6 +276,7 @@ const props = defineProps<{
   createUrl: string
   reorderUrl?: string
   mergeUrl?: string
+  destroyUrl?: string
   transitions?: ShotTransitionOption[]
 }>()
 
@@ -335,30 +352,22 @@ watch(playing, async (index) => {
 const reordering = ref(false)
 
 /*
- * Merging: the director ticks shots that follow each other and have a
- * video, then confirms a title and a transition in the dialog.
+ * Editing: the director ticks shots to delete them, or to merge them once
+ * they follow each other and have a video; the merge dialog asks a title
+ * and a transition.
  */
-const merging = ref(false)
+const editing = ref(false)
 const selected = ref<string[]>([])
 const dialogOpen = ref(false)
 
-const toggleMerging = () => {
-  merging.value = !merging.value
+const toggleEditing = () => {
+  editing.value = !editing.value
   selected.value = []
 }
 
-const mergeBlocker = (shot: ShotListItem): string | null => {
-  if (shot.partsCount > 0) return $t('Already merged. Unmerge it first.')
-  if (shot.status !== 'video-ready') return $t('Render its video first.')
-
-  return null
-}
-
-const canMerge = (shot: ShotListItem) => mergeBlocker(shot) === null
+const canMerge = (shot: ShotListItem) => shot.partsCount === 0 && shot.status === 'video-ready'
 
 const toggle = (shot: ShotListItem) => {
-  if (!canMerge(shot)) return
-
   selected.value = selected.value.includes(shot.id)
     ? selected.value.filter((id) => id !== shot.id)
     : [...selected.value, shot.id]
@@ -366,14 +375,13 @@ const toggle = (shot: ShotListItem) => {
 
 const selectedShots = computed(() => props.shots.filter((shot) => selected.value.includes(shot.id)))
 
-const selectionProblem = computed<string | null>(() => {
-  if (selected.value.length < 2) return $t('Tick at least two shots.')
+/** Two or more shots that follow each other, each with its own video. */
+const canMergeSelection = computed(() => {
+  if (selectedShots.value.length < 2 || !selectedShots.value.every(canMerge)) return false
 
   const indexes = props.shots.flatMap((shot, i) => (selected.value.includes(shot.id) ? [i] : []))
 
   return indexes[indexes.length - 1] - indexes[0] === indexes.length - 1
-    ? null
-    : $t('Only shots that follow each other can be merged.')
 })
 
 const move = (index: number, delta: number) => {

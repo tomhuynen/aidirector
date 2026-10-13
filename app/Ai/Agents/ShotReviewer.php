@@ -60,7 +60,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             - Every person is recognisable as the same person throughout: face, hair, clothing and colours. Gear the plan has them put on or take off, such as a helmet, is not an issue.
             - The place and the camera stay the same unless the keyframes say they change; a sign, vehicle or door does not move, appear or disappear between keyframes.
             - Objects stay where they were left and change state in an order that makes sense: what is picked up is held, what is opened stays open.
-            - Positions and distances change in the direction the steps describe.
+            - Positions and distances change in the direction the steps describe. Judge whether something is before or past a barrier, gate or line by where it stands on the ground along the lane, against the post or the line on the ground, never by what overlaps in the image: a barrier arm that swings up rises from its post and can cross in front of or behind a vehicle that still waits before it.
             - Nobody appears out of nothing: a person who is not in a keyframe and is in the next one, standing with the others, without being seen to come in from an edge of the frame or a door, is an issue; give the keyframe where they first appear.
             - Nobody passes through someone else: the video takes the shortest way between two keyframes, so a person who is on one side of someone standing still in one keyframe and on the other side in the next keyframe walks straight through them. That is an issue; give the keyframe where they end up on the other side.
             Ignore small details such as exact hand positions or expressions, and matters of taste.

@@ -28,6 +28,8 @@ class PlanPlaceAligner implements Agent, HasReasoningEffort, HasStructuredOutput
         private readonly Shot $shot,
         /** Where the fixed things stand, which way they face and the routes through the place, in plain lines. */
         private readonly string $layout = '',
+        /** Whether the second image is the same view with the cast where they stand at the start, cut from the master of the sequence. */
+        private readonly bool $withBlocking = false,
     ) {}
 
     public function instructions(): Stringable|string
@@ -43,6 +45,7 @@ class PlanPlaceAligner implements Agent, HasReasoningEffort, HasStructuredOutput
               - Seen: from this camera, nothing that must be seen is hidden behind something nearer the camera, such as the guard and his booth behind a truck in the lane between them and the camera.
               - Reach: who touches, hands over or checks something stands close enough to it.
             - Rewrite only the words that break one of these so the keyframe fits, such as where someone stands or which way something faces.
+            - When a second image shows the same view with the cast in it, that is where everyone stands at the start of this shot, as the director chose it: keyframe 1 keeps their spots and the way each of them faces there, such as a truck that comes towards the camera from beyond the barrier, and the later keyframes move on from there. Never turn someone or something around against that picture, and never move them to the other side of a barrier, line or door; rewrite the words to fit the picture instead.
             - Name sides from the camera's point of view: on the left or the right of the frame, nearer to or further from the camera. Name hands by the side of the frame they are on.
             - keyframes: every keyframe in the same order, with its description and spatial fact, changed or as it was.
             - note: when you changed anything, one short sentence for the director on what and why, such as "The bin stands on the left by the pillar, so she now walks away to the right." Empty when the plan already fits.
@@ -72,6 +75,10 @@ class PlanPlaceAligner implements Agent, HasReasoningEffort, HasStructuredOutput
             ->map(fn(array $keyframe, int $index) => ($index + 1) . ". {$keyframe['description']}" . (filled($keyframe['spatial'] ?? null) ? "\n   Spatial fact: {$keyframe['spatial']}" : ''))
             ->join("\n");
 
-        return 'The attached image is the empty place.' . ($this->layout !== '' ? "\n\nIts layout:\n{$this->layout}" : '') . "\n\nThe keyframes:\n{$keyframes}";
+        $images = $this->withBlocking
+            ? 'The first attached image is the empty place; the second is the same view with the cast where they stand at the start of this shot.'
+            : 'The attached image is the empty place.';
+
+        return $images . ($this->layout !== '' ? "\n\nIts layout:\n{$this->layout}" : '') . "\n\nThe keyframes:\n{$keyframes}";
     }
 }

@@ -84,3 +84,20 @@ it('checks the plan against the layout of the place, and says what cannot work f
         && str_contains((string) $prompt->agent->instructions(), 'Seen: from this camera, nothing that must be seen is hidden behind something nearer the camera'));
     App\Ai\Agents\PlaceMapper::assertPromptedTimes(1);
 });
+
+it('keeps where the cast stands and faces in the master cut of a sequence shot', function () {
+    PlanPlaceAligner::fake([['keyframes' => [
+        ['description' => 'The bin burns on the right of the frame.', 'spatial' => ''],
+        ['description' => 'She walks away to the left of the frame.', 'spatial' => 'Two steps from the bin.'],
+    ], 'note' => '', 'problem' => '']]);
+    $image = imagecreatetruecolor(9, 16);
+    ob_start();
+    imagepng($image);
+    $this->shot->addMediaFromString((string) ob_get_clean())->usingFileName('blocking.png')->toMediaCollection(Shot::BLOCKING);
+
+    app(PlanToPlace::class)->align($this->shot->fresh(), $this->place);
+
+    PlanPlaceAligner::assertPrompted(fn($prompt) => count($prompt->attachments) === 2
+        && str_contains($prompt->prompt, 'the second is the same view with the cast where they stand at the start of this shot')
+        && str_contains((string) $prompt->agent->instructions(), 'Never turn someone or something around against that picture'));
+});

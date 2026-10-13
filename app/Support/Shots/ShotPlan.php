@@ -42,6 +42,8 @@ class ShotPlan
             'elements' => collect((array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
             // What someone changes in this keyframe, and what moves by itself in it: only those objects are taken from the drawing when it is put onto the place.
             'handled' => collect((array) ($keyframe['handled'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
+            // Parts of the place that move in this keyframe, such as a barrier arm, in plain words: taken from the drawing where they were and where they are now.
+            'moving_parts' => collect((array) ($keyframe['moving_parts'] ?? []))->map(fn(mixed $part) => trim((string) $part))->filter()->unique()->values()->all(),
         ])->all();
         $keyframes = self::withNamedPeople($shot, $keyframes);
 

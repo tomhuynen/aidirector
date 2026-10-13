@@ -129,10 +129,30 @@ class MoveController
         $keyframe->forceFill(['render_id' => $moved->id, 'render_error' => null])->save();
         $this->keepLayers($keyframe, $render, $moved, $cutout);
 
-        // The description and the plan follow the image, then the shot is reviewed; nothing is redrawn.
-        PoseMovedPerson::dispatch($keyframe, '', $box, redraw: false);
+        $this->afterMove($request, $keyframe, $box, $cutout->movedThing());
 
         return redirect()->route('public.shots.view', [$project, $shot]);
+    }
+
+    /**
+     * After a move the description and the plan follow the image, then the shot is reviewed. Asked to redraw, what
+     * was moved is drawn again at its new spot first, so it sits there with its own shadow, light and, for a person,
+     * pose; otherwise nothing is redrawn.
+     *
+     * @param  array{x: float, y: float, width: float, height: float}  $box
+     */
+    private function afterMove(KeyframeMoveRequest $request, Keyframe $keyframe, array $box, bool $thing): void
+    {
+        if (! $request->boolean('redraw')) {
+            PoseMovedPerson::dispatch($keyframe, '', $box, redraw: false);
+
+            return;
+        }
+
+        $keyframe->forceFill(['rendering' => true, 'render_error' => null])->save();
+        PoseMovedPerson::dispatch($keyframe, $thing
+            ? 'Redraw what was moved by hand where it stands now, so it sits naturally in the place: where it meets the ground, its shadow and its light for this spot. Keep how it looks, its size and which way it faces.'
+            : "Redraw the person moved by hand where they stand now, so they sit naturally in the place: their shadow and light for this spot, and the pose, gaze and gesture this describes from there: {$keyframe->fullDescription()}", $box);
     }
 
     /**
@@ -210,7 +230,7 @@ class MoveController
         $keyframe->forceFill(['render_id' => $moved->id, 'render_error' => null])->save();
         $this->keepLayers($keyframe, $render, $moved, $cutout);
 
-        PoseMovedPerson::dispatch($keyframe, '', $box, redraw: false);
+        $this->afterMove($request, $keyframe, $box, true);
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

@@ -116,6 +116,8 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
             - an object without lettering, such as a blank card, paper or badge: objects are known by their shape, colour, size and where they are, never by text, so never ask for text to make one recognisable.
             Report what makes the story wrong, and what a viewer would see change {$this->comparedWith()}.
 
+            Judge whether something is before or past a barrier, gate or line by where it stands on the ground along the lane, against the post or the line on the ground, never by what overlaps in the image: a barrier arm that swings up rises from its post and can cross in front of or behind a vehicle that still waits before it.
+
             Direction: check which way someone faces or moves only when the story depends on it: someone who goes into or out of a place, or who must stand or move relative to a line, a zone, a door or a hazard. Then someone who faces the camera or walks towards it while the description says they go away from it or into the place is a high issue in category state. Otherwise a person who faces another way than the description says is not an issue.
 
             Severity:

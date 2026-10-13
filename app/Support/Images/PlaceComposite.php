@@ -34,9 +34,6 @@ class PlaceComposite
     /** How far sideways of the soles the contact shadow reaches at that depth, as a share of the image width. */
     private const float CONTACT_REACH = 0.008;
 
-    /** How much darker the place gets right under a sole the drawing gave no shadow, from 0 to 1. */
-    private const float CONTACT_SHADE = 0.22;
-
     /** How far to each side, as a share of the image width, the lowest point of a column is compared with, to tell feet from an arm. */
     private const float FEET_WINDOW = 0.06;
 
@@ -48,6 +45,9 @@ class PlaceComposite
 
     /** How far around the people, as a share of the image width, the picture without them takes the edit, so no edge or halo of them is left. */
     private const float EMPTIED_MARGIN = 0.04;
+
+    /** How close to what is taken out of a picture, as a share of its width, a shadow must start to be the one it threw. */
+    private const float THROWN_SHADOW_REACH = 0.03;
 
     /** How close to an object, as a share of the image width, a person counts as touching it, such as by a cord or a hand just in front of it. */
     private const float TOUCH_MARGIN = 0.02;
@@ -70,11 +70,8 @@ class PlaceComposite
 
             return $mask;
         }, $areas)]);
-        [$shadows, $dark] = $this->shadows($placeImage, $drawnImage, $topLayerMask);
+        $shadows = $this->shadows($placeImage, $drawnImage, $topLayerMask);
         $keep->compositeImage($shadows, Imagick::COMPOSITE_LIGHTEN, 0, 0);
-
-        // Where the drawing has no shadow right under a sole, the place gets a soft one, so nobody floats.
-        $this->shadeUnderFeet($placeImage, $topLayerMask, $dark);
 
         // A little wider and closed, so hair, fingers and edges come along; soft, so no hard seam shows.
         $keep->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '2'));
@@ -132,11 +129,78 @@ class PlaceComposite
     {
         [$pictureImage, $emptiedImage] = $this->pair($picture, $emptied);
         $keep = $this->read($people, $pictureImage);
+        $shadows = $this->shadowsTakenOut($pictureImage, $emptiedImage, $keep);
         $margin = (string) max(1, (int) round(self::EMPTIED_MARGIN * $pictureImage->getImageWidth()));
         $keep->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, $margin));
+        // The shadows they threw go too, also where they fall further away than the margin: otherwise they stay on the floor with nobody there.
+        $keep->compositeImage($shadows, Imagick::COMPOSITE_LIGHTEN, 0, 0);
         $keep->gaussianBlurImage(0, 6);
 
         return $this->paste($pictureImage, $emptiedImage, $keep);
+    }
+
+    /**
+     * Where the edit has the floor lighter than the picture by about the same factor in every channel, in a part
+     * that starts right next to what is taken out: the shadow it threw, which the edit took away. Measured on small
+     * copies; white where it is, black elsewhere.
+     */
+    public function shadowsTakenOut(Imagick $picture, Imagick $emptied, Imagick $taken): Imagick
+    {
+        $width = 216;
+        $height = (int) max(1, round($width * $picture->getImageHeight() / $picture->getImageWidth()));
+        [$before, $after, $mask] = [clone $picture, clone $emptied, clone $taken];
+
+        foreach ([$before, $after, $mask] as $image) {
+            $image->resizeImage($width, $height, Imagick::FILTER_TRIANGLE, 1);
+        }
+
+        // A shadow touches what threw it: the parts that start right next to it, however far they reach.
+        $near = clone $mask;
+        $near->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, (string) max(2, (int) round($width * self::THROWN_SHADOW_REACH))));
+        $beforePixels = $before->exportImagePixels(0, 0, $width, $height, 'RGB', Imagick::PIXEL_CHAR);
+        $afterPixels = $after->exportImagePixels(0, 0, $width, $height, 'RGB', Imagick::PIXEL_CHAR);
+        $isNear = $near->exportImagePixels(0, 0, $width, $height, 'I', Imagick::PIXEL_CHAR);
+        $shadow = [];
+
+        for ($i = 0; $i < $width * $height; $i++) {
+            $j = $i * 3;
+            $shadow[] = self::darkerByShadow([$beforePixels[$j], $beforePixels[$j + 1], $beforePixels[$j + 2]], [$afterPixels[$j], $afterPixels[$j + 1], $afterPixels[$j + 2]]);
+        }
+
+        $found = array_fill(0, $width * $height, 0);
+
+        foreach (Masks::parts($shadow, $width, $height) as $part) {
+            if (array_filter($part, fn(int $index) => $isNear[$index] > 127) !== []) {
+                foreach ($part as $index) {
+                    $found[$index] = 255;
+                }
+            }
+        }
+
+        $shadows = Masks::black($width, $height);
+        $shadows->importImagePixels(0, 0, $width, $height, 'I', Imagick::PIXEL_CHAR, $found);
+        $shadows->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '2'));
+        $shadows->resizeImage($picture->getImageWidth(), $picture->getImageHeight(), Imagick::FILTER_TRIANGLE, 1);
+        $shadows->setImageColorspace(Imagick::COLORSPACE_GRAY);
+
+        return $shadows;
+    }
+
+    /**
+     * Whether a colour is another one in shadow: every channel darker by about the same factor.
+     *
+     * @param  array{int, int, int}  $dark
+     * @param  array{int, int, int}  $light
+     */
+    private static function darkerByShadow(array $dark, array $light): bool
+    {
+        if (min($light) < 24) {
+            return false;
+        }
+
+        $ratios = [$dark[0] / $light[0], $dark[1] / $light[1], $dark[2] / $light[2]];
+
+        return max($ratios) < 0.9 && min($ratios) > 0.3 && max($ratios) - min($ratios) < 0.15;
     }
 
     /**
@@ -227,11 +291,9 @@ class PlaceComposite
      * enough to be a shadow, in a cone that widens downward, so a thin wedge
      * along the base of a wall or pillar, or a redrawn edge beside a person,
      * never comes along. What the people hold or touch comes in through the
-     * objects instead. Returns those shadows and everything darker than the place.
-     *
-     * @return array{0: Imagick, 1: Imagick}
+     * objects instead. Returns those shadows.
      */
-    private function shadows(Imagick $place, Imagick $drawn, Imagick $people): array
+    private function shadows(Imagick $place, Imagick $drawn, Imagick $people): Imagick
     {
         $matched = clone $drawn;
         $reference = clone $place;
@@ -263,30 +325,7 @@ class PlaceComposite
         $contact->compositeImage($this->belowFeet($people, self::CONTACT_DEPTH, self::CONTACT_REACH), Imagick::COMPOSITE_MULTIPLY, 0, 0);
         $reference->compositeImage($contact, Imagick::COMPOSITE_LIGHTEN, 0, 0);
 
-        return [$reference, $dark];
-    }
-
-    /**
-     * Darkens the place softly right under the soles where the drawing has
-     * no shadow there, like the contact shadow of a person moved by hand.
-     */
-    private function shadeUnderFeet(Imagick $place, Imagick $people, Imagick $dark): void
-    {
-        $shade = $this->belowFeet($people, self::CONTACT_DEPTH, self::CONTACT_REACH);
-        $missing = clone $dark;
-        $missing->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '3'));
-        $missing->negateImage(false);
-        $outside = clone $people;
-        $outside->negateImage(false);
-        $shade->compositeImage($missing, Imagick::COMPOSITE_MULTIPLY, 0, 0);
-        $shade->compositeImage($outside, Imagick::COMPOSITE_MULTIPLY, 0, 0);
-        $shade->gaussianBlurImage(0, 5);
-
-        // White where nothing changes, a little darker where the shade is.
-        $shade->evaluateImage(Imagick::EVALUATE_MULTIPLY, self::CONTACT_SHADE);
-        $shade->negateImage(false);
-        $shade->transformImageColorspace(Imagick::COLORSPACE_SRGB);
-        $place->compositeImage($shade, Imagick::COMPOSITE_MULTIPLY, 0, 0);
+        return $reference;
     }
 
     /**

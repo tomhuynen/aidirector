@@ -137,7 +137,7 @@ describe('compositing', function () {
             ->and(colourAt($composite, 30, 60))->toBe(colourAt(stripedPlace(), 30, 60));
     });
 
-    it('gives feet without a shadow in the drawing a soft one, but not an arm beside the body', function () {
+    it('adds no shadow of its own under feet the drawing gave none', function () {
         $flat = compositePng(fn(GdImage $image) => imagefill($image, 0, 0, (int) imagecolorallocate($image, 150, 150, 150)));
         // A person from 100 to 180 high, with an arm hanging down beside the body to 140.
         $person = compositePng(function (GdImage $image) {
@@ -153,7 +153,7 @@ describe('compositing', function () {
 
         $composite = (new PlaceComposite())->keyframe($flat, $drawn, $person);
 
-        expect(colourAt($composite, 70, 182)[0])->toBeLessThan(150)
+        expect(colourAt($composite, 70, 184))->toBe([150, 150, 150])
             ->and(colourAt($composite, 83, 143))->toBe([150, 150, 150])
             ->and(colourAt($composite, 70, 200))->toBe([150, 150, 150]);
     });
@@ -429,8 +429,31 @@ describe('painter', function () {
         app(KeyframePainter::class)->ensurePlaceStates($shot->load('project'), collect());
 
         expect($shot->media()->where('collection_name', Shot::PLACE_STATES)->count())->toBe(1);
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('The barrier arm is raised.'));
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('The barrier arm is raised.')
+            && $prompt->contains('The barrier arm stays in the place, exactly once'));
         App\Ai\Agents\PlaceChangeChecker::assertPromptedTimes(2);
+        // A part gone, or a second copy of it still across the road, is no change.
+        App\Ai\Agents\PlaceChangeChecker::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'The part that changes: the barrier arm.')
+            && str_contains((string) $prompt->agent->instructions(), 'exactly once'));
+    });
+
+    it('tries a change to the place up to three times, since the edit model may remove or double a part', function () {
+        fakeReplicate();
+        App\Ai\Agents\PlaceChangeChecker::fake(fn() => ['shown' => false]);
+        Image::fake(fn() => base64_encode(compositePng(fn(GdImage $image) => imagefill($image, 0, 0, (int) imagecolorallocate($image, 250, 200, 0)))));
+
+        $shot = Shot::factory()->for($this->project)->create([
+            'storyline' => ['keyframes' => [
+                ['title' => 'Closed', 'description' => 'The barrier is down.', 'place_change' => '', 'place_part' => ''],
+                ['title' => 'Open', 'description' => 'The barrier is up.', 'place_change' => 'The barrier arm is raised.', 'place_part' => 'barrier arm'],
+            ]],
+        ]);
+        $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+
+        app(KeyframePainter::class)->ensurePlaceStates($shot->load('project'), collect());
+
+        expect($shot->media()->where('collection_name', Shot::PLACE_STATES)->count())->toBe(1);
+        App\Ai\Agents\PlaceChangeChecker::assertPromptedTimes(3);
     });
 
     it('keeps the drawn keyframe when the cut-out fails', function () {
@@ -816,6 +839,54 @@ it('takes a handled thing of the place from the drawing also where it moved to, 
         ->and(colourAt($image, 120, 20))->toBe(colourAt(stripedPlace(), 120, 20));
 });
 
+it('takes a moving part of the place, such as a barrier arm going up, from the drawing where it was and where it is now', function () {
+    Config::set('pipeline.keyframes.composite.enabled', true);
+    Config::set('services.replicate.token', 'test-token');
+    Config::set('pipeline.keyframes.drift.enabled', false);
+    $people = (string) Config::get('pipeline.keyframes.composite.people_model');
+    $found = 0;
+    Http::fake([
+        // Found in the place at its spot first, then in the drawing further down, where it drove to.
+        'api.replicate.com/v1/predictions' => function (HttpRequest $request) use ($people, &$found) {
+            return Http::response(['status' => 'succeeded', 'output' => match (true) {
+                $request['version'] === $people => 'https://replicate.delivery/front.png',
+                ($request['input']['text_prompt'] ?? null) === 'barrier arm' => ++$found === 1 ? 'https://replicate.delivery/at-spot.png' : 'https://replicate.delivery/moved.png',
+                default => 'https://replicate.delivery/nothing.png',
+            }]);
+        },
+        'replicate.delivery/front.png' => Http::response(compositePng(fn(GdImage $image) => imagefilledrectangle($image, 20, 150, 120, 220, (int) imagecolorallocatealpha($image, 255, 255, 255, 0)), alpha: true)),
+        'replicate.delivery/at-spot.png' => Http::response(rectangleMask(20, 20, 60, 60)),
+        'replicate.delivery/moved.png' => Http::response(rectangleMask(20, 150, 120, 220)),
+        'replicate.delivery/nothing.png' => Http::response(rectangleMask(0, 0, 0, 0)),
+    ]);
+    App\Ai\Agents\ObjectInPlaceJudge::fake(fn() => ['present' => true]);
+    DetectionWordsWriter::fake(fn() => ['words' => ['barrier arm']]);
+    Image::fake(fn() => base64_encode(compositePng(fn(GdImage $image) => imagefill($image, 0, 0, (int) imagecolorallocate($image, 250, 200, 0)))));
+
+    $shot = Shot::factory()->for($this->project)->create([
+        'status' => ShotStatus::KEYFRAMES_PENDING,
+        'storyline' => ['keyframes' => [
+            ['title' => 'Closed', 'description' => 'The barrier is down.', 'handled' => []],
+            ['title' => 'Opens', 'description' => 'The barrier arm swings up.', 'handled' => [], 'moving_parts' => ['barrier arm']],
+        ]],
+    ]);
+    $shot->addMediaFromString(stripedPlace())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+    Keyframe::factory()->for($shot)->create(['position' => 1]);
+    $second = Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'The barrier arm swings up.']);
+    $second->elements()->attach(Element::factory()->for($this->project)->create(['name' => 'Gate guard', 'type' => 'person']));
+
+    (new GenerateRemainingKeyframes($shot, elementsDrawn: true))->handle(app(KeyframePainter::class));
+
+    $render = $second->fresh()->render();
+    $image = Storage::disk($render->disk)->get($render->getPathRelativeToRoot());
+
+    // Where the arm was and where it is now both come from the drawing; the rest stays the place.
+    expect($render->getCustomProperty(Keyframe::COMPOSITED))->toBeTrue()
+        ->and(colourAt($image, 40, 40))->toBe([250, 200, 0])
+        ->and(colourAt($image, 70, 185))->toBe([250, 200, 0])
+        ->and(colourAt($image, 120, 20))->toBe(colourAt(stripedPlace(), 120, 20));
+});
+
 it('finds no people when the finder finds nobody, even when the cut-out keeps something large in front', function () {
     Config::set('services.replicate.token', 'test-token');
     $people = (string) Config::get('pipeline.keyframes.composite.people_model');
@@ -876,4 +947,22 @@ it('leaves the picture of what moves in the shot out of its place, so it is not 
 
     expect($option->getCustomProperty(Keyframe::SENT)['images'])->toContain('Picture of Waste bin')
         ->not->toContain('Picture of Delivery truck');
+});
+
+it('takes the shadow a person throws out of the picture with them, also where it falls further away', function () {
+    // The picture: a red person with a long shadow to their left; the edit: the floor without either, a little off in colour.
+    $picture = compositePng(function (GdImage $image) {
+        imagefill($image, 0, 0, (int) imagecolorallocate($image, 160, 160, 170));
+        imagefilledrectangle($image, 100, 100, 115, 200, (int) imagecolorallocate($image, 220, 40, 40));
+        imagefilledrectangle($image, 20, 180, 99, 220, (int) imagecolorallocate($image, 96, 96, 102));
+    });
+    $emptied = compositePng(fn(GdImage $image) => imagefill($image, 0, 0, (int) imagecolorallocate($image, 158, 158, 168)));
+    $person = rectangleMask(100, 100, 115, 200);
+
+    $result = app(App\Support\Images\PlaceComposite::class)->withoutPeople($picture, $emptied, $person);
+
+    // Gone where they stood and where their shadow fell; the floor elsewhere is the picture's own.
+    expect(colourAt($result, 107, 150))->toEqualWithDelta([158, 158, 168], 6)
+        ->and(colourAt($result, 40, 200))->toEqualWithDelta([158, 158, 168], 8)
+        ->and(colourAt($result, 30, 40))->toBe([160, 160, 170]);
 });

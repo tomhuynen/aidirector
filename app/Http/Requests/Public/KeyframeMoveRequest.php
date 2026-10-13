@@ -22,6 +22,8 @@ class KeyframeMoveRequest extends FormRequest
             'dy' => ['required', 'numeric', 'between:-1,1'],
             /** How much larger or smaller the person becomes around their feet: from the depth of the place at the old and new spot. */
             'scale' => ['required', 'numeric', 'between:0.3,3'],
+            /** Whether it is redrawn at the new spot after the move, so it sits there with its own shadow and light. */
+            'redraw' => ['sometimes', 'boolean'],
         ];
     }
 }

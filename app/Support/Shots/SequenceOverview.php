@@ -17,6 +17,26 @@ class SequenceOverview
     /** On the storyline of a shot of a sequence: its beats as agreed with the sequence, before it is planned. */
     public const string BEATS = 'sequence_beats';
 
+    /** On the storyline of each shot of a sequence once the director agreed to its overview: a plan written for it is drawn without asking again. */
+    public const string AGREED = 'sequence_agreed';
+
+    /**
+     * Marks every shot of the sequence as agreed by the director.
+     */
+    public static function agree(Shot $shot): void
+    {
+        $shots = $shot->group_key === null
+            ? collect([$shot])
+            : Shot::query()->where('project_id', $shot->project_id)->where('group_key', $shot->group_key)->whereNull('merged_into_id')->get();
+
+        $shots->each(fn(Shot $member) => $member->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), self::AGREED => true]));
+    }
+
+    public static function agreed(Shot $shot): bool
+    {
+        return ($shot->storyline[self::AGREED] ?? false) === true;
+    }
+
     /**
      * @return list<array{id: string, code: string, kind: string, current: bool, planned: bool, beats: list<string>}>
      */

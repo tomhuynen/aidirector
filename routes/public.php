@@ -137,6 +137,7 @@ Route::middleware('auth:director')->group(function () {
             Route::get('create', [ShotCreateController::class, 'create'])->name('create');
             Route::post('create', [ShotCreateController::class, 'store'])->name('store');
             Route::post('reorder', [ShotReorderController::class, 'store'])->name('reorder');
+            Route::delete('', [ShotDestroyController::class, 'destroyMany'])->name('destroy.many');
             Route::post('merge', [ShotMergeController::class, 'store'])->name('merge');
             Route::post('{shot}/merge', [ShotMergeController::class, 'update'])->name('merge.update');
             Route::delete('{shot}/merge', [ShotMergeController::class, 'destroy'])->name('unmerge');

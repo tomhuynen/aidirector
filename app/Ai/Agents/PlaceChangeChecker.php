@@ -22,12 +22,15 @@ class PlaceChangeChecker implements Agent, HasReasoningEffort, HasStructuredOutp
     use Promptable;
     use SetsReasoningEffort;
 
-    public function __construct(private readonly string $change) {}
+    public function __construct(
+        private readonly string $change,
+        private readonly string $part = '',
+    ) {}
 
     public function instructions(): Stringable|string
     {
         return <<<'INSTRUCTIONS'
-            You get two images of the same empty place from an animated film: first how it was, then its new version. Say whether the new version shows the change it was asked for, clearly enough that a viewer sees it at a glance, such as a barrier arm that now stands up instead of across the road. A change that is only half made, or that the first image already showed, does not count.
+            You get two images of the same empty place from an animated film: first how it was, then its new version. Say whether the new version shows the change it was asked for, clearly enough that a viewer sees it at a glance, such as a barrier arm that now stands up instead of across the road. A change that is only half made, or that the first image already showed, does not count. When a part of the place changes state, such as a barrier arm that goes up, it counts only when that part is there exactly once, in its new state: the part gone, or a second copy of it still in its old state, such as the arm still across the road as well, does not count.
             INSTRUCTIONS;
     }
 
@@ -43,6 +46,6 @@ class PlaceChangeChecker implements Agent, HasReasoningEffort, HasStructuredOutp
 
     public function promptFor(): string
     {
-        return "The change asked for: {$this->change}";
+        return "The change asked for: {$this->change}" . ($this->part !== '' ? "\nThe part that changes: the {$this->part}." : '');
     }
 }

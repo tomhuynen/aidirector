@@ -176,6 +176,8 @@ it('writes out what a cut-in sees from its own camera, so the picture of the sho
         ->toContain('never copy the viewpoint of the attached picture');
     // Written once for this picture and plan, with what its first keyframe shows.
     App\Ai\Agents\CutInBriefWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'What its first keyframe shows: The vest pocket, the badge held in her right hand.'));
+    // Who is in the picture and in this camera's view stays, such as the driver in the cab.
+    App\Ai\Agents\CutInBriefWriter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'so nobody leaves'));
     App\Ai\Agents\CutInBriefWriter::assertPromptedTimes(1);
     expect((string) (new App\Ai\Agents\ShotReviewer($shot->fresh(), collect()))->instructions())->toContain('When its background repeats the view of the shot before from the same direction');
 });
@@ -223,6 +225,7 @@ describe('sequences', function () {
             ->and($this->project->shots()->get()[1]->storyline['sequence_beats'])->toBe(['His hand lays the badge on the counter.', 'The officer takes it.'])
             // Agreed with the sequence, so its chat goes straight to the plan instead of asking idea, kind, keyframes and cast again.
             ->and($this->project->shots()->get()[1]->plan_chat[0])->toMatchArray(['answers' => ['Yes, write the plan', 'Change something first']])
+            ->and($shot->fresh()->storyline[App\Support\Shots\SequencePlaces::PLACES_WAIT] ?? null)->toBeTrue()
             ->and((string) (new App\Ai\Agents\PlanDirector($shot->fresh(), []))->instructions())->toContain('already has its idea, kind, cast, setting and keyframes from the sequence: never ask them again')
             // Every beat changes something visible; a repeat of the same moment is left out.
             ->toContain('fewer keyframes rather than one that repeats')

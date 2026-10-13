@@ -32,6 +32,8 @@ export function createKeyframeMover() {
       placeObject: string | null
     } | null,
     offset: { dx: 0, dy: 0 },
+    /** Let go at a new spot: confirm, redraw it there or cancel; it can still be dragged further. */
+    dropped: false,
     selecting: false,
     applying: false,
     error: null as string | null,
@@ -59,7 +61,14 @@ export function createKeyframeMover() {
   })
 
   const reset = () =>
-    Object.assign(state, { picked: null, offset: { dx: 0, dy: 0 }, selecting: false, applying: false, error: null })
+    Object.assign(state, {
+      picked: null,
+      offset: { dx: 0, dy: 0 },
+      dropped: false,
+      selecting: false,
+      applying: false,
+      error: null,
+    })
 
   /** Finds the person at a point given as shares of the image width and height. */
   const pick = async (urls: { selectUrl: string; moveUrl: string }, point: { x: number; y: number }) => {
@@ -84,14 +93,19 @@ export function createKeyframeMover() {
     }
   }
 
-  /** Puts the person down where they were dragged; a click without a drag only keeps them selected. */
+  /** Let go at a new spot: it waits there for confirm, redraw or cancel; a click without a drag only keeps it selected. */
   const drop = () => {
-    if (!state.picked || Math.hypot(state.offset.dx, state.offset.dy) < MIN_MOVE) return
+    state.dropped = Boolean(state.picked) && Math.hypot(state.offset.dx, state.offset.dy) >= MIN_MOVE
+  }
+
+  /** Puts it down where it was dropped; redrawn, it is drawn again there with its own shadow and light. */
+  const apply = (redraw: boolean) => {
+    if (!state.picked || !state.dropped || state.applying) return
 
     state.applying = true
     router.post(
       state.moveUrl,
-      { x: state.picked.x, y: state.picked.y, dx: state.offset.dx, dy: state.offset.dy, scale: scale.value },
+      { x: state.picked.x, y: state.picked.y, dx: state.offset.dx, dy: state.offset.dy, scale: scale.value, redraw },
       {
         preserveScroll: true,
         onSuccess: reset,
@@ -100,6 +114,7 @@ export function createKeyframeMover() {
           Object.assign(state, {
             picked: null,
             offset: { dx: 0, dy: 0 },
+            dropped: false,
             applying: false,
             error: Object.values(errors)[0] ?? null,
           })
@@ -111,7 +126,7 @@ export function createKeyframeMover() {
   /** Moves the person's feet by shares of the image width and height. */
   const moveBy = (dx: number, dy: number) => (state.offset = { dx, dy })
 
-  return { state, scale, pick, drop, cancel: reset, moveBy }
+  return { state, scale, pick, drop, apply, cancel: reset, moveBy }
 }
 
 export type KeyframeMoverState = ReturnType<typeof createKeyframeMover>

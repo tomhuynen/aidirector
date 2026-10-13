@@ -28,6 +28,7 @@ final class KeyframeReferences
      * @param  string  $settingLabel  what that image is, such as "the last keyframe of SH100, the shot before"
      * @param  StoredImage|null  $leftBehind  the last keyframe of the shot before in this place, for what it left there, such as a landed helicopter
      * @param  string  $leftBehindLabel  what that image is
+     * @param  StoredImage|null  $blocking  for keyframe 1 on a place cut from the master of its sequence: the same cut with the cast where they stand
      */
     public function __construct(
         public readonly ?StoredImage $style = null,
@@ -43,6 +44,7 @@ final class KeyframeReferences
         public readonly string $settingLabel = '',
         public readonly ?StoredImage $leftBehind = null,
         public readonly string $leftBehindLabel = '',
+        public readonly ?StoredImage $blocking = null,
     ) {}
 
     /**
@@ -57,6 +59,7 @@ final class KeyframeReferences
             $this->style !== null ? 'Style sheet' : null,
             $this->setting !== null ? 'The setting: ' . $this->settingLabel : null,
             $this->leftBehind !== null ? 'Left behind: ' . $this->leftBehindLabel : null,
+            $this->blocking !== null ? 'Where the cast stands, from the master' : null,
             ...array_map(fn(array $entry) => "Picture of {$entry['element']->name}", $this->elementImages),
             $this->previous !== null ? 'The keyframe before' : null,
         ]));
@@ -72,6 +75,7 @@ final class KeyframeReferences
             $this->style,
             $this->setting,
             $this->leftBehind,
+            $this->blocking,
             ...array_column($this->elementImages, 'image'),
             $this->previous,
         ]));

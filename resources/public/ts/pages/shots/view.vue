@@ -10,6 +10,7 @@
       :create-url="project.links?.shotsCreate ?? '#'"
       :reorder-url="project.links?.shotsReorder"
       :merge-url="project.links?.shotsMerge"
+      :destroy-url="project.links?.shotsDestroy"
       :transitions="shotTransitions"
     />
 
@@ -58,6 +59,7 @@
               :aspect-ratio="aspectRatio"
               :render-seconds="shot.renderSeconds?.keyframe"
               :takeaway="shot.takeaway"
+              @drawing="drawingAsked = true"
             />
           </div>
           <PlanSkeleton v-else-if="planning" />
@@ -140,7 +142,7 @@ import ShotList from '@public:components/editor/ShotList.vue'
 import TopBar from '@public:components/editor/TopBar.vue'
 import { index as projectsIndex } from '@routes/public/projects'
 import { Combine } from 'lucide-vue-next'
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 defineOptions({
   layout: EditorLayout,
@@ -165,11 +167,9 @@ const usesPlates = computed(
 
 /** Nothing drawn yet: the plan is worked out in the plan chat. */
 // A plan that waits to be drawn, such as for a picture still being made, already shows its keyframes, so the layout does not flip.
+// Also while the plan waits for something before it is drawn: the chat says what, with a loader, until the keyframes start.
 const planEditable = computed(
-  () =>
-    (props.shot.status === 'storyline-ready' || props.shot.status === 'draft') &&
-    props.keyframes.length === 0 &&
-    !props.shot.waitingFor,
+  () => (props.shot.status === 'storyline-ready' || props.shot.status === 'draft') && props.keyframes.length === 0,
 )
 
 const panelKeyframes = computed<PanelKeyframe[]>(() =>
@@ -216,8 +216,16 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
       })),
 )
 
+/** The chat answer started drawing: the page keeps looking until the keyframes show, also when one reload got lost. */
+const drawingAsked = ref(false)
+watch(
+  () => [props.shot.id, props.shot.status, props.keyframes.length],
+  () => (drawingAsked.value = false),
+)
+
 const busy = computed(
   () =>
+    drawingAsked.value ||
     // Waiting for another shot or new cast pictures: drawing starts by itself, so the page keeps looking.
     Boolean(props.shot.waitingFor) ||
     // The places of the sequence are drawn: the chat shows them once they are there.

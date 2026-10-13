@@ -317,14 +317,22 @@ it('lets the description take off or put on gear a person wears in their picture
         ->and((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain('say in every keyframe whether they wear it');
 });
 
-it('leaves a pictured thing out of the place when it moves, such as a truck that drives off later in the sequence', function () {
+it('draws a moving thing in the master where it starts, and leaves it out of a shot\'s own place when it moves there', function () {
     $shot = framedShot(['size' => 'full', 'spot' => 'At the gate.']);
     $truck = App\Models\Element::factory()->object()->for($shot->project)->create(['name' => 'Visitor delivery truck']);
     $references = new KeyframeReferences(elementImages: [['element' => $truck, 'image' => new StoredImage('truck.png')]]);
     $place = ['key' => 'gate', 'name' => 'entrance gate lane', 'shots' => ['SH170', 'SH200'], 'ideas' => ['The truck stops at the barrier.', 'The truck drives off.'], 'elements' => ['Visitor delivery truck']];
 
     expect(KeyframeImageBrief::sequencePlace($shot, $place, $references, 0))
-        ->toContain('shows Visitor delivery truck (object): draw it exactly like it where it stands still in all of these shots; when it moves in any of them, such as a vehicle that drives in or off, leave it out')
+        ->toContain('shows Visitor delivery truck (object): draw it exactly like it, where the story has it at the start.')
         ->and(KeyframeImageBrief::plate($shot, $references, 0))
         ->toContain('where it stands still in this shot; when it moves during the shot, such as a vehicle that drives in or off, leave it out');
+});
+
+it('has the image model move a part of the place this keyframe moves, and draw it only once', function () {
+    $shot = framedShot(['size' => 'full', 'spot' => 'At the gate.']);
+    $keyframe = ['title' => 'Opens', 'description' => 'The barrier arm swings up.', 'moving_parts' => ['barrier arm']];
+
+    expect(KeyframeImageBrief::for($shot, $keyframe, new KeyframeReferences(first: new StoredImage('place.png'), firstIsPlate: true)))
+        ->toContain('This keyframe moves the barrier arm of the place: draw it where the description has it now, and nothing left where it was, never twice.');
 });

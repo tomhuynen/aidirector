@@ -42,16 +42,23 @@ const props = defineProps<{
   title: string
   description: string
   confirmLabel?: string
+  /** Sent along with the delete, such as which shots. */
+  data?: Record<string, unknown>
 }>()
+
+const emit = defineEmits<{ deleted: [] }>()
 
 const open = ref(false)
 const form = useForm({})
 
 const submit = () => {
-  form.delete(props.action, {
-    onSuccess: () => {
-      open.value = false
-    },
-  })
+  form
+    .transform(() => props.data ?? {})
+    .delete(props.action, {
+      onSuccess: () => {
+        open.value = false
+        emit('deleted')
+      },
+    })
 }
 </script>

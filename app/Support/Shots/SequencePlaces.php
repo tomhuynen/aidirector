@@ -7,7 +7,7 @@ namespace App\Support\Shots;
 use App\Ai\Agents\CameraBriefWriter;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateSequencePlaceOption;
-use App\Jobs\MapSequencePlace;
+use App\Jobs\MakeSequenceMaster;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Images\BackgroundDrift;
@@ -41,6 +41,17 @@ class SequencePlaces
     /** On the storyline of a shot with its own view: what its camera sees of the place, with the place and view it was written for. */
     public const CAMERA_BRIEF = 'camera_brief';
 
+    /** On the storyline of the first shot of a new sequence: its places wait for the director's yes to the overview before they are drawn. */
+    public const PLACES_WAIT = 'sequence_places_wait';
+
+    /** On a chosen picture of a place: it is the master, with the cast where they stand at the start. */
+    public const MASTER = 'master';
+
+    /** On the empty place made from a master: where the cast stands in it, in words, and the box around them, as shares of the picture. */
+    public const BLOCKING = 'blocking';
+
+    public const CAST_BOX = 'cast_box';
+
     /**
      * The places of the sequence the shot opens, in the order they first appear.
      *
@@ -69,7 +80,35 @@ class SequencePlaces
      */
     public function chosen(Shot $owner, string $key): ?Media
     {
-        return $owner->getMedia(Shot::SEQUENCE_PLACES)->first(fn(Media $media) => $media->getCustomProperty('place') === $key);
+        return $owner->getMedia(Shot::SEQUENCE_PLACES)->first(fn(Media $media) => $media->getCustomProperty('place') === $key && $media->getCustomProperty(self::MASTER) !== true);
+    }
+
+    /**
+     * The master of a place of the sequence: the chosen picture with the cast where they stand at the start, which
+     * the empty place is made from and every shot there is cut from; null for a place chosen before masters.
+     */
+    public function master(Shot $owner, string $key): ?Media
+    {
+        return $owner->getMedia(Shot::SEQUENCE_PLACES)->first(fn(Media $media) => $media->getCustomProperty('place') === $key && $media->getCustomProperty(self::MASTER) === true);
+    }
+
+    /**
+     * The master of the place this shot plays in.
+     */
+    public function masterFor(Shot $shot): ?Media
+    {
+        $key = $shot->sequencePlaceKey();
+        $owner = $key === null ? null : $this->ownerOf($shot);
+
+        return $owner === null ? null : $this->master($owner, $key);
+    }
+
+    /**
+     * Whether the picture of a place is picked: its master, or the place itself for one chosen before masters.
+     */
+    private function picked(Shot $owner, string $key): bool
+    {
+        return $this->chosen($owner, $key) !== null || $this->master($owner, $key) !== null;
     }
 
     /**
@@ -251,7 +290,7 @@ class SequencePlaces
      */
     public function current(Shot $owner): ?array
     {
-        return collect($this->places($owner))->first(fn(array $place) => $this->chosen($owner, $place['key']) === null);
+        return collect($this->places($owner))->first(fn(array $place) => ! $this->picked($owner, $place['key']));
     }
 
     /**
@@ -273,7 +312,7 @@ class SequencePlaces
     }
 
     /**
-     * The place whose options are being drawn, with how many, for the chat to show while it waits.
+     * The place whose options are being drawn, with how many are still to come, for the chat to show while it waits.
      *
      * @return array{name: string, shots: list<string>, count: int}|null
      */
@@ -282,7 +321,14 @@ class SequencePlaces
         $key = $owner->storyline['sequence_places_drawing'] ?? null;
         $place = is_string($key) ? collect($this->places($owner))->firstWhere('key', $key) : null;
 
-        return $place === null ? null : ['name' => $place['name'], 'shots' => $place['shots'], 'count' => max(1, (int) Config::get('pipeline.keyframes.plate_options'))];
+        if ($place === null) {
+            return null;
+        }
+
+        // The ones of this round that are not there yet: the ones already drawn show as options.
+        $ready = $this->options($owner, $place['key'])->count() - (int) ($owner->storyline['sequence_places_drawn'] ?? 0);
+
+        return ['name' => $place['name'], 'shots' => $place['shots'], 'count' => max(0, max(1, (int) Config::get('pipeline.keyframes.plate_options')) - $ready)];
     }
 
     /**
@@ -338,20 +384,21 @@ class SequencePlaces
      * for the chat: said here, or added to the reply when chosen in the chat;
      * and the chosen place, shown in the conversation where it was chosen.
      *
-     * @return array{text: string, place: array{name: string, media: int}}
+     * @return array{text: string, place: array{name: string, media: int}, all_chosen: bool}
      */
     public function choose(Shot $owner, Media $option, bool $say = true): array
     {
         $key = (string) $option->getCustomProperty('place');
         $place = collect($this->places($owner))->firstWhere('key', $key);
 
-        if ($place === null || $this->chosen($owner, $key) !== null) {
+        if ($place === null || $this->picked($owner, $key)) {
             throw ValidationException::withMessages(['place' => __('That place is chosen already.')]);
         }
 
+        // The chosen option is the master, with the cast where they start; the empty place every shot is cut from is made from it.
         $chosen = $option->copy($owner, Shot::SEQUENCE_PLACES);
-        $chosen->setCustomProperty('place', $key)->save();
-        MapSequencePlace::dispatch($owner, $key);
+        $chosen->setCustomProperty('place', $key)->setCustomProperty(self::MASTER, true)->save();
+        MakeSequenceMaster::dispatch($owner, $key);
         $owner->load('media');
 
         $next = $this->current($owner);
@@ -361,14 +408,14 @@ class SequencePlaces
             $text = __(':place is chosen. Now :next, for :shots; I am drawing it.', ['place' => ucfirst($place['name']), 'next' => $next['name'], 'shots' => implode(', ', $next['shots'])]);
         } else {
             Shot::drawWaitingShots($owner->project_id);
-            $text = __(':place is chosen. Every place of the sequence is chosen now; each shot draws its own view of its place, so we can plan the shots in order.', ['place' => ucfirst($place['name'])]);
+            $text = __(':place is chosen.', ['place' => ucfirst($place['name'])]);
         }
 
         if ($say) {
             $owner->say($text);
         }
 
-        return ['text' => $text, 'place' => ['name' => $place['name'], 'media' => $chosen->id]];
+        return ['text' => $text, 'place' => ['name' => $place['name'], 'media' => $chosen->id], 'all_chosen' => $next === null];
     }
 
     /**
@@ -382,14 +429,14 @@ class SequencePlaces
             return;
         }
 
-        $owner->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['sequence_places_drawing' => true]));
+        $owner->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['sequence_places_drawing' => true, 'sequence_places_drawn' => true]));
         $places = app(self::class);
         $place = collect($places->places($owner))->firstWhere('key', $key);
         $drawn = $places->options($owner->load('media'), $key)->isNotEmpty();
         $url = route('public.shots.view', [$owner->project, $owner]);
 
         // Chosen meanwhile from the ones already there: the extra ones are not offered.
-        if ($place !== null && $places->chosen($owner, $key) !== null) {
+        if ($place !== null && $places->picked($owner, $key)) {
             return;
         }
 
@@ -409,8 +456,9 @@ class SequencePlaces
      */
     private function drawRound(Shot $owner, array $place): void
     {
-        $owner->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'sequence_places_drawing' => $place['key']]);
         $drawn = $this->options($owner, $place['key'])->count();
+        // With how many there were, so the chat shows only the ones still being drawn.
+        $owner->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'sequence_places_drawing' => $place['key'], 'sequence_places_drawn' => $drawn]);
         $ownerId = $owner->id;
         $key = $place['key'];
 

@@ -179,7 +179,7 @@ class KeyframeImageBrief
      * is attached first, so the place, the camera and the style cannot shift.
      * Only the people, their poses and the objects that are handled change.
      *
-     * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
+     * @param  array{title: string, description: string, spatial?: string|null, moving_parts?: list<string>}  $keyframe
      */
     private static function onFirstKeyframe(Shot $shot, array $keyframe, KeyframeReferences $references): string
     {
@@ -207,6 +207,12 @@ class KeyframeImageBrief
         }
 
         // Only the people and what is handled are kept from this drawing; an object moved in it would leave its spot in the place empty.
+        $parts = array_values(array_filter(array_map(fn(string $part) => trim($part), $keyframe['moving_parts'] ?? [])));
+
+        if ($parts !== []) {
+            $lines[] = 'This keyframe moves ' . implode(' and ', array_map(fn(string $part) => "the {$part}", $parts)) . ' of the place: draw ' . (count($parts) > 1 ? 'them' : 'it') . ' where the description has ' . (count($parts) > 1 ? 'them' : 'it') . ' now, and nothing left where ' . (count($parts) > 1 ? 'they were' : 'it was') . ', never twice.';
+        }
+
         if ($references->firstIsPlate) {
             $lines[] = 'An object that is already in the first image, such as a bin, a sign or a machine, stays exactly where it is there, at the same size, even when the description puts it on another side of the frame: place the people around it so they stand as the description says relative to it. Only an object a person picks up, carries or pushes moves, and one that moves by itself in this keyframe, such as a helicopter flying in.';
         }
@@ -238,6 +244,10 @@ class KeyframeImageBrief
 
         $ordinals = ['second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
         $attached = 0;
+
+        if ($references->blocking !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the same place with the cast where they stand, from the picture the director chose for this sequence. Put every person and vehicle of this keyframe where that image has them: the same side of the frame, the same spot and which way they face, unless this keyframe\'s description moves them. Draw the place from the first image only.';
+        }
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
@@ -309,25 +319,28 @@ class KeyframeImageBrief
     }
 
     /**
-     * The prompt for one option of a place a sequence of shots plays in: wide
-     * and empty, so every shot there can draw its own view of it, from a
-     * close-up of one part to the whole place.
+     * The prompt for one option of a place a sequence of shots plays in: its
+     * master, wide, with the cast where they stand at the start of the first
+     * shot there, so where everyone stands and which way they face is decided
+     * once, in the picture the director chooses. The empty place is made from
+     * it afterwards, and every shot there is cut from it.
      *
      * @param  array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}  $place
      */
     public static function sequencePlace(Shot $owner, array $place, KeyframeReferences $references, int $variation): string
     {
         $happens = collect($place['shots'])->map(fn(string $code, int $index) => "- {$code}: " . ($place['ideas'][$index] ?? ''))->join("\n");
+        $cast = collect($references->elementImages)->map(fn(array $entry) => $entry['element'])->filter(fn(Element $element) => $element->type !== ElementType::PLACE)->pluck('name')->join(', ');
 
         $lines = [
             $owner->project->styleBrief(),
             '',
-            "Draw {$place['name']}, empty: no people at all. Several shots of one sequence play here, each drawn later from this picture with its own camera, from a close-up of one part to the whole place, so everything they need must be in it and recognisable.",
-            'Framing: ' . ShotSize::FULL->framing() . ' The people are added later, so do not draw them, but leave room for them: ' . ShotSize::FULL->personScale() . '.',
+            "Draw {$place['name']}, wide, with the people and the things that move in it where they stand at the start of the first shot here" . ($cast !== '' ? ": {$cast}" : '') . '. Several shots of one sequence play here and each is cut from this picture later, from a medium shot of one part to the whole place, so where everyone stands, which way they face and which side of the frame they are on is decided by this picture.',
+            'Framing: ' . ShotSize::FULL->framing() . ' ' . ShotSize::FULL->personScale() . '.',
             '',
-            "What happens here in the shots of the sequence; place the fixed objects, doors, signs and zones so all of it can happen in this one picture. Do not draw the people or what they hold:\n{$happens}",
+            "What happens here in the shots of the sequence; place the fixed objects, doors, signs and zones so all of it can happen in this one picture, and the people and vehicles where the first of it starts:\n{$happens}",
             '',
-            'Put every fixed object these shots use where it is needed, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or smoke, and anything that moves in these shots, such as a vehicle, a helicopter or a hanging load.',
+            'Put every fixed object these shots use where it is needed, large enough to read. Every person stands where the story has them, clear of each other and of what is in front of them, so each can be seen whole: nobody hidden behind a vehicle or a booth that the story needs them beside. A vehicle stands lined up with its lane or road, its nose pointing the way it drives next. Leave out anything that only appears later in the story, such as an object handed over later or smoke.',
             'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions, brand names, logos or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. A logo already on the place in its picture may stay, exactly as it is there.',
             self::plateVariation($variation),
         ];
@@ -341,7 +354,11 @@ class KeyframeImageBrief
 
         foreach ($references->elementImages as $entry) {
             $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it where it stands still in all of these shots; when it moves in any of them, such as a vehicle that drives in or off, leave it out: the picture only shows how it looks.');
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . match ($element->type) {
+                ElementType::PLACE => ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.',
+                ElementType::PERSON => ': draw this person exactly like it, same face, hair, build, clothing and headwear, where the story has them at the start. Do not copy its background or pose.',
+                default => ': draw it exactly like it, where the story has it at the start.',
+            };
         }
 
         return implode("\n", $lines);
@@ -452,15 +469,16 @@ class KeyframeImageBrief
      * The prompt for a later state of the empty place, such as a door that is
      * closed by now: only the change is made, the place stays without people.
      */
-    public static function placeState(string $change): string
+    public static function placeState(string $change, string $part = ''): string
     {
-        return implode("\n", [
+        return implode("\n", array_filter([
             'Edit the attached image. It is the empty place where a shot plays, without any people, seen from a camera that does not move.',
             "Change only this, which is how it looks from now on in the shot: {$change}",
+            $part !== '' ? "The {$part} stays in the place, exactly once: it only changes its position or state, the way the real one does, such as swinging up on its post. Nothing of it stays where it was, and it is never taken out." : null,
             'Everything else stays exactly as it is: the walls, the floor and every line on it, the ceiling, doors, windows, signs, machines, objects and the background, at the same place, size and angle, with the same framing, camera, light and style.',
             'Do not add people.',
             'Do not add text, captions, brand names, logos or watermarks. Signs and markings already in the image stay exactly as they are.',
-        ]);
+        ]));
     }
 
     /**

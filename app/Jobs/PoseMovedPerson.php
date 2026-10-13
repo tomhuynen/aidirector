@@ -112,7 +112,7 @@ class PoseMovedPerson implements ShouldQueue
     public function failed(?Throwable $exception): void
     {
         // The moved version stays the keyframe's image; the plan still follows it before the shot is reviewed.
-        $this->markRenderFailed($this->keyframe, __('The person is moved, but the pose could not be redrawn. Adjust the image to try again.'), $exception);
+        $this->markRenderFailed($this->keyframe, __('It is moved, but it could not be redrawn there. Adjust the image to try again.'), $exception);
 
         try {
             $keyframe = $this->keyframe->fresh(['shot.project', 'media']);

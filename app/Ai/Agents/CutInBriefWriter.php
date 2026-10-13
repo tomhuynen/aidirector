@@ -41,7 +41,9 @@ class CutInBriefWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Work out the geometry first. Place the new camera in the scene of the picture, next to the people and things in it, where the plan puts it, such as at the driver's window where the officer stands, and turn it towards its subject. Then decide what lies behind the subject from there: a camera beside the scene, at someone's side or at a window, looks across it in another direction than the first camera, so what was behind the subject in the picture is often beside or behind this camera now, and another side of the scene shows instead, such as the far side of the cab and the lane beyond it. Left and right swap when it looks the other way.
 
-            brief: three to five short sentences. First where the camera stands in the scene of the picture and which way it looks. Then what is behind the subject in its frame, and where. Then what of the picture is beside or behind this camera and must not show behind the subject. Write in English.
+            Everyone in the picture who is in this camera's view stays there, also when the plan does not name them, such as the driver behind the wheel when the camera looks into the cab: the moment is the same, so nobody leaves. Say who is in the frame and what of them shows, such as the driver's shoulder and arm behind the glass.
+
+            brief: three to five short sentences. First where the camera stands in the scene of the picture and which way it looks. Then who and what is behind the subject in its frame, and where. Then what of the picture is beside or behind this camera and must not show behind the subject. Write in English.
             INSTRUCTIONS;
     }
 

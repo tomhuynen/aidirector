@@ -11,6 +11,7 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
+use App\Support\Images\PlaceDepth;
 use App\Support\Shots\FirstKeyframeChoice;
 use App\Support\Shots\SequencePlaces;
 use Illuminate\Bus\Batch;
@@ -80,6 +81,22 @@ class GenerateKeyframes implements ShouldQueue
             if (! $this->more) {
                 $shot->clearMediaCollection(Shot::PLATE_OPTIONS);
                 $shot->clearMediaCollection(Shot::PLATE);
+                $shot->clearMediaCollection(Shot::BLOCKING);
+            }
+
+            // In the place of its sequence, with the master the director chose: cut from it, with the cast where they stand there, nothing to choose.
+            if (! $this->more && ($cut = app(KeyframePainter::class)->masterPlate($shot)) !== null) {
+                // Already without its people and what moves; the whole place keeps the depth measured on it, a closer cut is measured now.
+                $plate = $shot->addMediaFromString($cut['plate'])->usingFileName('place.png')->withCustomProperties(array_filter([Shot::PLATE_CHOSEN => true, Shot::PLATE_EMPTIED_DONE => true, PlaceDepth::DEPTH => $cut['depth']]))->toMediaCollection(Shot::PLATE);
+
+                if ($cut['depth'] === null) {
+                    MeasurePlaceDepth::dispatch($plate);
+                }
+
+                $shot->addMediaFromString($cut['blocking'])->usingFileName('blocking.png')->toMediaCollection(Shot::BLOCKING);
+                GenerateRemainingKeyframes::startOnPlate($shot->refresh(), app(KeyframePainter::class));
+
+                return;
             }
 
             // The same place as another shot of the sequence: its chosen place is used as it is, with nothing to choose.

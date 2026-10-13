@@ -37,11 +37,13 @@ class PlanToPlace
         // Where its fixed things stand and the routes through it, made once for this place.
         $names = collect($planned)->flatMap(fn(array $keyframe) => (array) ($keyframe['elements'] ?? []))->unique()->values()->all();
         $layout = $this->layout->of($place, trim((string) ($shot->storylineFraming()['spot'] ?? '')) ?: 'the place of this shot', $names);
-        $aligner = new PlanPlaceAligner($shot, $layout !== null ? PlaceLayout::lines($layout) : '');
+        // Cut from the master of its sequence: the cast stands where the director chose it, and the plan keeps that.
+        $blocking = $shot->media()->where('collection_name', Shot::BLOCKING)->latest('id')->first();
+        $aligner = new PlanPlaceAligner($shot, $layout !== null ? PlaceLayout::lines($layout) : '', $blocking !== null);
 
         try {
             /** @var StructuredAgentResponse $response */
-            $response = $aligner->prompt($aligner->promptFor(), attachments: [ImageFile::fromStorage($place->getPathRelativeToRoot(), $place->disk)], provider: 'openrouter', model: (string) Config::get('pipeline.models.text'));
+            $response = $aligner->prompt($aligner->promptFor(), attachments: array_map(fn(Media $image) => ImageFile::fromStorage($image->getPathRelativeToRoot(), $image->disk), array_filter([$place, $blocking])), provider: 'openrouter', model: (string) Config::get('pipeline.models.text'));
         } catch (Throwable $exception) {
             report($exception);
 

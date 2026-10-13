@@ -62,6 +62,33 @@ class PlaceObjects
     }
 
     /**
+     * Where a part of the place is in it, such as a barrier arm, found by its plain words and kept on the place;
+     * null when it cannot be found. For a part that moves in a keyframe and is not in the cast and sets.
+     */
+    public function partIn(Media $place, string $part): ?string
+    {
+        $key = 'part:' . mb_strtolower($part);
+        $masks = (array) $place->getCustomProperty(self::MASKS, []);
+
+        if (! array_key_exists($key, $masks)) {
+            $image = (string) Storage::disk($place->disk)->get($place->getPathRelativeToRoot());
+            $found = $this->find($image, [$part]);
+            $masks[$key] = $found === null ? false : base64_encode($this->shrink($found));
+            $place->setCustomProperty(self::MASKS, $masks)->save();
+        }
+
+        return $masks[$key] === false ? null : base64_decode((string) $masks[$key]);
+    }
+
+    /**
+     * Where a part of the place is in a drawn keyframe, such as a barrier arm that is up now; not kept, since every drawing differs.
+     */
+    public function partInDrawing(string $drawn, string $part): ?string
+    {
+        return $this->find($drawn, [$part], self::MAX_SHARE_IN_DRAWING);
+    }
+
+    /**
      * Where the object is in a drawn keyframe, for one that is not in the
      * place, such as a helicopter that flies in or a badge put down on the
      * counter: it can only come from the drawing. Not kept, since every

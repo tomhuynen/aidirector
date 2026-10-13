@@ -388,11 +388,6 @@ class TopLayerCutout
             $this->hideBehind($cutout, $depth, $left, $top, $width, $height, $depth->at($feetX / $width, min(0.999, $feetY / $height)));
         }
 
-        // The person's own shadow stayed behind with the place; a soft one goes under the feet at the new spot. A thing may fly or hang, so it gets none.
-        if (! $shape['thing']) {
-            $this->contactShadow($image, $feetX, $feetY - $scaledHeight * 0.02, $scaledWidth * 0.6);
-        }
-
         $image->compositeImage($cutout, Imagick::COMPOSITE_OVER, $left, $top);
         $image->setImageFormat('png');
         $image->writeImage($output);
@@ -581,19 +576,47 @@ class TopLayerCutout
 
             // The redrawn person alone, moved so their feet land where they were put.
             [$ax, $ay, $aw, $ah] = $this->pixels($after['box'], $width, $height);
-            $person = clone $withRedraw;
-            $person->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
-            $person->compositeImage($redrawnCutout->matte($place, $withRedraw, $after), Imagick::COMPOSITE_COPYOPACITY, 0, 0);
-            $person->cropImage($aw, $ah, $ax, $ay);
-            $person->setImagePage(0, 0, 0, 0);
+            $matte = $redrawnCutout->matte($place, $withRedraw, $after);
             $shiftX = (int) round(($box['x'] + $box['width'] / 2) * $width - ($ax + $aw / 2));
             $shiftY = (int) round(($box['y'] + $box['height']) * $height - ($ay + $ah));
+
+            // The shadow the redraw gave them on the ground comes along: darker than the place, right next to them, inside the redrawn crop.
+            $shadow = $this->shadowIn($withRedraw, $place, $matte, $crop);
+            $shade = clone $withRedraw;
+            $shade->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+            $shade->compositeImage($shadow, Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+            $image->compositeImage($shade, Imagick::COMPOSITE_OVER, $shiftX, $shiftY);
+
+            $person = clone $withRedraw;
+            $person->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+            $person->compositeImage($matte, Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+            $person->cropImage($aw, $ah, $ax, $ay);
+            $person->setImagePage(0, 0, 0, 0);
             $image->compositeImage($person, Imagick::COMPOSITE_OVER, $ax + $shiftX, $ay + $shiftY);
             $image->setImageFormat('png');
             $image->writeImage($output);
         } finally {
             @unlink($redrawnPath);
         }
+    }
+
+    /**
+     * Where a redraw has the ground darker than the place by shadow, in a part that touches what was redrawn and
+     * inside the crop that was redrawn: the shadow it gave them. Grey, white where it is.
+     *
+     * @param  array{x: int, y: int, width: int, height: int}  $crop
+     */
+    private function shadowIn(Imagick $redrawn, Imagick $place, Imagick $matte, array $crop): Imagick
+    {
+        $shadow = app(PlaceComposite::class)->shadowsTakenOut($redrawn, $place, $matte);
+        $inside = Masks::black($redrawn->getImageWidth(), $redrawn->getImageHeight());
+        $draw = new ImagickDraw();
+        $draw->setFillColor(new ImagickPixel('white'));
+        $draw->rectangle($crop['x'], $crop['y'], $crop['x'] + $crop['width'] - 1, $crop['y'] + $crop['height'] - 1);
+        $inside->drawImage($draw);
+        $shadow->compositeImage($inside, Imagick::COMPOSITE_MULTIPLY, 0, 0);
+
+        return $shadow;
     }
 
     /**
@@ -864,28 +887,8 @@ class TopLayerCutout
     }
 
     /**
-     * A soft, neutral contact shadow under feet at a point, so a person put down somewhere else does not float.
-     */
-    private function contactShadow(Imagick $image, float $feetX, float $feetY, float $personWidth): void
-    {
-        $width = max(8, (int) round($personWidth * 1.1));
-        $height = max(4, (int) round($width * 0.22));
-        $pad = $height * 2;
-
-        $shadow = new Imagick();
-        $shadow->newImage($width + 2 * $pad, $height + 2 * $pad, new ImagickPixel('transparent'));
-        $draw = new ImagickDraw();
-        $draw->setFillColor(new ImagickPixel('rgba(0,0,0,0.35)'));
-        // Whole pixels: ImageMagick's drawing language reads a locale's decimal comma as an error.
-        $draw->ellipse($pad + intdiv($width, 2), $pad + intdiv($height, 2), intdiv($width, 2), intdiv($height, 2), 0, 360);
-        $shadow->drawImage($draw);
-        $shadow->blurImage(0, $height / 2);
-        $image->compositeImage($shadow, Imagick::COMPOSITE_OVER, (int) round($feetX - $width / 2 - $pad), (int) round($feetY - $height / 2 - $pad));
-    }
-
-    /**
      * Where the empty place goes back in when a shape is lifted: the shape itself, and every shadow around its old
-     * feet, such as the one it was drawn with or the one an earlier move gave it. Neither is part of the shape, so
+     * feet or wheels, such as the one it was drawn with or the one an earlier move gave it. Neither is part of the shape, so
      * it would stay on the floor and stand still in the video while the person walks off. What else lies on top,
      * such as someone standing next to them, keeps its own shadow.
      *
@@ -895,11 +898,8 @@ class TopLayerCutout
     {
         $mask = $this->fillMask($shape, $width, $height);
 
-        if ($shape['thing'] ?? false) {
-            return $mask;
-        }
+        // Around the old feet or wheels, as far as a low sun throws a shadow, to either side; a thing in the air has none there, so nothing is found.
 
-        // Around the old feet, as far as a low sun throws a shadow, to either side.
         [$bx, $by, $bw, $bh] = $this->pixels($shape['box'], $width, $height);
         $left = max(0, (int) round($bx - $bw * self::SHADOW_REACH));
         $right = min($width, (int) round($bx + $bw * (1 + self::SHADOW_REACH)));

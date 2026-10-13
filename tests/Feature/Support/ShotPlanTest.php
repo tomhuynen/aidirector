@@ -91,3 +91,14 @@ it('makes the storyline the beats of the keyframes, so each sentence belongs to 
 it('keeps the written storyline for a plan without beats', function () {
     expect(ShotPlan::storylineFrom([['title' => 'One', 'beat' => 'She waits.'], ['title' => 'Two']], 'She waits and waves.'))->toBe('She waits and waves.');
 });
+
+it('keeps the parts of the place a keyframe moves, in plain words, also when they are not in the cast', function () {
+    $shot = Shot::factory()->for(Project::factory())->create()->load('project');
+
+    ShotPlan::apply($shot, ['kind' => 'scene', 'storyline' => 'The barrier opens.', 'seconds' => 4, 'keyframes' => [
+        ['title' => 'Closed', 'description' => 'The barrier is down.', 'elements' => [], 'moving_parts' => []],
+        ['title' => 'Opens', 'description' => 'The barrier arm swings up.', 'elements' => [], 'moving_parts' => [' barrier arm ', 'barrier arm']],
+    ]]);
+
+    expect($shot->fresh()->storylineKeyframes()[1]['moving_parts'])->toBe(['barrier arm']);
+});

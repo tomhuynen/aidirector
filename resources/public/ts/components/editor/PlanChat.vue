@@ -43,9 +43,14 @@
       @send="(text: string) => send(text)"
     >
       <template #text="{ message }">
+        <!-- The plan waits for something before it is drawn: said with a loader, until the keyframes start. -->
+        <p v-if="message.id === 'waiting'" class="flex items-center gap-2 py-1 text-[15px] leading-relaxed text-signal">
+          <LoaderCircle class="size-4 shrink-0 animate-spin" />
+          {{ message.content }}
+        </p>
         <!-- A place of the sequence being drawn: shown while it waits, so the director sees something is happening. -->
         <div
-          v-if="message.id === 'sequence-place-drawing' && sequencePlaceDrawing"
+          v-else-if="message.id === 'sequence-place-drawing' && sequencePlaceDrawing"
           class="flex max-w-[85%] flex-col gap-3 py-1 text-[15px] leading-relaxed"
         >
           <p>
@@ -367,6 +372,8 @@ watch(draft, (text, before) => {
 const emit = defineEmits<{
   /** A message went out, so what was clicked for it is done. */
   sent: []
+  /** The answer started drawing, or has it start as soon as what it waits for is there: the page keeps looking until it shows. */
+  drawing: []
 }>()
 
 const turns = ref<PlanChatTurn[]>([...(props.conversation ?? [])])
@@ -402,6 +409,13 @@ const addElements = () => {
         }),
     })
 }
+/** What the keyframes wait for as the last answer said, shown at once; the page's own value takes over once it reloads. */
+const answeredWaitingFor = ref<string | null>(null)
+watch(
+  () => props.waitingFor,
+  () => (answeredWaitingFor.value = null),
+)
+const waiting = computed(() => props.waitingFor ?? answeredWaitingFor.value)
 const choosingPlace = ref(false)
 /** Clicked: chosen like saying so in the chat; the conversation comes back with the shot. */
 const choosePlace = (id: number) => {
@@ -470,13 +484,13 @@ const messages = computed<ChatMessage[]>(() => [
     kind: 'text' as const,
     content: turn.text,
   })),
-  ...(props.waitingFor
+  ...(waiting.value
     ? [
         {
           id: 'waiting',
           role: 'assistant' as const,
           kind: 'text' as const,
-          content: $t('The keyframes are drawn as soon as :what is ready.', { what: props.waitingFor }),
+          content: $t('The keyframes are drawn as soon as :what is ready.', { what: waiting.value }),
         },
       ]
     : []),
@@ -533,29 +547,45 @@ const send = async (text: string, extra: { made?: string[]; continue?: boolean }
     ? { target: 'keyframe', keyframe: props.target.keyframe, ...(props.target.box ? { box: props.target.box } : {}) }
     : {}
 
+  let goesOn = false
   try {
     const {
       messages: saved,
       reload,
       visit,
-    } = await postJson<{ messages: PlanChatTurn[]; reload: boolean; visit?: string }>(props.chatUrl, {
+      continue: next,
+      waitingFor,
+      drawing,
+    } = await postJson<{
+      messages: PlanChatTurn[]
+      reload: boolean
+      visit?: string
+      continue?: boolean
+      waitingFor?: string | null
+      drawing?: boolean
+    }>(props.chatUrl, {
       message,
       ...extra,
       ...selection,
     })
     turns.value = saved
+    answeredWaitingFor.value = waitingFor ?? null
     emit('sent')
+    if (drawing || waitingFor) emit('drawing')
 
     // The director agreed to drop this shot: go on to the shot that took its place.
     if (visit) return router.visit(visit)
 
     // The reply changed the shot: a plan written and drawn, cast and sets offered or redrawn, or shots added.
     if (reload) router.reload({ only: ['shot', 'keyframes', 'siblings', 'elements'] })
+    // The last place of the sequence was chosen in the chat: the plan director goes on with the shot without waiting for a message.
+    goesOn = next === true
   } catch {
     if (!extra.continue) turns.value = turns.value.slice(0, -1)
     error.value = $t('The plan director could not answer. Please try again.')
   } finally {
     busy.value = false
   }
+  if (goesOn) send('', { continue: true })
 }
 </script>

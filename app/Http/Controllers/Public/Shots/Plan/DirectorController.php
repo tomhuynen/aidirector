@@ -188,8 +188,10 @@ class DirectorController
         $spoken = [...$spoken, ...$this->changeView($shot, $data['view'] ?? null)];
         $changes = ['made' => [...$redrawn, ...$chosen['made'], ...$judged['made'], ...$spoken, ...$changes['made']], 'waiting' => $chosen['waiting'] ?? $judged['waiting'] ?? $changes['waiting']];
 
-        // A new plan waits for the director's go on the overview of the sequence before anything is drawn.
-        if ($plan !== null && ! $keepsDrawn) {
+        // A new plan waits for the director's go on the overview of the sequence before anything is drawn; in a sequence they agreed to already, it is drawn straight away.
+        if ($plan !== null && ! $keepsDrawn && $keyframes->isEmpty() && SequenceOverview::agreed($shot)) {
+            $go = true;
+        } elseif ($plan !== null && ! $keepsDrawn) {
             $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), Shot::AWAITS_GO => true]);
         }
 
@@ -204,17 +206,16 @@ class DirectorController
         $sequenceNotes = $this->splitInto($project, $shot, $data['shots'] ?? null);
         $added = count($sequenceNotes);
 
-        // What the agreed sequence means for drawing, shown under the reply, so the director sees which shot uses what and waits for what.
-        if ($sequenceNotes !== []) {
-            $last = array_key_last($turns);
-            $turns[$last]['changes'] = [...($turns[$last]['changes'] ?? []), ...$sequenceNotes];
-            $shot->forceFill(['plan_chat' => $turns])->save();
-        }
-
-        // The overview of the sequence, every shot with its kind and beats, under a new plan or newly agreed shots.
+        // The overview of the sequence, every shot with its kind and beats, under a new plan or newly agreed shots; only when it changed since it was last shown.
         if (($plan !== null && ! $keepsDrawn) || $sequenceNotes !== []) {
-            $turns[array_key_last($turns)]['overview'] = SequenceOverview::of($shot->fresh());
-            $shot->forceFill(['plan_chat' => $turns])->save();
+            $overview = SequenceOverview::of($shot->fresh());
+            $shown = collect($conversation)->reverse()->first(fn(array $turn) => ! empty($turn['overview']))['overview'] ?? null;
+            $differs = $shown === null || array_map(fn(array $row) => [$row['code'], $row['kind'], $row['beats']], $overview) !== array_map(fn(array $row) => [$row['code'] ?? '', $row['kind'] ?? '', $row['beats'] ?? []], $shown);
+
+            if ($differs) {
+                $turns[array_key_last($turns)]['overview'] = $overview;
+                $shot->forceFill(['plan_chat' => $turns])->save();
+            }
         }
         $removed = $this->removeShots($project, $shot, $data['remove_shots'] ?? null);
         $visit = $this->removeThisShot($project, $shot, $data['remove_shots'] ?? null);
@@ -223,12 +224,25 @@ class DirectorController
             return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'reload' => false, 'visit' => $visit]);
         }
 
+        // Agreed on the overview of a new sequence: its places are drawn now.
+        $placesDrawn = ($data['draw'] ?? false) === true && ($shot->fresh()->storyline[SequencePlaces::PLACES_WAIT] ?? false) === true;
+
+        if ($placesDrawn) {
+            SequenceOverview::agree($shot);
+            $shot->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], [SequencePlaces::PLACES_WAIT => true]));
+            app(SequencePlaces::class)->draw($shot->refresh());
+        }
+
         // Agreed on the overview: drawn now, or as soon as the pictures or the setting it needs are there.
         if ($go) {
             $shot->drawKeyframes();
         }
 
-        return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'reload' => $go || $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $removed !== [] || $offered]);
+        // What the keyframes wait for goes with the answer, so the chat shows it with a loader right away, without waiting for the page to reload.
+        $fresh = $shot->fresh();
+        $waitingFor = $fresh !== null && $fresh->waitsToDraw() ? $fresh->waitsFor() : null;
+
+        return response()->json(['messages' => Shot::shownPlanChat($turns, $shot), 'waitingFor' => $waitingFor, 'drawing' => $go, 'continue' => ($chosen['all_chosen'] ?? false) === true, 'reload' => $go || $placesDrawn || $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $removed !== [] || $offered]);
     }
 
     /**
@@ -368,7 +382,7 @@ class DirectorController
      * The place of the sequence chosen in the chat, or more options of it drawn.
      *
      * @param  array{step: string, options: Collection<int, Media>, place: array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}}  $waiting
-     * @return array{made: list<string>, waiting: string|null, place: array{name: string, media: int}|null}
+     * @return array{made: list<string>, waiting: string|null, place: array{name: string, media: int}|null, all_chosen?: bool}
      */
     private function chooseSequencePlace(Shot $shot, array $waiting, SequencePlaces $places, mixed $said): array
     {
@@ -389,7 +403,7 @@ class DirectorController
             return ['made' => [], 'waiting' => '(' . collect($exception->errors())->flatten()->first() . ')', 'place' => null];
         }
 
-        return ['made' => $made !== null ? [$made] : [], 'waiting' => $chosen['text'] ?? null, 'place' => $chosen['place'] ?? null];
+        return ['made' => $made !== null ? [$made] : [], 'waiting' => $chosen['text'] ?? null, 'place' => $chosen['place'] ?? null, 'all_chosen' => $chosen['all_chosen'] ?? false];
     }
 
     /**
@@ -486,6 +500,8 @@ class DirectorController
         }
 
         $shot->startPlanOver();
+        // Back to the places is asking for another camera than the master of its place: it draws its own.
+        $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), KeyframePainter::OWN_CAMERA => true]);
         $shot->drawKeyframes();
 
         return ['made' => [__('Back to the places')], 'waiting' => null];
@@ -809,9 +825,9 @@ class DirectorController
             }
         });
 
-        // The places are drawn right away, so they are chosen before anything else of the sequence.
+        // The places are drawn once the director agrees to the overview of the sequence, and chosen before anything else of it.
         if ($notes !== []) {
-            app(SequencePlaces::class)->draw($shot->refresh());
+            $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), SequencePlaces::PLACES_WAIT => true]);
         }
 
         return $notes;

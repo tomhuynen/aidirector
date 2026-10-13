@@ -12,6 +12,7 @@ use App\Ai\Agents\ShotReviewer;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Enums\ElementType;
 use App\Enums\ShotKind;
+use App\Enums\ShotSize;
 use App\Jobs\CheckKeyframe;
 use App\Models\Element;
 use App\Models\Keyframe;
@@ -32,6 +33,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
+use Imagick;
 use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Files\StoredImage;
 use Laravel\Ai\Image;
@@ -45,6 +47,15 @@ use Throwable;
  */
 class KeyframePainter
 {
+    /** On the storyline: the director asked for another camera than the master of the place, so the shot draws its own place. */
+    public const OWN_CAMERA = 'own_camera';
+
+    /** How many pictures of the cast a master of a sequence place gets: its people, what moves and the place. */
+    private const int MASTER_REFERENCES = 5;
+
+    /** How often a later state of the place is drawn before the last try is kept: the edit model sometimes removes or doubles a part that moves. */
+    private const int PLACE_STATE_ATTEMPTS = 3;
+
     /** On the storyline of a shot that cuts in on a keyframe of another shot: what its own camera sees, with what it was written for. */
     public const CUT_IN_BRIEF = 'cut_in_brief';
 
@@ -570,6 +581,8 @@ class KeyframePainter
             settingLabel: $setting['label'] ?? '',
             leftBehind: $setting['left']['image'] ?? null,
             leftBehindLabel: $setting['left']['label'] ?? '',
+            // Keyframe 1 on a place cut from the master of its sequence: where the cast stands there.
+            blocking: $plate !== null && $keyframe->position === 1 && ($blocking = $keyframe->shot->getFirstMedia(Shot::BLOCKING)) !== null ? $this->referenceFor($blocking) : null,
         );
     }
 
@@ -594,7 +607,8 @@ class KeyframePainter
                     $place['view'] !== null => " This shot shows: {$place['view']}; keep every fixed thing where the place has it, also what is out of this view",
                     default => '',
                 }
-                . ($place['left'] !== null ? " Since {$place['left']['shot']}, these stand in the place too and are drawn where they stand, as part of it: {$place['left']['text']}" : ''),
+                . ($place['left'] !== null ? " Since {$place['left']['shot']}, these stand in the place too and are drawn where they stand, as part of it: {$place['left']['text']}" : '')
+                . (filled($blocking = $place['image']->getCustomProperty(SequencePlaces::BLOCKING)) ? " Where the cast stands at the start, in the picture the director chose; keep these sides: {$blocking}" : ''),
                 'left' => ($place['left']['image'] ?? null) !== null ? ['image' => $this->referenceFor($place['left']['image']), 'label' => "the last keyframe of {$place['left']['shot']}, the same place from another camera at the end of that shot"] : null];
         }
 
@@ -726,11 +740,15 @@ class KeyframePainter
      */
     public function paintSequencePlaceOption(Shot $owner, array $place, int $variation): Media
     {
-        $moving = $this->movingAt($owner, $place);
+        // The master: the cast is in it, people first, at where they start; the empty place is made from it once chosen.
         $elementImages = $owner->project->elements()->with('media')->get()
-            // What moves in these shots, such as a truck that drives off, is left out of the place: the image model draws whatever it gets a picture of.
-            ->filter(fn(Element $element) => in_array($element->name, $place['elements'], true) && $element->type !== ElementType::PERSON && $element->reference() !== null && ! in_array(mb_strtolower($element->name), $moving, true))
-            ->take((int) Config::get('pipeline.keyframes.max_element_references', 3))
+            ->filter(fn(Element $element) => in_array($element->name, $place['elements'], true) && $element->reference() !== null)
+            ->sortBy(fn(Element $element) => match ($element->type) {
+                ElementType::PERSON => 0,
+                ElementType::OBJECT => 1,
+                default => 2,
+            })
+            ->take(self::MASTER_REFERENCES)
             ->map(fn(Element $element) => ['element' => $element, 'image' => $this->referenceFor($element->reference())])
             ->values()
             ->all();
@@ -745,12 +763,82 @@ class KeyframePainter
     }
 
     /**
+     * The place of a scene in the place of its sequence, cut from the empty place made from the master the director
+     * chose, around where the cast stands: the whole picture for a full shot, closer around them for a medium one.
+     * With it, the same cut of the master, so keyframe 1 puts everyone where they stand there, on the same side.
+     * Null when the place has no master, for a close-up, for a shot that continues another or that asked for its
+     * own camera: those draw their own place.
+     *
+     * @return array{plate: string, blocking: string, depth: array<string, mixed>|null}|null the depth of the empty place when the cut is the whole of it
+     */
+    public function masterPlate(Shot $shot): ?array
+    {
+        $places = app(SequencePlaces::class);
+        $empty = $places->chosenFor($shot);
+        $master = $places->masterFor($shot);
+        $box = $empty?->getCustomProperty(SequencePlaces::CAST_BOX);
+
+        if ($empty === null || $master === null || ! is_array($box) || ! $shot->kindOrScene()->usesPlace() || $shot->settingFrom() !== null || ($shot->storyline[self::OWN_CAMERA] ?? false) === true) {
+            return null;
+        }
+
+        $place = new Imagick();
+        $place->readImageBlob($this->bytes($empty));
+        $people = new Imagick();
+        $people->readImageBlob($this->bytes($master));
+        [$width, $height] = [$place->getImageWidth(), $place->getImageHeight()];
+
+        if ($people->getImageWidth() !== $width || $people->getImageHeight() !== $height) {
+            $people->resizeImage($width, $height, Imagick::FILTER_LANCZOS, 1);
+        }
+
+        $whole = $shot->shotSize() !== ShotSize::MEDIUM;
+
+        // A medium shot comes closer around the cast, keeping the shape of the frame; a full shot is the whole picture.
+        if (! $whole) {
+            $cropHeight = (int) round($height * min(1, max(0.45, (float) $box['height'] * 1.5)));
+            $cropWidth = min($width, (int) round($cropHeight * $width / $height));
+            $centreX = ((float) $box['x'] + (float) $box['width'] / 2) * $width;
+            $centreY = ((float) $box['y'] + (float) $box['height'] / 2) * $height;
+            $left = (int) round(min(max(0, $centreX - $cropWidth / 2), $width - $cropWidth));
+            $top = (int) round(min(max(0, $centreY - $cropHeight / 2), $height - $cropHeight));
+
+            foreach ([$place, $people] as $image) {
+                $image->cropImage($cropWidth, $cropHeight, $left, $top);
+                $image->setImagePage(0, 0, 0, 0);
+                $image->resizeImage($width, $height, Imagick::FILTER_LANCZOS, 1);
+            }
+        }
+
+        $place->setImageFormat('png');
+        $people->setImageFormat('png');
+
+        $depth = $empty->getCustomProperty(PlaceDepth::DEPTH);
+
+        return ['plate' => $place->getImageBlob(), 'blocking' => $people->getImageBlob(), 'depth' => $whole && is_array($depth) ? $depth : null];
+    }
+
+    /**
+     * A picture of a place without what is named, such as its people and a truck: the edit model takes them out,
+     * and only where the mask has them, and a little around, its result is used.
+     *
+     * @throws Throwable when the image model fails
+     */
+    public function emptyOf(Shot $shot, Media $picture, string $what, string $mask): string
+    {
+        $prompt = KeyframeImageBrief::withoutThing($what);
+        $emptied = $this->drawForShot($shot, $prompt, [$this->referenceFor($picture)], (string) Config::get('pipeline.models.keyframe_edit'));
+
+        return $this->composite->withoutPeople($this->bytes($picture), $emptied['content'], $mask);
+    }
+
+    /**
      * The things of a place of a sequence that move in its shots, in lower case, judged once from what happens there.
      *
      * @param  array{key: string, name: string, shots: list<string>, ideas: list<string>, elements: list<string>}  $place
      * @return list<string>
      */
-    private function movingAt(Shot $owner, array $place): array
+    public function movingAt(Shot $owner, array $place): array
     {
         $objects = $owner->project->elements()->where('type', ElementType::OBJECT)->whereIn('name', $place['elements'])->pluck('name')->unique()->values()->all();
 
@@ -1276,7 +1364,28 @@ class KeyframePainter
             }
         }
 
+        // Parts of the place that move in this keyframe, such as a barrier arm going up: where they were and where they are now come from the drawing.
+        foreach ($this->movingPartsIn($keyframe) as $part) {
+            foreach ([$this->placeObjects->partIn($place, $part), $this->placeObjects->partInDrawing($drawn, $part)] as $area) {
+                if ($area !== null) {
+                    $areas[] = $area;
+                }
+            }
+        }
+
         return ['areas' => $areas, 'movable' => $movable, 'missing' => null];
+    }
+
+    /**
+     * The parts of the place the plan has move in a keyframe, in plain words, such as "barrier arm".
+     *
+     * @return list<string>
+     */
+    private function movingPartsIn(Keyframe $keyframe): array
+    {
+        $plan = $keyframe->shot->storylineKeyframes()[$keyframe->position - 1] ?? [];
+
+        return array_values(array_filter(array_map(fn(mixed $part) => trim((string) $part), (array) ($plan['moving_parts'] ?? []))));
     }
 
     /**
@@ -1349,9 +1458,11 @@ class KeyframePainter
     private function placeChanges(Shot $shot, int $position): array
     {
         // What the plan changes in the place, from keyframe 2 on; then what the director changed in it, from any keyframe on.
+        // A shot cut from the master of its sequence may start with a changed place, as an earlier shot left it, such as the barrier up.
+        $fromMaster = $shot->media()->where('collection_name', Shot::BLOCKING)->exists();
         $planned = collect($shot->storylineKeyframes())
             ->map(fn(array $keyframe, int $index) => ['position' => $index + 1, 'change' => trim((string) ($keyframe['place_change'] ?? '')), 'part' => trim((string) ($keyframe['place_part'] ?? ''))])
-            ->filter(fn(array $change) => $change['position'] > 1);
+            ->filter(fn(array $change) => $change['position'] > 1 || $fromMaster);
         $edits = collect($shot->placeEdits())->map(fn(array $edit) => ['position' => $edit['from'], 'change' => $edit['change'], 'part' => $edit['part']]);
 
         return $planned->concat($edits)
@@ -1425,10 +1536,10 @@ class KeyframePainter
     {
         $before = $this->bytes($place);
 
-        // Drawn once more when the change does not show, such as a barrier arm still across the road.
-        for ($attempt = 1; $attempt <= 2; $attempt++) {
+        // Drawn again when the change does not show, such as a barrier arm still across the road, or a second arm.
+        for ($attempt = 1; $attempt <= self::PLACE_STATE_ATTEMPTS; $attempt++) {
             try {
-                $result = $this->drawForShot($shot, KeyframeImageBrief::placeState($change['change']), [$this->referenceFor($place)], (string) Config::get('pipeline.models.keyframe_edit'));
+                $result = $this->drawForShot($shot, KeyframeImageBrief::placeState($change['change'], $change['part']), [$this->referenceFor($place)], (string) Config::get('pipeline.models.keyframe_edit'));
             } catch (Throwable $exception) {
                 report($exception);
 
@@ -1448,7 +1559,7 @@ class KeyframePainter
                 }
             }
 
-            if ($this->changeShows($before, $image, $change['change'])) {
+            if ($this->changeShows($before, $image, $change['change'], $change['part'])) {
                 break;
             }
         }
@@ -1460,7 +1571,7 @@ class KeyframePainter
                 'position' => $change['position'],
                 'change' => $change['change'],
                 Keyframe::COMPOSITED => $composited,
-                Keyframe::SENT => ['model' => $result['model'], 'prompt' => KeyframeImageBrief::placeState($change['change']), 'images' => ['The place before this change']],
+                Keyframe::SENT => ['model' => $result['model'], 'prompt' => KeyframeImageBrief::placeState($change['change'], $change['part']), 'images' => ['The place before this change']],
             ])
             ->toMediaCollection(Shot::PLACE_STATES);
     }
@@ -1468,9 +1579,9 @@ class KeyframePainter
     /**
      * Whether a new version of the place shows the change asked for, judged by a vision model; without an answer it counts as shown.
      */
-    private function changeShows(string $before, string $after, string $change): bool
+    private function changeShows(string $before, string $after, string $change, string $part = ''): bool
     {
-        $checker = new PlaceChangeChecker($change);
+        $checker = new PlaceChangeChecker($change, $part);
 
         try {
             /** @var StructuredAgentResponse $response */

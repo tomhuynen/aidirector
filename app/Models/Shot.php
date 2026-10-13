@@ -74,6 +74,9 @@ class Shot extends Model implements HasMedia
     /** On the storyline: the plan is written and waits for the director's go before anything is drawn. */
     public const AWAITS_GO = 'awaits_go';
 
+    /** The cut of the master of its sequence place this shot's place was cut with: the cast where they stand, for keyframe 1. */
+    public const BLOCKING = 'blocking';
+
     /** On the chosen place: its named things were taken out, or it has none, or that failed; until then nothing can be moved in its keyframes. */
     public const PLATE_EMPTIED_DONE = 'emptied';
 
@@ -329,7 +332,7 @@ class Shot extends Model implements HasMedia
      *
      * `handled` lists the objects someone changes in that keyframe and those that move by themselves in it; plans from before it was asked for have none.
      *
-     * @return list<array{title: string, beat?: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, handled?: list<string>, copied?: bool}>
+     * @return list<array{title: string, beat?: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, handled?: list<string>, moving_parts?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
@@ -500,8 +503,9 @@ class Shot extends Model implements HasMedia
             return;
         }
 
-        $this->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['draw_when_ready' => true, self::AWAITS_GO => true]));
+        // The status first: a page that looks in between never sees a shot that neither waits nor draws.
         $this->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_PENDING, 'storyline_error' => null])->save();
+        $this->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['draw_when_ready' => true, self::AWAITS_GO => true]));
 
         GenerateKeyframes::dispatch($this);
     }
@@ -869,6 +873,7 @@ class Shot extends Model implements HasMedia
         $this->addMediaCollection(self::SEQUENCE_PLACES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PLACE_STATES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PLATE_EMPTIED)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
+        $this->addMediaCollection(self::BLOCKING)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }

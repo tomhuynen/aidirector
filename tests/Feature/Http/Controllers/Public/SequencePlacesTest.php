@@ -51,6 +51,16 @@ function fireSequenceReply(): array
 }
 
 /**
+ * Runs the job that makes the empty place from a chosen master, which a faked bus only records.
+ */
+function makeMasters(): void
+{
+    if (Bus::getFacadeRoot() instanceof Illuminate\Support\Testing\Fakes\BusFake) {
+        Bus::dispatched(App\Jobs\MakeSequenceMaster::class)->each(fn(App\Jobs\MakeSequenceMaster $job) => app()->call([$job, 'handle']));
+    }
+}
+
+/**
  * The first shot of the agreed fire sequence, with the options of its first place drawn.
  */
 function fireSequence(Project $project): Shot
@@ -72,9 +82,9 @@ function fireSequence(Project $project): Shot
     return $shot->refresh();
 }
 
-it('keeps the places of an agreed sequence on its first shot and draws the first one right away', function () {
+it('keeps the places of an agreed sequence on its first shot and draws the first one once the director agrees to the overview', function () {
     Bus::fake();
-    PlanDirector::fake([fireSequenceReply()]);
+    PlanDirector::fake([fireSequenceReply(), ['reply' => 'I draw the places now.', 'stage' => 'kind', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'proposal' => null, 'shots' => [], 'draw' => true]]);
     $shot = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => []]]);
 
     $response = actingAs($this->director, 'director')
@@ -91,8 +101,22 @@ it('keeps the places of an agreed sequence on its first shot and draws the first
         // Nothing waits for a later shot; the cut-in continues the shot before.
         ->and($shots[0]->storyline)->not->toHaveKey('setting_from')
         ->and($shots[2]->storyline['setting_from']['shot_id'])->toBe($shots[1]->id)
-        ->and($response->json('messages.1.changes'))->toContain('SH010 (Close-up) uses Meeting-room door; plays in Meeting-room corridor, chosen first')
-        ->and($shots[0]->fresh()->storyline['sequence_places_drawing'])->toBe('meeting-room-corridor');
+        // The overview says what each shot shows; no second list of the same shots beside it.
+        ->and($response->json('messages.1.overview'))->not->toBeEmpty()
+        ->and($response->json('messages.1.changes') ?? [])->not->toContain('SH010 (Close-up) uses Meeting-room door; plays in Meeting-room corridor, chosen first')
+        // Nothing is drawn before the director agrees to the overview.
+        ->and($shots[0]->fresh()->storyline)->not->toHaveKey('sequence_places_drawing')
+        ->and($shots[0]->fresh()->storyline[SequencePlaces::PLACES_WAIT])->toBeTrue();
+    Bus::assertNothingBatched();
+
+    $agreed = actingAs($this->director, 'director')->postJson(route('public.shots.plan.chat', [$this->project, $shots[0]]), ['message' => 'yes, draw the places']);
+
+    // The page reloads, so the places being drawn show in the chat right away.
+    expect($agreed->json('reload'))->toBeTrue()
+        ->and($shots[0]->fresh()->storyline['sequence_places_drawing'])->toBe('meeting-room-corridor')
+        ->and($shots[0]->fresh()->storyline)->not->toHaveKey(SequencePlaces::PLACES_WAIT)
+        // Agreeing to the overview agrees to every shot in it: their plans are drawn without asking again.
+        ->and($shots->every(fn(Shot $member) => App\Support\Shots\SequenceOverview::agreed($member->fresh())))->toBeTrue();
 
     // While it is drawn, the chat shows it.
     actingAs($this->director, 'director')
@@ -102,7 +126,7 @@ it('keeps the places of an agreed sequence on its first shot and draws the first
         && $batch->jobs->every(fn(GenerateSequencePlaceOption $job) => $job->place === 'meeting-room-corridor'));
 });
 
-it('draws a place of the sequence wide and empty, with what happens there in each shot', function () {
+it('draws a place of the sequence as its master: wide, with the cast where they stand at the start', function () {
     Image::fake(fn() => base64_encode(sequencePng()));
     $shot = fireSequence($this->project);
     $place = app(SequencePlaces::class)->places($shot)[0];
@@ -111,27 +135,23 @@ it('draws a place of the sequence wide and empty, with what happens there in eac
 
     expect($option->collection_name)->toBe(Shot::SEQUENCE_PLACE_OPTIONS)
         ->and($option->getCustomProperty('place'))->toBe('meeting-room-corridor');
-    Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Draw Meeting-room corridor, empty: no people at all. Several shots of one sequence play here')
+    Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Draw Meeting-room corridor, wide, with the people and the things that move in it where they stand at the start of the first shot here')
+        && $prompt->contains('so where everyone stands, which way they face and which side of the frame they are on is decided by this picture')
         && $prompt->contains('- SH010: Smoke under the meeting-room door.'));
 });
 
-it('leaves the picture of a thing that moves in the shots there out of the place, such as a truck that drives off', function () {
+it('gives the master the pictures of its people and of what moves, such as a truck, people first', function () {
     Image::fake(fn() => base64_encode(sequencePng()));
-    App\Ai\Agents\MovingThingsJudge::fake(fn() => ['moving' => ['Delivery truck']]);
     $shot = fireSequence($this->project);
     $truck = App\Models\Element::factory()->object()->for($this->project)->create(['name' => 'Delivery truck']);
     $truck->addMediaFromString(sequencePng())->usingFileName('truck.png')->toMediaCollection(App\Models\Element::REFERENCE);
-    $bin = App\Models\Element::factory()->object()->for($this->project)->create(['name' => 'Waste bin']);
-    $bin->addMediaFromString(sequencePng())->usingFileName('bin.png')->toMediaCollection(App\Models\Element::REFERENCE);
-    $place = [...app(SequencePlaces::class)->places($shot)[0], 'elements' => ['Delivery truck', 'Waste bin']];
+    $guard = App\Models\Element::factory()->for($this->project)->create(['name' => 'Gate guard', 'type' => 'person']);
+    $guard->addMediaFromString(sequencePng())->usingFileName('guard.png')->toMediaCollection(App\Models\Element::REFERENCE);
+    $place = [...app(SequencePlaces::class)->places($shot)[0], 'elements' => ['Delivery truck', 'Gate guard']];
 
     $option = app(KeyframePainter::class)->paintSequencePlaceOption($shot->load('project'), $place, 0);
-    app(KeyframePainter::class)->paintSequencePlaceOption($shot, $place, 1);
 
-    expect($option->getCustomProperty(App\Models\Keyframe::SENT)['images'])->toContain('Picture of Waste bin')
-        ->not->toContain('Picture of Delivery truck');
-    // Judged once for the place.
-    App\Ai\Agents\MovingThingsJudge::assertPromptedTimes(1);
+    expect($option->getCustomProperty(App\Models\Keyframe::SENT)['images'])->toBe(['Picture of Gate guard', 'Picture of Delivery truck']);
 });
 
 it('has the place chosen in the chat first, then the next place, and says so', function () {
@@ -147,7 +167,10 @@ it('has the place chosen in the chat first, then the next place, and says so', f
         ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'the second one'])
         ->assertJsonPath("{$reply}.changes", ['Place 2 chosen for Meeting-room corridor'])
         ->assertJsonPath("{$reply}.chosenPlace.name", 'Meeting-room corridor')
+        // Another place still waits to be chosen, so the chat does not go on by itself yet.
+        ->assertJsonPath('continue', false)
         ->assertJsonMissingPath("{$reply}.chosen_place");
+    makeMasters();
 
     $places = app(SequencePlaces::class);
     $shot->refresh();
@@ -173,6 +196,7 @@ it('chooses a place by clicking it in the chat, and every shot there draws its o
     actingAs($this->director, 'director')
         ->post(route('public.shots.sequence-places.choose', [$this->project, $shot]), ['place' => $option->id])
         ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
+    makeMasters();
 
     $setting = app(KeyframePainter::class)->settingFor($second->fresh());
 
@@ -224,6 +248,7 @@ it('draws a scene that was set to start from a close-up in that close-up\'s chos
     $closeUp = fireSequence($this->project);
     $option = $closeUp->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first();
     app(SequencePlaces::class)->choose($closeUp, $option, say: false);
+    makeMasters();
     // Planned before this rule, like SH120: a full scene taking its setting from keyframe 2 of the close-up.
     $scene = Shot::factory()->for($this->project)->create(['position' => 5, 'group_key' => $closeUp->group_key, 'kind' => ShotKind::SCENE, 'storyline' => ['framing' => ['size' => 'full', 'spot' => ''], 'keyframes' => [], 'setting_from' => ['shot_id' => $closeUp->id, 'keyframe' => 2]]]);
 
@@ -259,13 +284,13 @@ it('maps a chosen place once, and gives every shot there the map and its own vie
     $closeUp = fireSequence($this->project);
     $scene = $this->project->shots()->where('position', 2)->firstOrFail();
     $scene->updateStoredJson('storyline', fn(?array $storyline) => [...$storyline, 'framing' => ['size' => 'full', 'spot' => ''], 'sequence_view' => 'from the safe spot looking back along the corridor; the door is behind her, off the left of the frame']);
+    App\Ai\Agents\PlaceMapper::fake([['map' => 'The meeting-room door is on the left, the exit at the far end on the right.', 'things' => [], 'routes' => []]]);
 
     app(SequencePlaces::class)->choose($closeUp, $closeUp->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first(), say: false);
 
-    Bus::assertDispatched(App\Jobs\MapSequencePlace::class, fn($job) => $job->place === 'meeting-room-corridor');
-    App\Ai\Agents\PlaceMapper::fake([['map' => 'The meeting-room door is on the left, the exit at the far end on the right.']]);
+    makeMasters();
 
-    (new App\Jobs\MapSequencePlace($closeUp, 'meeting-room-corridor'))->handle(app(SequencePlaces::class));
+    Bus::assertDispatched(App\Jobs\MakeSequenceMaster::class, fn($job) => $job->place === 'meeting-room-corridor');
 
     $scene = $scene->fresh();
     $setting = app(KeyframePainter::class)->settingFor($scene);
@@ -308,6 +333,7 @@ it('tells the review where the shot before ended and which part of the place eac
 it('leaves the place of its sequence when a new plan moves the shot to another place', function () {
     $closeUp = fireSequence($this->project);
     app(SequencePlaces::class)->choose($closeUp, $closeUp->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first(), say: false);
+    makeMasters();
     App\Models\Element::factory()->for($this->project)->create(['name' => 'Meeting-room door', 'type' => 'object']);
     App\Models\Element::factory()->for($this->project)->create(['name' => 'Meeting-room corridor', 'type' => 'place']);
     App\Models\Element::factory()->for($this->project)->create(['name' => 'Plain hallway', 'type' => 'place']);
@@ -354,6 +380,7 @@ function stripedSequencePlace(bool $across): string
 it('writes once what the camera of a shot with its own view sees, and draws its place from that', function () {
     $closeUp = fireSequence($this->project);
     app(SequencePlaces::class)->choose($closeUp, $closeUp->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first(), say: false);
+    makeMasters();
     $scene = $this->project->shots()->where('position', 2)->firstOrFail();
     $scene->updateStoredJson('storyline', fn(?array $storyline) => [...$storyline, 'sequence_view' => 'from the safe end looking back; the bin is behind them']);
     App\Ai\Agents\CameraBriefWriter::fake([['brief' => 'The camera stands at the safe end, looking back. The bin is far away on the right of the frame, small.']]);
@@ -394,6 +421,7 @@ it('draws the place of a shot with its own view again when it kept the camera of
 it('gives a shot another view from the chat and draws new places from it, since a keyframe never moves the camera', function () {
     $closeUp = fireSequence($this->project);
     app(SequencePlaces::class)->choose($closeUp, $closeUp->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first(), say: false);
+    makeMasters();
     $scene = $this->project->shots()->where('position', 2)->firstOrFail();
     $scene->updateStoredJson('storyline', fn(?array $storyline) => [...$storyline, 'sequence_view' => 'from the safe end; the bin is off the left of the frame', SequencePlaces::CAMERA_BRIEF => ['for' => 'old', 'text' => 'Old brief.'], 'keyframes' => [['title' => 'Back', 'description' => 'She looks back.', 'elements' => []]]]);
     $scene->addMediaFromString(sequencePng())->usingFileName('option.png')->toMediaCollection(Shot::PLATE_OPTIONS);
@@ -430,6 +458,7 @@ function drawnFirstOfSequence(Project $project): array
 {
     $first = fireSequence($project);
     app(SequencePlaces::class)->choose($first, $first->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first(), say: false);
+    makeMasters();
     $first->forceFill(['status' => ShotStatus::KEYFRAMES_READY])->save();
     $keyframe = App\Models\Keyframe::factory()->for($first)->create(['position' => 1]);
     $render = $keyframe->addMediaFromString(sequencePng())->usingFileName('last.png')->toMediaCollection(App\Models\Keyframe::RENDERS);
@@ -483,11 +512,172 @@ it('keeps the options there to choose from while more are drawn, and does not of
 
     actingAs($this->director, 'director')
         ->get(route('public.shots.view', [$this->project, $shot]))
-        ->assertInertia(fn($page) => $page->has('shot.sequencePlace.options', 2)->where('shot.sequencePlaceDrawing.name', 'Meeting-room corridor'));
+        ->assertInertia(fn($page) => $page->has('shot.sequencePlace.options', 2)->where('shot.sequencePlaceDrawing.name', 'Meeting-room corridor')->where('shot.sequencePlaceDrawing.count', 3));
+
+    // One of the round is there: only the others are shown as being drawn.
+    $shot->addMediaFromString(sequencePng())->usingFileName('corridor-3.png')->withCustomProperties(['place' => 'meeting-room-corridor'])->toMediaCollection(Shot::SEQUENCE_PLACE_OPTIONS);
+
+    expect(app(SequencePlaces::class)->drawingPlace($shot->fresh())['count'])->toBe(2);
 
     app(SequencePlaces::class)->choose($shot->fresh(), $shot->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first(), say: false);
+
+    makeMasters();
     $said = count($shot->fresh()->plan_chat);
     SequencePlaces::finish($shot->id, 'meeting-room-corridor');
 
     expect($shot->fresh()->plan_chat)->toHaveCount($said);
+});
+
+/**
+ * A grey place of 144 by 256, with a red person standing at x 60 to 80, y 100 to 180 when asked.
+ */
+function masterPng(bool $person): string
+{
+    $image = imagecreatetruecolor(144, 256);
+    imagefill($image, 0, 0, (int) imagecolorallocate($image, 128, 128, 128));
+
+    if ($person) {
+        imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocate($image, 220, 40, 40));
+    }
+
+    ob_start();
+    imagepng($image);
+
+    return (string) ob_get_clean();
+}
+
+function personMask(bool $alpha): string
+{
+    $image = imagecreatetruecolor(144, 256);
+    imagesavealpha($image, $alpha);
+    imagefill($image, 0, 0, (int) imagecolorallocatealpha($image, 0, 0, 0, $alpha ? 127 : 0));
+    imagefilledrectangle($image, 60, 100, 80, 180, (int) imagecolorallocatealpha($image, 255, 255, 255, 0));
+    ob_start();
+    imagepng($image);
+
+    return (string) ob_get_clean();
+}
+
+it('makes the empty place from the chosen master, reads where the cast stands and keeps the box around them', function () {
+    Illuminate\Support\Facades\Config::set('services.replicate.token', 'test-token');
+    $people = (string) Illuminate\Support\Facades\Config::get('pipeline.keyframes.composite.people_model');
+    Illuminate\Support\Facades\Http::fake([
+        'api.replicate.com/v1/predictions' => fn(Illuminate\Http\Client\Request $request) => Illuminate\Support\Facades\Http::response(['status' => 'succeeded', 'output' => ($request['version'] ?? null) === $people ? 'https://replicate.delivery/front.png' : 'https://replicate.delivery/person.png']),
+        'replicate.delivery/front.png' => Illuminate\Support\Facades\Http::response(personMask(true)),
+        'replicate.delivery/person.png' => Illuminate\Support\Facades\Http::response(personMask(false)),
+    ]);
+    App\Ai\Agents\MovingThingsJudge::fake(fn() => ['moving' => []]);
+    App\Ai\Agents\BlockingReader::fake(fn() => ['blocking' => 'The Visitor stands in the middle of the frame, facing the door on the left.']);
+    App\Ai\Agents\PlaceMapper::fake(fn() => ['map' => 'The door is on the left.', 'things' => [], 'routes' => []]);
+    // The edit model takes the people out: the place without them.
+    Image::fake(fn() => base64_encode(masterPng(false)));
+
+    $shot = fireSequence($this->project);
+    App\Models\Element::factory()->for($this->project)->create(['name' => 'Visitor', 'type' => 'person']);
+    $master = $shot->addMediaFromString(masterPng(true))->usingFileName('master.png')->withCustomProperties(['place' => 'meeting-room-corridor'])->toMediaCollection(Shot::SEQUENCE_PLACE_OPTIONS);
+
+    app(SequencePlaces::class)->choose($shot, $master, say: false);
+    makeMasters();
+
+    $places = app(SequencePlaces::class);
+    $shot->refresh();
+    $empty = $places->chosen($shot, 'meeting-room-corridor');
+    $box = $empty->getCustomProperty(SequencePlaces::CAST_BOX);
+    $red = fn(string $png, int $x, int $y) => ($image = imagecreatefromstring($png)) !== false ? imagecolorsforindex($image, imagecolorat($image, $x, $y))['red'] : 0;
+    $pixel = $red(Storage::disk($empty->disk)->get($empty->getPathRelativeToRoot()), 70, 140);
+
+    expect($places->master($shot, 'meeting-room-corridor'))->not->toBeNull()
+        ->and($empty->getCustomProperty(SequencePlaces::MASTER))->not->toBeTrue()
+        ->and($empty->getCustomProperty(SequencePlaces::BLOCKING))->toBe('The Visitor stands in the middle of the frame, facing the door on the left.')
+        ->and($empty->getCustomProperty(SequencePlaces::MAP))->toBe('The door is on the left.')
+        ->and($box['x'])->toEqualWithDelta(60 / 144, 0.05)
+        ->and($box['height'])->toEqualWithDelta(80 / 256, 0.06)
+        // The person is gone from the empty place.
+        ->and($pixel)->toBeLessThan(160);
+});
+
+it('cuts a medium scene\'s place from the empty place around the cast, with the same cut of the master for keyframe 1', function () {
+    $shot = fireSequence($this->project);
+    $scene = $this->project->shots()->where('position', 2)->firstOrFail();
+    $scene->updateStoredJson('storyline', fn(?array $storyline) => [...$storyline, 'framing' => ['size' => 'medium', 'spot' => ''], 'keyframes' => [['title' => 'Looks', 'description' => 'She looks at the door.']]]);
+    $master = $shot->addMediaFromString(masterPng(true))->usingFileName('master.png')->withCustomProperties(['place' => 'meeting-room-corridor', SequencePlaces::MASTER => true])->toMediaCollection(Shot::SEQUENCE_PLACES);
+    $shot->addMediaFromString(masterPng(false))->usingFileName('empty.png')->withCustomProperties(['place' => 'meeting-room-corridor', 'master_id' => $master->id, SequencePlaces::CAST_BOX => ['x' => 60 / 144, 'y' => 100 / 256, 'width' => 20 / 144, 'height' => 80 / 256]])->toMediaCollection(Shot::SEQUENCE_PLACES);
+    $painter = app(KeyframePainter::class);
+
+    $cut = $painter->masterPlate($scene->fresh()->load('project'));
+
+    $plate = imagecreatefromstring($cut['plate']);
+    $red = fn(string $png, int $x, int $y) => ($image = imagecreatefromstring($png)) !== false ? imagecolorsforindex($image, imagecolorat($image, $x, $y))['red'] : 0;
+
+    // The same size as the place, closer around her: she fills the middle of the cut of the master, and the place has no one.
+    expect([imagesx($plate), imagesy($plate)])->toBe([144, 256])
+        ->and($red($cut['blocking'], 72, 128))->toBeGreaterThan(180)
+        ->and($red($cut['blocking'], 72, 30))->toBeLessThan(160)
+        ->and($red($cut['plate'], 72, 128))->toBeLessThan(160);
+
+    // Drawing the shot: its place is the cut, chosen, nothing to choose; keyframe 1 gets the cut of the master to put her where she stands.
+    Illuminate\Support\Facades\Config::set('pipeline.keyframes.start_with_plate', true);
+    (new App\Jobs\GenerateKeyframes($scene->fresh()))->handle();
+    $scene = $scene->fresh();
+    $first = $scene->keyframes()->with(['media', 'elements'])->firstOrFail()->setRelation('shot', $scene);
+
+    // Already without its people and what moves: nothing to get ready before things can be moved; a closer cut has its depth measured.
+    Bus::assertDispatched(App\Jobs\MeasurePlaceDepth::class);
+    expect($scene->getFirstMedia(Shot::PLATE)?->getCustomProperty(Shot::PLATE_EMPTIED_DONE))->toBeTrue()
+        ->and($scene->getFirstMedia(Shot::PLATE)?->getCustomProperty(Shot::PLATE_CHOSEN))->toBeTrue()
+        ->and($scene->getFirstMedia(Shot::BLOCKING))->not->toBeNull()
+        ->and($painter->referencesFor($first, collect([$first]))->labels())->toContain('Where the cast stands, from the master');
+
+    // A full shot is the whole empty place, so it keeps the depth measured on it once.
+    $places = app(SequencePlaces::class);
+    $places->chosen($shot->fresh(), 'meeting-room-corridor')->setCustomProperty(App\Support\Images\PlaceDepth::DEPTH, ['width' => 1, 'height' => 1, 'values' => [1.0]])->save();
+    $scene->updateStoredJson('storyline', fn(?array $storyline) => [...$storyline, 'framing' => ['size' => 'full', 'spot' => '']]);
+    expect($painter->masterPlate($scene->fresh())['depth'])->toEqual(['width' => 1, 'height' => 1, 'values' => [1.0]]);
+
+    // A shot that asked for its own camera draws its own place.
+    $scene->updateStoredJson('storyline', fn(?array $storyline) => [...$storyline, KeyframePainter::OWN_CAMERA => true]);
+    expect($painter->masterPlate($scene->fresh()))->toBeNull();
+});
+
+it('starts a shot cut from the master with the place as an earlier shot left it, such as the barrier up', function () {
+    Image::fake(fn() => base64_encode(masterPng(false)));
+    $shot = Shot::factory()->for($this->project)->create(['storyline' => ['keyframes' => [
+        ['title' => 'Past', 'description' => 'The truck starts past the open barrier.', 'place_change' => 'The barrier arm is raised, leaving the lane open.', 'place_part' => 'barrier arm'],
+        ['title' => 'Gone', 'description' => 'The truck leaves the frame.', 'place_change' => '', 'place_part' => ''],
+    ]]])->load('project');
+    $shot->addMediaFromString(masterPng(false))->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+    $shot->addMediaFromString(masterPng(true))->usingFileName('blocking.png')->toMediaCollection(Shot::BLOCKING);
+    $painter = app(KeyframePainter::class);
+
+    $painter->ensurePlaceStates($shot, collect());
+
+    expect($painter->placeAt($shot->fresh(), collect(), 1)?->collection_name)->toBe(Shot::PLACE_STATES);
+    Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('The barrier arm is raised, leaving the lane open.'));
+    expect((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain('In keyframe 1 it is empty too, except for a shot that plays in the place of its sequence after an earlier shot there changed it');
+});
+
+it('shows in the chat what an agreed shot waits for while the empty place of its sequence is made', function () {
+    $shot = fireSequence($this->project);
+    $option = $shot->getMedia(Shot::SEQUENCE_PLACE_OPTIONS)->first();
+    app(SequencePlaces::class)->choose($shot, $option, say: false);
+    App\Support\Shots\SequenceOverview::agree($shot);
+
+    PlanDirector::fake([['reply' => 'I draw it now.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [], 'proposal' => [
+        'takeaway' => 'See the danger', 'kind' => 'close-up', 'storyline' => 'Smoke seeps under the door.', 'seconds' => 3, 'setting_from' => null,
+        'keyframes' => [['title' => 'Smoke', 'description' => 'A thin wisp of smoke under the meeting-room door.', 'spatial' => '', 'elements' => []]],
+    ]]]);
+
+    actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot->fresh()]), ['message' => 'ok'])
+        ->assertJsonPath('reload', true)
+        ->assertJsonPath('waitingFor', $shot->fresh()->waitsFor())
+        // The page keeps looking until the drawing shows, also when one reload gets lost.
+        ->assertJsonPath('drawing', true);
+
+    $waits = $shot->fresh()->waitsFor();
+
+    expect($waits)->not->toBeNull();
+    actingAs($this->director, 'director')
+        ->get(route('public.shots.view', [$this->project, $shot]))
+        ->assertInertia(fn($page) => $page->where('shot.waitingFor', $waits)->where('shot.status', 'storyline-ready'));
 });

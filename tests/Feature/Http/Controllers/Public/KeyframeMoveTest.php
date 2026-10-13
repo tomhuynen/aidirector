@@ -117,6 +117,54 @@ it('moves the person at once, shows the place where they stood, and only makes t
     Queue::assertPushed(PoseMovedPerson::class, fn(PoseMovedPerson $job) => $job->redraw === false);
 });
 
+it('moves and then redraws it at the new spot when the director picks redraw, with its own shadow and light', function () {
+    Queue::fake();
+    $keyframe = keyframeOnPlace($this->project);
+    $shot = $keyframe->shot;
+
+    actingAs($this->director, 'director')
+        ->post(route('public.shots.keyframes.move', [$this->project, $shot, $keyframe]), ['x' => 300 / 432, 'y' => 520 / 768, 'dx' => -200 / 432, 'dy' => 0, 'scale' => 1, 'redraw' => true])
+        ->assertSessionHasNoErrors();
+
+    expect($keyframe->fresh()->rendering)->toBeTrue();
+    Queue::assertPushed(PoseMovedPerson::class, fn(PoseMovedPerson $job) => $job->redraw && str_contains($job->instruction, 'their shadow and light for this spot'));
+});
+
+it('brings the shadow the redraw gives along with the redrawn person', function () {
+    $keyframe = keyframeOnPlace($this->project);
+    $box = app(TopLayerCutout::class)->select($keyframe->shot->getFirstMedia(Shot::PLATE)->getPath(), $keyframe->render()->getPath(), 300 / 432, 520 / 768)['box'];
+    // The redraw gives the crop back with a shadow on the floor right of the feet: the floor, darker by the same factor.
+    Image::fake(function (ImagePrompt $prompt) {
+        $crop = imagecreatefromstring((string) Storage::disk('local')->get($prompt->attachments->first()->path));
+        [$right, $bottom] = [0, 0];
+
+        for ($x = 0; $x < imagesx($crop); $x++) {
+            for ($y = 0; $y < imagesy($crop); $y++) {
+                $colour = imagecolorsforindex($crop, imagecolorat($crop, $x, $y));
+
+                if ($colour['red'] > 200 && $colour['green'] < 80) {
+                    [$right, $bottom] = [max($right, $x), max($bottom, $y)];
+                }
+            }
+        }
+
+        imagefilledrectangle($crop, $right + 1, $bottom - 10, $right + 50, $bottom, (int) imagecolorallocate($crop, 45, 55, 80));
+        ob_start();
+        imagepng($crop);
+
+        return base64_encode((string) ob_get_clean());
+    });
+    MovedPersonDescriber::fake([['description' => 'He stands in the lane.', 'storyline' => '', 'title' => 'Lane', 'warning' => '']]);
+
+    (new PoseMovedPerson($keyframe, 'Redraw the person.', $box))->handle(app(KeyframePainter::class), app(TopLayerCutout::class), app(BackgroundDrift::class));
+
+    $render = $keyframe->fresh()->render();
+
+    // Found by what differs from the place, the shadow counts as part of him here, so both land a little to the left.
+    expect(pixelAt($render->getPath(), 330, 596)[2])->toBeLessThan(120)
+        ->and(pixelAt($render->getPath(), 285, 540)[0])->toBeGreaterThan(180);
+});
+
 it('gives the depth of the place when a person is clicked, so the editor sizes them while dragging', function () {
     $keyframe = keyframeOnPlace($this->project);
     $keyframe->shot->getFirstMedia(Shot::PLATE)->setCustomProperty(PlaceDepth::DEPTH, (new DepthGrid(2, 2, [8.0, 8.0, 4.0, 2.0]))->toArray())->save();
@@ -286,7 +334,7 @@ it('still makes the plan true to the moved image when the pose cannot be redrawn
     (new PoseMovedPerson($keyframe, 'Keep the person where they stand.', ['x' => 0.6, 'y' => 0.5, 'width' => 0.1, 'height' => 0.2]))->failed(new RuntimeException('Provider down'));
 
     expect($keyframe->fresh()->rendering)->toBeFalse()
-        ->and($keyframe->fresh()->render_error)->toContain('the pose could not be redrawn')
+        ->and($keyframe->fresh()->render_error)->toContain('it could not be redrawn there')
         ->and($keyframe->fresh()->description)->toBe('He stands in the blue lane.');
 });
 
@@ -463,7 +511,7 @@ it('moves a thing, such as a helicopter, without a shadow on the floor and witho
 
     $moved = $keyframe->fresh()->render();
 
-    // Just under where it was put down, where a person gets a soft shadow, the floor is untouched.
+    // Just under where it was put down, the floor is untouched: no shadow is added.
     expect(pixelAt($moved->getPath(), 100, 603))->toEqualWithDelta([90, 110, 160], 3)
         ->and($moved->getCustomProperty(Keyframe::MOVED_THING))->toBeTrue()
         ->and($moved->getCustomProperty(Keyframe::THINGS_MASK))->toBeString();
@@ -651,6 +699,44 @@ it('takes the shadow a person leaves on the floor along when they are moved, and
     ob_start();
     imagepng($mask);
     $version->setCustomProperty(Keyframe::TOP_LAYER_MASK, base64_encode((string) ob_get_clean()))->save();
+    $keyframe->forceFill(['render_id' => $version->id])->save();
+
+    actingAs($this->director, 'director')
+        ->post(route('public.shots.keyframes.move', [$this->project, $keyframe->shot, $keyframe]), ['x' => 300 / 432, 'y' => 520 / 768, 'dx' => 0, 'dy' => -150 / 768, 'scale' => 1])
+        ->assertSessionHasNoErrors();
+
+    $moved = $keyframe->fresh()->render()->getPath();
+
+    expect(pixelAt($moved, 240, 592))->toEqualWithDelta([90, 110, 160], 6)
+        ->and(pixelAt($moved, 50, 592))->toEqualWithDelta([54, 66, 96], 6);
+});
+
+it('takes the shadow a thing leaves on the floor along when it is moved, such as a truck', function () {
+    Queue::fake();
+    $keyframe = keyframeOnPlace($this->project);
+    // Two people with long shadows to their left: the one at x 300, moved, and the one at x 100, who stays.
+    $render = imagecreatefromstring(placePng([300, 600]));
+    $red = (int) imagecolorallocate($render, 220, 40, 40);
+    imagefilledrectangle($render, 75, 440, 125, 600, $red);
+    $shadow = (int) imagecolorallocate($render, 54, 66, 96);
+    imagefilledrectangle($render, 215, 585, 274, 600, $shadow);
+    imagefilledrectangle($render, 30, 585, 74, 600, $shadow);
+    ob_start();
+    imagepng($render);
+    $keyframe->render()->delete();
+    $version = $keyframe->addMediaFromString((string) ob_get_clean())->usingFileName('keyframe-1.png')->toMediaCollection(Keyframe::RENDERS);
+    $mask = imagecreatetruecolor(432, 768);
+    $white = (int) imagecolorallocate($mask, 255, 255, 255);
+    imagefilledrectangle($mask, 275, 440, 325, 600, $white);
+    imagefilledrectangle($mask, 75, 440, 125, 600, $white);
+    ob_start();
+    imagepng($mask);
+    $both = (string) ob_get_clean();
+    $thing = imagecreatetruecolor(432, 768);
+    imagefilledrectangle($thing, 275, 440, 325, 600, (int) imagecolorallocate($thing, 255, 255, 255));
+    ob_start();
+    imagepng($thing);
+    $version->setCustomProperty(Keyframe::TOP_LAYER_MASK, base64_encode($both))->setCustomProperty(Keyframe::THINGS_MASK, base64_encode((string) ob_get_clean()))->save();
     $keyframe->forceFill(['render_id' => $version->id])->save();
 
     actingAs($this->director, 'director')
