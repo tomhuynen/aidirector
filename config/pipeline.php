@@ -120,6 +120,11 @@ return [
     ],
 
     'keyframes' => [
+        // Keyframe 1 on a chosen place is staged first: plain grey placeholders put into the place by FLUX Fill, where a vision model put their boxes, then the edit model makes them the cast.
+        'staging' => [
+            'enabled' => (bool) env('AI_STAGING', true),
+            'fill_model' => env('AI_FILL_MODEL', 'black-forest-labs/flux-fill-pro'),
+        ],
         // The most the planner plans (a scene with a clear fifth step); per kind it plans fewer. The director may add more by hand, up to max_manual.
         'max' => 5,
         'max_manual' => 10,
@@ -133,6 +138,8 @@ return [
         // Moving a person by hand is instant; asked for, the pose is redrawn for the new spot, again when the redraw moves them off it.
         'move' => [
             'attempts' => 2,
+            // Where something stood before it was moved is blended into what is around it by FLUX Fill, so no patch of another shade or old shadow shows.
+            'blend' => (bool) env('AI_MOVE_BLEND', true),
             // The crop the pose is redrawn on, as times the person's height: tight, so the model cannot move them.
             'crop' => 1.3,
             // Where the place is nearer the camera than the person's feet by this share, it stands in front of them.

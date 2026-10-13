@@ -466,6 +466,25 @@ class KeyframeImageBrief
     }
 
     /**
+     * The prompt that makes the grey placeholders of a staged first keyframe the cast: the staging is the image that
+     * is edited, so where everyone stands, how big and what is in front of what stays as staged.
+     *
+     * @param  list<string>  $names  the cast, in the order of their pictures, attached after the staging
+     */
+    public static function fromStaging(string $description, array $names): string
+    {
+        $pictures = collect($names)->map(fn(string $name, int $index) => 'image ' . ($index + 2) . " is {$name}")->join('; ');
+
+        return implode("\n", [
+            'Edit image 1. It is the place of this shot with plain grey placeholders in it. Replace only the placeholders, exactly where they are, at the same size and facing the same way; change nothing else in the picture.',
+            "Each placeholder becomes the one of the cast it stands for, looking exactly like their picture: {$pictures}. People keep the pose of their placeholder; a vehicle keeps its position and direction, with the people in it seen through its windows.",
+            "What this keyframe shows: {$description}",
+            'The place, its fixed parts, the road and floor, the camera and the light stay exactly as in image 1. Nothing grey and untextured is left.',
+            'Do not add text, captions, brand names, logos or watermarks, and never write words, labels or numbers on cards, badges, permits or screens. Signs and markings already in the image stay exactly as they are.',
+        ]);
+    }
+
+    /**
      * The prompt for a later state of the empty place, such as a door that is
      * closed by now: only the change is made, the place stays without people.
      */

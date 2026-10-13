@@ -165,6 +165,48 @@ it('brings the shadow the redraw gives along with the redrawn person', function 
         ->and(pixelAt($render->getPath(), 285, 540)[0])->toBeGreaterThan(180);
 });
 
+it('blends where the moved person stood into what is around it, so no patch or old shadow shows', function () {
+    Queue::fake();
+    $blended = imagecreatetruecolor(432, 768);
+    imagefill($blended, 0, 0, (int) imagecolorallocate($blended, 20, 200, 20));
+    ob_start();
+    imagepng($blended);
+    $green = (string) ob_get_clean();
+    Http::fake([
+        'api.replicate.com/v1/models/*' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/blended.png']),
+        'replicate.delivery/blended.png' => Http::response($green),
+    ]);
+    $keyframe = keyframeOnPlace($this->project);
+
+    actingAs($this->director, 'director')
+        ->post(route('public.shots.keyframes.move', [$this->project, $keyframe->shot, $keyframe]), ['x' => 300 / 432, 'y' => 520 / 768, 'dx' => -200 / 432, 'dy' => 0, 'scale' => 1])
+        ->assertSessionHasNoErrors();
+
+    $fill = Http::recorded(fn(Illuminate\Http\Client\Request $request) => str_contains($request->url(), 'flux-fill'))->first()[0];
+    $mask = new Imagick();
+    $mask->readImageBlob((string) base64_decode(substr($fill['input']['mask'], strpos($fill['input']['mask'], ',') + 1)));
+    $white = fn(int $x, int $y) => $mask->getImagePixelColor($x, $y)->getColorValue(Imagick::COLOR_RED) > 0.5;
+
+    // White where he stood, black where he stands now: only the vacated spot is drawn again.
+    expect($white(300, 540))->toBeTrue()
+        ->and($white(100, 540))->toBeFalse()
+        ->and($white(20, 20))->toBeFalse()
+        ->and(pixelAt($keyframe->fresh()->render()->getPath(), 300, 540))->toBe([20, 200, 20]);
+});
+
+it('keeps the move as it is when blending is switched off', function () {
+    Queue::fake();
+    Config::set('pipeline.keyframes.move.blend', false);
+    Http::fake();
+    $keyframe = keyframeOnPlace($this->project);
+
+    actingAs($this->director, 'director')
+        ->post(route('public.shots.keyframes.move', [$this->project, $keyframe->shot, $keyframe]), ['x' => 300 / 432, 'y' => 520 / 768, 'dx' => -200 / 432, 'dy' => 0, 'scale' => 1])
+        ->assertSessionHasNoErrors();
+
+    Http::assertNotSent(fn(Illuminate\Http\Client\Request $request) => str_contains($request->url(), 'flux-fill'));
+});
+
 it('gives the depth of the place when a person is clicked, so the editor sizes them while dragging', function () {
     $keyframe = keyframeOnPlace($this->project);
     $keyframe->shot->getFirstMedia(Shot::PLATE)->setCustomProperty(PlaceDepth::DEPTH, (new DepthGrid(2, 2, [8.0, 8.0, 4.0, 2.0]))->toArray())->save();

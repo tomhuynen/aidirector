@@ -33,6 +33,9 @@ class Keyframe extends Model implements HasMedia
     /** The whole cut-out of what was moved by hand on a version, also the part outside the frame, so it comes back whole when moved again; with the version, where it lies and whether it is a thing. */
     public const LAYERS = 'layers';
 
+    /** The grey staging a staged keyframe 1 was made from, kept per render (custom property 'render'), to see what the edit model got. */
+    public const STAGINGS = 'stagings';
+
     public const THUMBNAIL = 'thumbnail';
 
     /** A presenter's keyframe without the presenter: the still background their video is put on, with the render it was made from. */
@@ -195,6 +198,7 @@ class Keyframe extends Model implements HasMedia
         $this->addMediaCollection(self::RENDERS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PRESENTER_BACKGROUND)->singleFile()->acceptsMimeTypes(['image/png']);
         $this->addMediaCollection(self::LAYERS)->acceptsMimeTypes(['image/png']);
+        $this->addMediaCollection(self::STAGINGS)->acceptsMimeTypes(['image/png']);
     }
 
     public function registerMediaConversions(?Media $media = null): void

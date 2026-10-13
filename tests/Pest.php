@@ -31,6 +31,8 @@ pest()
         App\Ai\Agents\ShotTimer::fake(fn() => throw new RuntimeException('Shots are not timed again in tests.'));
         // A change to the place shows unless a test says otherwise.
         App\Ai\Agents\PlaceChangeChecker::fake(fn() => ['shown' => true]);
+        // No staging of keyframe 1 unless a test gives boxes.
+        App\Ai\Agents\StagingBoxer::fake(fn() => ['boxes' => [], 'fixed_parts' => []]);
 
         $this->withoutVite();
     });

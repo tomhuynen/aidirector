@@ -63,6 +63,19 @@ function plannedKeyframes(): array
     ];
 }
 
+/**
+ * A white png, as a mask that covers the whole image.
+ */
+function whitePng(): string
+{
+    $image = imagecreatetruecolor(16, 9);
+    imagefill($image, 0, 0, (int) imagecolorallocate($image, 255, 255, 255));
+    ob_start();
+    imagepng($image);
+
+    return (string) ob_get_clean();
+}
+
 function fakePng(): string
 {
     $image = imagecreatetruecolor(16, 9);
@@ -446,6 +459,78 @@ describe('job', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
             && $prompt->contains('It is the place of this shot without any people')
             && $prompt->attachments->first()->path === $plate->getPathRelativeToRoot());
+    });
+
+    it('stages keyframe 1 on the chosen place with grey placeholders then makes them the cast', function () {
+        Config::set('pipeline.keyframes.start_with_plate', true);
+        Config::set('services.replicate.token', 'test-token');
+        Image::fake(fn() => fakePng());
+        Bus::fake([GeneratePlateOption::class]);
+        Http::fake([
+            'api.replicate.com/v1/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/part.png']),
+            'api.replicate.com/v1/models/*' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/filled.png']),
+            'replicate.delivery/*' => Http::response(base64_decode(fakePng())),
+        ]);
+        App\Ai\Agents\StagingBoxer::fake([['boxes' => [['name' => 'Female engineer', 'left' => 0.2, 'top' => 0.2, 'right' => 0.6, 'bottom' => 0.9, 'facing' => 'toward the camera', 'before' => []]], 'fixed_parts' => ['the reception counter']]]);
+
+        $shot = plannedShot($this->project);
+        (new GenerateKeyframes($shot))->handle();
+        (new GeneratePlateOption($shot, 0))->handle(app(KeyframePainter::class));
+        GenerateKeyframes::finishPlates($shot->id);
+        $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
+        $engineer->addMediaFromString(base64_decode(fakePng()))->usingFileName('engineer.png')->toMediaCollection(Element::REFERENCE);
+        $shot->keyframes()->get()->each(fn(Keyframe $keyframe) => $keyframe->elements()->attach($engineer));
+
+        Queue::fake([GenerateRemainingKeyframes::class]);
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.plate.choose', [$this->project, $shot]), ['plate' => $shot->fresh()->getFirstMedia(Shot::PLATE_OPTIONS)->id])
+            ->assertSessionHasNoErrors();
+
+        (new GenerateRemainingKeyframes($shot->fresh(), elementsDrawn: true, onlyFirst: true))->handle(app(KeyframePainter::class));
+
+        $render = $shot->keyframes()->with('media')->where('position', 1)->first()->render();
+
+        expect($render->getCustomProperty(KeyframePainter::STAGING)[0]['name'])->toBe('Female engineer')
+            // The grey staging the edit model got is kept with the version.
+            ->and($shot->keyframes()->where('position', 1)->first()->getMedia(Keyframe::STAGINGS)->first()?->getCustomProperty('render'))->toBe($render->id)
+            ->and($render->getCustomProperty(Keyframe::SENT)['images'])->toBe(['The place with grey placeholders, the image that is edited', 'Picture of Female engineer']);
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('It is the place of this shot with plain grey placeholders in it') && $prompt->attachments->count() === 2);
+        Http::assertSent(fn(HttpRequest $request) => str_contains($request->url(), 'flux-fill-pro') && str_contains((string) $request['input']['prompt'], 'mannequin'));
+    });
+
+    it('draws a staged keyframe 1 once more when someone is not where they were staged, and says so when they still are not', function () {
+        Config::set('pipeline.keyframes.start_with_plate', true);
+        Config::set('services.replicate.token', 'test-token');
+        Image::fake(fn() => fakePng());
+        Bus::fake([GeneratePlateOption::class]);
+        Http::fake([
+            'api.replicate.com/v1/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/part.png']),
+            'api.replicate.com/v1/models/*' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/filled.png']),
+            'replicate.delivery/part.png' => Http::response(whitePng()),
+            'replicate.delivery/*' => Http::response(base64_decode(fakePng())),
+        ]);
+        App\Ai\Agents\StagingBoxer::fake([['boxes' => [['name' => 'Female engineer', 'left' => 0.4, 'top' => 0.4, 'right' => 0.5, 'bottom' => 0.5, 'facing' => 'toward the camera', 'before' => []]], 'fixed_parts' => ['the reception counter']]]);
+
+        $shot = plannedShot($this->project);
+        (new GenerateKeyframes($shot))->handle();
+        (new GeneratePlateOption($shot, 0))->handle(app(KeyframePainter::class));
+        GenerateKeyframes::finishPlates($shot->id);
+        $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
+        $engineer->addMediaFromString(base64_decode(fakePng()))->usingFileName('engineer.png')->toMediaCollection(Element::REFERENCE);
+        $shot->keyframes()->get()->each(fn(Keyframe $keyframe) => $keyframe->elements()->attach($engineer));
+
+        Queue::fake([GenerateRemainingKeyframes::class]);
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.plate.choose', [$this->project, $shot]), ['plate' => $shot->fresh()->getFirstMedia(Shot::PLATE_OPTIONS)->id])
+            ->assertSessionHasNoErrors();
+
+        (new GenerateRemainingKeyframes($shot->fresh(), elementsDrawn: true, onlyFirst: true))->handle(app(KeyframePainter::class));
+
+        $render = $shot->keyframes()->with('media')->where('position', 1)->first()->render();
+
+        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('The first attempt moved Female engineer away from their placeholder'));
+        expect($shot->keyframes()->where('position', 1)->first()->renders()->count())->toBe(1)
+            ->and(collect($shot->fresh()->plan_chat)->pluck('text')->all())->toContain('Keyframe 1 does not show Female engineer where the staging put them. Tell me how to fix it, or draw it again.');
     });
 
     it('draws only keyframe 1 on the chosen place when it shows people, and the others once it is confirmed', function () {

@@ -26,6 +26,7 @@ use App\Support\Images\PlaceComposite;
 use App\Support\Images\PlaceDepth;
 use App\Support\Images\PlaceObjects;
 use App\Support\Images\ReplicateClient;
+use App\Support\Images\StartFrameStaging;
 use App\Support\Images\TopLayerCutout;
 use App\Support\Shots\SequencePlaces;
 use finfo;
@@ -33,6 +34,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Imagick;
 use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Files\StoredImage;
@@ -49,6 +51,9 @@ class KeyframePainter
 {
     /** On the storyline: the director asked for another camera than the master of the place, so the shot draws its own place. */
     public const OWN_CAMERA = 'own_camera';
+
+    /** On a staged render of keyframe 1: where each cast member was staged, as boxes in shares of the image. */
+    public const STAGING = 'staging';
 
     /** How many pictures of the cast a master of a sequence place gets: its people, what moves and the place. */
     private const int MASTER_REFERENCES = 5;
@@ -221,13 +226,94 @@ class KeyframePainter
 
         $keyframe->forceFill(['prompt' => $prompt])->save();
 
-        $render = $this->paintOn($this->baseFor($keyframe, $siblings), $keyframe, $extra === '' ? $prompt : $prompt . "\n" . $extra, $references->images(), $choose, labels: $references->labels());
+        $base = $this->baseFor($keyframe, $siblings);
+        // Keyframe 1 on the chosen place is staged first with grey placeholders, so what stands in front of what comes from the place; drawn the usual way when it cannot be staged.
+        $render = $keyframe->position === 1 && $extra === '' ? $this->stagedFirst($keyframe, $plan, $references, $base, $choose) : null;
+        $render ??= $this->paintOn($base, $keyframe, $extra === '' ? $prompt : $prompt . "\n" . $extra, $references->images(), $choose, labels: $references->labels());
         $keyframe->load('media');
 
         // Options for keyframe 1 are judged by the director; every keyframe that is used straight away is checked once, after it is shown.
         // A copy the director has not described yet repeats another keyframe's plan, so there is nothing of its own to check it against.
         if ($choose && ! $shot->plannedKeyframeIsCopy($keyframe->position)) {
             CheckKeyframe::start($keyframe, $render);
+        }
+
+        return $render;
+    }
+
+    /**
+     * Keyframe 1 on the chosen place, staged: grey placeholders put into the place where a vision model put each cast
+     * member, checked against the depth of the place, then made the cast by the edit model. It is composited onto the
+     * place like any keyframe, so the place stays exact and only the people and things come from the drawing. Null
+     * when it cannot be staged, such as without a chosen place.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    private function stagedFirst(Keyframe $keyframe, array $plan, KeyframeReferences $references, ?Media $base, bool $choose): ?Media
+    {
+        $shot = $keyframe->shot;
+        $chosen = $this->chosenPlate($shot);
+
+        if (! Config::get('pipeline.keyframes.staging.enabled') || ! $references->firstIsPlate || $chosen === null || $base === null) {
+            return null;
+        }
+
+        $cast = array_values(array_filter($references->elementImages, fn(array $entry) => $entry['element']->type !== ElementType::PLACE));
+        $description = trim((string) ($plan['description'] ?? $keyframe->description));
+        $staged = app(StartFrameStaging::class)->stage(
+            $this->bytes($base),
+            $description,
+            trim((string) ($plan['spatial'] ?? '')),
+            array_map(fn(array $entry) => ['name' => $entry['element']->name, 'type' => $entry['element']->type->value], $cast),
+            app(PlaceDepth::class)->stored($chosen),
+        );
+
+        if ($staged === null) {
+            return null;
+        }
+
+        $stored = 'tmp/staging/' . Str::random(16) . '.png';
+        Storage::disk('local')->put($stored, $staged['image']);
+        $names = array_map(fn(array $entry) => $entry['element']->name, $cast);
+        $castTypes = array_map(fn(array $entry) => ['name' => $entry['element']->name, 'type' => $entry['element']->type->value], $cast);
+        $draw = fn(string $correction) => $this->paintOn(
+            $base,
+            $keyframe,
+            KeyframeImageBrief::fromStaging($description, $names) . $correction,
+            [ImageFile::fromStorage($stored, 'local'), ...array_column($cast, 'image')],
+            $choose,
+            (string) Config::get('pipeline.models.keyframe_edit'),
+            ['The place with grey placeholders, the image that is edited', ...array_map(fn(string $name) => "Picture of {$name}", $names)],
+        );
+
+        try {
+            $render = $draw('');
+            // Checked against the staging: who is drawn elsewhere or far larger than their placeholder is drawn once more.
+            $misplaced = app(StartFrameStaging::class)->misplaced($this->bytes($render), $staged['boxes'], $castTypes);
+
+            if ($misplaced !== []) {
+                $first = $render;
+                $render = $draw("\nThe first attempt moved " . implode(' and ', $misplaced) . ' away from their placeholder or made them much larger: draw each exactly where their grey placeholder stands and at its size.');
+                $misplaced = app(StartFrameStaging::class)->misplaced($this->bytes($render), $staged['boxes'], $castTypes);
+                $first->delete();
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+            Storage::disk('local')->delete($stored);
+
+            return null;
+        }
+
+        // The staging and its boxes are kept with the version, so it can be seen later what the edit model got.
+        $render->setCustomProperty(self::STAGING, $staged['boxes'])->save();
+        $keyframe->addMediaFromDisk($stored, 'local')
+            ->usingFileName("staging-{$keyframe->position}.png")
+            ->withCustomProperties(['render' => $render->id])
+            ->toMediaCollection(Keyframe::STAGINGS);
+        Storage::disk('local')->delete($stored);
+
+        if ($misplaced !== [] && $choose) {
+            $shot->say(__('Keyframe 1 does not show :who where the staging put them. Tell me how to fix it, or draw it again.', ['who' => implode(' and ', $misplaced)]), [__('Draw it again')]);
         }
 
         return $render;

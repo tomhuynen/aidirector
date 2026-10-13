@@ -33,12 +33,26 @@ class ReplicateClient
      */
     public function run(string $version, array $input, int $waitSeconds = self::WAIT_SECONDS): mixed
     {
-        $prediction = $this->request()
-            ->withHeaders(['Prefer' => 'wait=60'])
-            ->post('predictions', ['version' => $version, 'input' => $input])
-            ->throw()
-            ->json();
+        return $this->finish($this->request()->withHeaders(['Prefer' => 'wait=60'])->post('predictions', ['version' => $version, 'input' => $input])->throw()->json(), $waitSeconds);
+    }
 
+    /**
+     * Run one prediction of an official model by its name, such as "black-forest-labs/flux-fill-pro", which has no version to give.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    public function runModel(string $model, array $input, int $waitSeconds = self::WAIT_SECONDS): mixed
+    {
+        return $this->finish($this->request()->withHeaders(['Prefer' => 'wait=60'])->post("models/{$model}/predictions", ['input' => $input])->throw()->json(), $waitSeconds);
+    }
+
+    /**
+     * Polls a prediction until it is done and returns its output.
+     *
+     * @param  array<string, mixed>|null  $prediction
+     */
+    private function finish(?array $prediction, int $waitSeconds): mixed
+    {
         $deadline = time() + $waitSeconds;
 
         while (in_array($prediction['status'] ?? null, ['starting', 'processing'], true) && time() < $deadline) {

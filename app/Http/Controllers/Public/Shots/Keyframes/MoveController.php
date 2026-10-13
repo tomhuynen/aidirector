@@ -14,12 +14,14 @@ use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Images\DepthGrid;
+use App\Support\Images\FluxFill;
 use App\Support\Images\PlaceDepth;
 use App\Support\Images\ReplicateClient;
 use App\Support\Images\TopLayerCutout;
 use App\Support\Media\LocalMediaFiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -43,6 +45,7 @@ class MoveController
         private readonly KeyframePainter $painter,
         private readonly TopLayerCutout $cutout,
         private readonly PlaceDepth $depth,
+        private readonly FluxFill $fill,
     ) {}
 
     /**
@@ -113,6 +116,8 @@ class MoveController
         if ($box === null) {
             return $this->movePlaceObject($request, $project, $shot, $keyframe, $plate, $render, $files);
         }
+
+        $this->blendVacated($cutout, $output);
 
         $moved = $keyframe->addMedia($output)
             ->usingFileName("keyframe-{$keyframe->position}.png")
@@ -209,6 +214,8 @@ class MoveController
             throw ValidationException::withMessages(['x' => __('Nothing was added to the place there. Click the person or thing you want to move.')]);
         }
 
+        $this->blendVacated($cutout, $output);
+
         // The other named things stay where they are, now on top of the emptied place.
         $others = array_values(array_map(fn(mixed $mask) => base64_decode((string) $mask), array_diff_key((array) $emptied->getCustomProperty(KeyframePainter::EMPTIED_MASKS, []), [(string) $found['element']->id => true])));
         $stored = fn(string $key) => is_string($render->getCustomProperty($key)) ? [base64_decode($render->getCustomProperty($key))] : [];
@@ -239,6 +246,26 @@ class MoveController
      * The depth of the place as measured when it was chosen, never measured now: a click must not wait for it.
      * Its later states and the place without its named things have the camera of the chosen place.
      */
+    /**
+     * Where the moved one stood shows the place again, drawn apart from this keyframe, so its ground can be another
+     * shade and the old shadow can stay. FLUX Fill redraws just that area, fitted to what is around it; the moved
+     * one and the rest stay as they are. When the fill fails, the move stays as it is.
+     */
+    private function blendVacated(TopLayerCutout $cutout, string $output): void
+    {
+        $vacated = $cutout->vacated();
+
+        if ($vacated === null || ! Config::get('pipeline.keyframes.move.blend')) {
+            return;
+        }
+
+        try {
+            file_put_contents($output, $this->fill->fill((string) file_get_contents($output), $vacated, 'The ground and the place exactly as around this area, continuing its surface, markings, edges and light seamlessly. Empty ground.'));
+        } catch (Throwable $exception) {
+            report($exception);
+        }
+    }
+
     private function depthOf(Shot $shot, Media $place): ?DepthGrid
     {
         return $this->depth->stored($this->painter->chosenPlate($shot) ?? $place);

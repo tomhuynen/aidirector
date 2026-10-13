@@ -86,6 +86,9 @@ class TopLayerCutout
     /** After a move: which of the layers it picked up, if any. */
     private ?int $usedLayer = null;
 
+    /** After a move: where it stood and its shadow, a little wider, without where it is now; white there, as a png. */
+    private ?string $vacated = null;
+
     /** Finds what can be moved in a redrawn image; without it, what differs from the place counts there. @var (Closure(string): string)|null */
     private ?Closure $finder = null;
 
@@ -369,7 +372,8 @@ class TopLayerCutout
         // Where the person stood, the empty place shows again, a little wider than them, and their shadow with it.
         $hole = clone $place;
         $hole->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
-        $hole->compositeImage($this->holeMask($place, $image, $shape, $width, $height), Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+        $holeMask = $this->holeMask($place, $image, $shape, $width, $height);
+        $hole->compositeImage($holeMask, Imagick::COMPOSITE_COPYOPACITY, 0, 0);
         $image->compositeImage($hole, Imagick::COMPOSITE_OVER, 0, 0);
 
         $scaledWidth = max(1, (int) round($bw * $scale));
@@ -396,6 +400,7 @@ class TopLayerCutout
         $this->movedThings = $this->thingsMask === null ? null : $this->movedMask($this->thingsMask, $shape['thing'], $shape, $piece, [$left, $top, $scaledWidth, $scaledHeight], $width, $height);
         $this->movedLayer = ['image' => $whole->getImageBlob(), 'box' => ['x' => $left / $width, 'y' => $top / $height, 'width' => $scaledWidth / $width, 'height' => $scaledHeight / $height], 'thing' => $shape['thing']];
         $this->usedLayer = $shape['layer'] ?? null;
+        $this->vacated = $this->vacatedMask($holeMask, $cutout, $left, $top, $width, $height);
 
         return ['x' => $left / $width, 'y' => $top / $height, 'width' => $scaledWidth / $width, 'height' => $scaledHeight / $height];
     }
@@ -894,6 +899,36 @@ class TopLayerCutout
      *
      * @param  array{box: array{x: float, y: float, width: float, height: float}, small: array{width: int, height: int, shape: list<bool>}, thing?: bool}  $shape
      */
+    /**
+     * Where what was moved stood, with its shadow and a margin, but not where it stands now: the area a fill blends
+     * into what is around it, so no patch of the place in another shade or a left shadow shows.
+     */
+    private function vacatedMask(Imagick $hole, Imagick $placed, int $left, int $top, int $width, int $height): string
+    {
+        $vacated = clone $hole;
+        $vacated->setImageAlphaChannel(Imagick::ALPHACHANNEL_OFF);
+        $vacated->thresholdImage(0.2 * Imagick::getQuantum());
+        $vacated->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '6'));
+
+        $there = Masks::black($width, $height);
+        $alpha = clone $placed;
+        $alpha->separateImageChannel(Imagick::CHANNEL_ALPHA);
+        $there->compositeImage($alpha, Imagick::COMPOSITE_LIGHTEN, $left, $top);
+        $there->morphology(Imagick::MORPHOLOGY_DILATE, 1, ImagickKernel::fromBuiltIn(Imagick::KERNEL_DISK, '3'));
+        $there->negateImage(false);
+        $vacated->compositeImage($there, Imagick::COMPOSITE_MULTIPLY, 0, 0);
+
+        return Masks::png($vacated);
+    }
+
+    /**
+     * The area the last move left behind, white, as a png; null before a move.
+     */
+    public function vacated(): ?string
+    {
+        return $this->vacated;
+    }
+
     private function holeMask(Imagick $place, Imagick $image, array $shape, int $width, int $height): Imagick
     {
         $mask = $this->fillMask($shape, $width, $height);
