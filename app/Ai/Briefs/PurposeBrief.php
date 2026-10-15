@@ -12,7 +12,7 @@ use App\Enums\ProjectPurpose;
  *
  * Known gap: the staging, framing, check and video rules elsewhere are tuned
  * for e-learning (clear literal action, static camera, subdued backgrounds,
- * no text, silent clips, a takeaway per shot) and apply to every purpose.
+ * no text, silent clips, one idea per shot) and apply to every purpose.
  * Commercials need the opposite in many places: emotion over instruction,
  * camera movement and cuts, rich backgrounds, product and brand shots with
  * logos and on-screen text, and sound. Those rules should move behind the

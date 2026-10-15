@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Support\Decisions;
 
-use App\Ai\KeyframePainter;
-use App\Jobs\GenerateKeyframeImage;
-use App\Jobs\TweakKeyframeImage;
+use App\Enums\KeyframeStatus;
+use App\Jobs\FixKeyframe;
 use App\Models\Keyframe;
 use App\Models\Shot;
+use App\Support\Shots\KeyframeChain;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
@@ -28,7 +28,7 @@ class ShotIssues
     /** The group for issues that name no keyframe. */
     public const SHOT = 'shot';
 
-    public function __construct(private readonly KeyframePainter $painter) {}
+    public function __construct(private readonly KeyframeChain $chain) {}
 
     /**
      * @param  Collection<int, Keyframe>  $keyframes  the shot's keyframes, with their media
@@ -57,8 +57,8 @@ class ShotIssues
     }
 
     /**
-     * Redraw the keyframe, told everything the checks found wrong with it,
-     * and take its issues off the list.
+     * Fix the keyframe only where the checks found something wrong, and
+     * take its issues off the list.
      */
     public function fix(Shot $shot, string $group): void
     {
@@ -66,36 +66,45 @@ class ShotIssues
         $found = $this->find($shot, $keyframes, $group);
         $keyframe = $keyframes->firstWhere('position', $found['position']);
 
-        if (! $found['fixable'] || $keyframe === null || $keyframe->rendering) {
+        if (! $found['fixable'] || $keyframe === null || $keyframe->isBusy()) {
             throw ValidationException::withMessages(['issue' => __('These issues cannot be fixed automatically.')]);
         }
 
         $problems = collect($this->issues($shot, $keyframes))
             ->filter(fn(array $issue) => in_array($keyframe->position, $issue['keyframes'], true))
-            ->map(fn(array $issue) => '- ' . $issue['problem'])
-            ->join("\n");
+            ->map(fn(array $issue) => (string) $issue['problem'])
+            ->values()
+            ->all();
 
-        $keyframe->forceFill(['rendering' => true, 'render_error' => null])->save();
-
-        // A moved picture goes back onto its place as it is, keeping the people, poses and changes the director asked for.
-        // Without a place it is drawn again from its plan.
+        // A picture whose background moved is drawn again from the keyframe before it.
         if ($keyframe->render()?->getCustomProperty(Keyframe::BACKGROUND_MOVED) === true) {
-            $base = $this->painter->baseFor($keyframe, $keyframes->each->setRelation('shot', $shot));
-            $others = collect($this->issues($shot, $keyframes))
-                ->filter(fn(array $issue) => in_array($keyframe->position, $issue['keyframes'], true) && ! str_starts_with($issue['id'], 'moved-'))
-                ->map(fn(array $issue) => $issue['problem'])
-                ->join(' ');
-
-            $base !== null && $this->painter->isPlace($base)
-                ? TweakKeyframeImage::dispatch($keyframe, 'Nothing else: the people, their poses, where they look, their gestures and what they hold stay exactly as in the current version; only the background is the place\'s own again.' . ($others !== '' ? " Also solve this: {$others}" : ''), fromCheck: true)
-                : GenerateKeyframeImage::dispatch($keyframe);
+            $this->chain->redrawFrom($keyframe);
             $this->resolve($shot, $keyframes, $found);
 
             return;
         }
 
-        TweakKeyframeImage::dispatch($keyframe, "This is keyframe {$keyframe->position}. A check found these problems with it:\n{$problems}\nChange only what this keyframe needs to solve them.", fromCheck: true, rewrite: true);
+        $keyframe->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => $keyframe->draw_version + 1, 'render_error' => null])->save();
+        FixKeyframe::dispatch($keyframe, $keyframe->draw_version, $problems);
 
+        $this->resolve($shot, $keyframes, $found);
+    }
+
+    /**
+     * Draw the keyframe again from its description, as it was drawn the
+     * first time, and take its issues off the list.
+     */
+    public function redraw(Shot $shot, string $group): void
+    {
+        $keyframes = $shot->keyframes()->with('media')->get();
+        $found = $this->find($shot, $keyframes, $group);
+        $keyframe = $keyframes->firstWhere('position', $found['position']);
+
+        if ($keyframe === null || $keyframe->isBusy()) {
+            throw ValidationException::withMessages(['issue' => __('This keyframe cannot be drawn again right now.')]);
+        }
+
+        $this->chain->redrawFrom($keyframe);
         $this->resolve($shot, $keyframes, $found);
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
+use App\Enums\KeyframeStatus;
 use App\Http\Controllers\Public\Shots\Concerns\GuardsBusyShots;
 use App\Http\Requests\Public\KeyframeTweakRequest;
 use App\Jobs\TweakKeyframeImage;
@@ -32,7 +33,7 @@ class TweakController
             ]);
         }
 
-        $keyframe->forceFill(['rendering' => true, 'render_error' => null])->save();
+        $keyframe->forceFill(['status' => KeyframeStatus::DRAWING, 'render_error' => null])->save();
 
         TweakKeyframeImage::dispatch($keyframe, $request->validated('instruction'), rewrite: $request->boolean('rewrite'));
 

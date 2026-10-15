@@ -36,7 +36,7 @@ class VoiceOverWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             - At most {$this->maxWords} words, so it fits the clip at a calm pace. Fewer is better than rushed.
             - Speak to the learner in plain, everyday words, in the present tense.
-            - Land the takeaway; do not describe every movement the viewer already sees.
+            - Say what matters in the storyline; do not describe every movement the viewer already sees.
             - One or two short sentences. No lists, no quotes, no stage directions.
             - Write in English.
             INSTRUCTIONS;
@@ -55,7 +55,7 @@ class VoiceOverWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     public function promptFor(?string $tooLong = null): string
     {
         $storyline = $this->shot->chosenStoryline()['storyline'] ?? '';
-        $prompt = "Takeaway: {$this->shot->takeaway}\nStoryline: {$storyline}";
+        $prompt = "Storyline: {$storyline}";
 
         return $tooLong === null
             ? $prompt

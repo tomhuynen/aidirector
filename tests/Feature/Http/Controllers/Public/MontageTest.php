@@ -18,6 +18,7 @@ use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Shots\KeyframeChain;
 use App\Support\Video\ClipJoiner;
 use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Http\Client\Request;
@@ -66,7 +67,7 @@ function montageShot(Project $project, array $attributes = []): Shot
 {
     return Shot::factory()->for($project)->montage()->create([
         'status' => ShotStatus::KEYFRAMES_PENDING,
-        'chosen_storyline' => ['title' => 'A Vessel For Life', 'storyline' => 'Designed, built and repaired.'],
+        'chosen_storyline' => ['storyline' => 'Designed, built and repaired.'],
         'storyline' => ['framing' => ['size' => 'full', 'spot' => '', 'light' => 'as the visual style', 'seconds' => 7], 'keyframes' => montagePlan()],
         ...$attributes,
     ]);
@@ -84,7 +85,7 @@ describe('planning', function () {
         // The scene it was is dropped: a fresh plan lets the planner choose.
         expect($shot->fresh()->kind)->toBe(ShotKind::MONTAGE)
             ->and((string) (new StorylineWriter(Shot::factory()->for($this->project)->make(['kind' => null])))->instructions())
-            ->toContain('The kind of shot, choose one by the takeaway')
+            ->toContain('The kind of shot, choose one by the idea')
             ->toContain('For a scene:')
             ->toContain('For a montage:');
 
@@ -102,7 +103,7 @@ describe('planning', function () {
         Illuminate\Support\Facades\Queue::fake();
         App\Ai\Agents\PlanDirector::fake([[
             'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
-            'proposal' => ['takeaway' => '', 'kind' => 'montage', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => montagePlan()],
+            'proposal' => ['title' => '', 'kind' => 'montage', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => montagePlan()],
         ]]);
         $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'kind' => ShotKind::SCENE, 'storyline' => ['keyframes' => montagePlan()]]);
 
@@ -115,8 +116,7 @@ describe('planning', function () {
 });
 
 describe('drawing', function () {
-    it('draws every still on its own, without a place to choose or a keyframe 1 to confirm', function () {
-        Config::set('pipeline.keyframes.start_with_plate', true);
+    it('draws every still on its own, without a keyframe 1 to choose or confirm', function () {
         Config::set('pipeline.keyframe_check', true);
         Image::fake(fn() => base64_encode(stillPng()));
         KeyframeChecker::fake(fn() => ['inventory' => [], 'issues' => []]);
@@ -127,16 +127,15 @@ describe('drawing', function () {
         (new GenerateKeyframes($shot))->handle();
 
         expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
-            ->and($shot->fresh()->getMedia(Shot::PLATE_OPTIONS))->toBeEmpty()
-            ->and($shot->keyframes()->where('rendering', true)->count())->toBe(3);
+            ->and($shot->keyframes()->busy()->count())->toBe(3);
         Queue::assertPushed(GenerateRemainingKeyframes::class);
 
-        (new GenerateRemainingKeyframes($shot->fresh()))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot->fresh()))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         $keyframes = $shot->keyframes()->with('media')->get();
 
         expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
-            ->and($keyframes->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->rendering))->toBeTrue();
+            ->and($keyframes->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->isBusy()))->toBeTrue();
         // Each still is drawn from scratch, never as an edit of another still.
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('welders join a hull section') && $prompt->contains('Visual style:'));
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Edit the first attached image'));

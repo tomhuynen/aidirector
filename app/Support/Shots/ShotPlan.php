@@ -10,7 +10,7 @@ use App\Models\Shot;
 use Illuminate\Support\Str;
 
 /**
- * Puts the plan agreed in the plan chat into the shot: the takeaway, the kind,
+ * Puts the plan agreed in the plan chat into the shot: the title, the kind,
  * the storyline, the keyframes with the cast and sets they show, the length
  * and where the setting comes from. A plan that changes what happens, or how
  * long it takes, has its voice-over written again.
@@ -31,16 +31,14 @@ class ShotPlan
 
         $keyframes = collect($proposal['keyframes'])->filter(fn(mixed $keyframe) => is_array($keyframe))->values()->map(fn(array $keyframe) => array_filter([
             'title' => trim((string) ($keyframe['title'] ?? '')),
-            'description' => trim((string) ($keyframe['description'] ?? '')),
+            ...KeyframeStaging::fromArray($keyframe)->fields(),
             'spatial' => trim((string) ($keyframe['spatial'] ?? '')),
-            'place_change' => trim((string) ($keyframe['place_change'] ?? '')),
-            'place_part' => trim((string) ($keyframe['place_part'] ?? '')),
         ]) + [
             'elements' => collect((array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
         ])->all();
 
         $storyline = trim((string) ($proposal['storyline'] ?? ''));
-        $takeaway = trim((string) ($proposal['takeaway'] ?? ''));
+        $title = trim((string) ($proposal['title'] ?? ''));
         $seconds = Shot::clampSeconds((int) ($proposal['seconds'] ?? $shot->durationInSeconds()));
         $source = self::settingSource($shot, $proposal['setting_from'] ?? null);
         $keyframe = max(0, (int) ($proposal['setting_from']['keyframe'] ?? 0));
@@ -50,11 +48,11 @@ class ShotPlan
             || $seconds !== $shot->durationInSeconds();
 
         $shot->forceFill([
-            ...($takeaway !== '' ? ['takeaway' => $takeaway, 'title' => Str::limit($takeaway, 80)] : []),
+            ...($title !== '' ? ['title' => Str::limit($title, 80)] : []),
             'kind' => ShotKind::tryFrom((string) ($proposal['kind'] ?? '')) ?? $shot->kind,
             // A length timed in the chat replaces one set in the brief.
             'duration' => null,
-            'chosen_storyline' => ['title' => (string) ($takeaway !== '' ? Str::limit($takeaway, 80) : $shot->title), 'storyline' => $storyline],
+            'chosen_storyline' => ['storyline' => $storyline],
             'storyline' => [
                 ...array_diff_key($shot->storyline ?? [], ['setting_from' => true, 'keyframes' => true, 'framing' => true]),
                 'framing' => ['spot' => (string) ($shot->storyline['framing']['spot'] ?? ''), 'seconds' => $seconds],
@@ -65,7 +63,7 @@ class ShotPlan
         ])->save();
 
         if ($shot->voice_over === null) {
-            GenerateVoiceOver::dispatch($shot);
+            GenerateVoiceOver::automatically($shot);
         }
 
         return [

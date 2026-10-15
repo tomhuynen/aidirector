@@ -82,6 +82,11 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
     /**
      * A scene keeps one place; a still of a montage has its own.
      */
+    private function storyline(): string
+    {
+        return trim((string) ($this->keyframe->shot->chosenStoryline()['storyline'] ?? '')) ?: '(none)';
+    }
+
     private function setting(): string
     {
         return match (true) {
@@ -99,7 +104,7 @@ class KeyframeChecker implements Agent, HasReasoningEffort, HasStructuredOutput
 
             {$this->imageList()}
 
-            The shot teaches: {$this->keyframe->shot->takeaway}
+            The storyline of the shot: {$this->storyline()}
 
             Work in three steps, using each reference only for what it is the reference for.
             1. Inventory of the references. List what must stay the same: each person (face, hair, headwear and any lettering on it, glasses, clothing and colours), each object and its state (what it holds, what is in it, where it hangs or stands), and the fixed parts of the place with where they are: floor markings and painted lines (their position and angle), doors, signs, windows, machines, vehicles and any lettering on them.

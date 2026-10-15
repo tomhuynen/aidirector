@@ -11,7 +11,6 @@ use App\Models\Project;
 use App\Models\ProjectRule;
 use App\Models\Shot;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\URL;
 
 /**
  * Everything in a project that waits for the director, oldest first: a
@@ -68,18 +67,18 @@ class DecisionQueue
     {
         $shot->setRelation('project', $project);
         $keyframes = $shot->keyframes->each->setRelation('shot', $shot);
-        $failed = $keyframes->first(fn(Keyframe $keyframe) => filled($keyframe->render_error) && ! $keyframe->rendering);
+        $failed = $keyframes->first(fn(Keyframe $keyframe) => filled($keyframe->render_error) && ! $keyframe->isBusy());
 
         $type = match (true) {
             $shot->status === ShotStatus::DRAFT && filled($shot->storyline_error) => self::ATTENTION,
             $failed !== null => self::ATTENTION,
             $shot->status === ShotStatus::STORYLINE_READY && $keyframes->isEmpty() && $shot->storylineKeyframes() !== [] => self::PLAN,
-            $shot->status === ShotStatus::FIRST_KEYFRAME_READY && ! (bool) $keyframes->first()?->rendering => self::FIRST_KEYFRAME,
+            $shot->status === ShotStatus::FIRST_KEYFRAME_READY && ! ($keyframes->first()?->isBusy() ?? false) => self::FIRST_KEYFRAME,
             // Asked only once the keyframes are drawn and reviewed together, so the issues are known.
             $shot->status === ShotStatus::KEYFRAMES_READY
                 && $shot->video() === null
                 && $keyframes->isNotEmpty()
-                && ! $keyframes->contains('rendering', true)
+                && ! $keyframes->contains(fn(Keyframe $keyframe) => $keyframe->isBusy())
                 && ! $shot->reviewing => self::RENDER,
             default => null,
         };
@@ -96,7 +95,6 @@ class DecisionQueue
                 'id' => $shot->sqid,
                 'code' => sprintf('SH%03d', $shot->position * 10),
                 'title' => $shot->title,
-                'takeaway' => $shot->takeaway,
                 'storyline' => $shot->chosenStoryline()['storyline'] ?? null,
                 'voiceOver' => $shot->voice_over,
                 'url' => route('public.shots.view', [$project, $shot]),
@@ -109,16 +107,9 @@ class DecisionQueue
                 'plan' => array_map(fn(array $keyframe) => ['title' => $keyframe['title'], 'description' => $keyframe['description']], $shot->storylineKeyframes()),
                 'drawUrl' => route('public.shots.keyframes.generate', [$project, $shot]),
             ],
-            self::FIRST_KEYFRAME => $shot->getMedia(Shot::PLATE_OPTIONS)->isNotEmpty() && ! $shot->hasChosenPlate() ? [
-                ...$decision,
-                'options' => $shot->getMedia(Shot::PLATE_OPTIONS)->map(fn($media) => ['id' => (int) $media->id, 'imageUrl' => URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $media])])->values()->all(),
-                'field' => 'plate',
-                'chooseUrl' => route('public.shots.plate.choose', [$project, $shot]),
-                'moreUrl' => route('public.shots.keyframes.first.more', [$project, $shot]),
-            ] : [
+            self::FIRST_KEYFRAME => [
                 ...$decision,
                 'options' => $this->firstOptions($project, $shot, $keyframes->first()),
-                'field' => 'render',
                 'chooseUrl' => route('public.shots.keyframes.first.choose', [$project, $shot]),
                 'moreUrl' => route('public.shots.keyframes.first.more', [$project, $shot]),
             ],

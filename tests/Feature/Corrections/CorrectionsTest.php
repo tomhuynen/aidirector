@@ -9,6 +9,7 @@ use App\Ai\KeyframeReferences;
 use App\Enums\CorrectionKind;
 use App\Enums\CorrectionSource;
 use App\Enums\Disk;
+use App\Enums\KeyframeStatus;
 use App\Enums\ProjectRuleStatus;
 use App\Enums\ShotStatus;
 use App\Models\Correction;
@@ -57,8 +58,8 @@ describe('recording', function () {
         Keyframe::factory()->for($shot)->create(['position' => 3]);
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $first]), ['description' => 'She walks up close to the crane.']);
-        $shot->keyframes()->update(['rendering' => false]);
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $first]), ['summary' => 'She walks up close to the crane.', 'cast' => []]);
+        $shot->keyframes()->update(['status' => KeyframeStatus::READY]);
         actingAs($this->director, 'director')
             ->delete(route('public.shots.keyframes.destroy', [$this->project, $shot, $second]))
             ->assertSessionHasNoErrors();

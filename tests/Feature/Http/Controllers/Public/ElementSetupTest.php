@@ -336,7 +336,7 @@ describe('prepared rounds', function () {
 });
 
 describe('generating shots', function () {
-    it('creates the shots the director asked for with their takeaway and context, and plans them without drawing', function () {
+    it('creates the shots the director asked for with their title and idea, and plans them without drawing', function () {
         Queue::fake([GenerateStoryline::class, GenerateProjectCover::class]);
         $conversationId = projectInElementStage($this->director, $this->project);
         foreach (ElementType::cases() as $type) {
@@ -345,9 +345,9 @@ describe('generating shots', function () {
         ProjectIntake::fake([[
             'reply' => 'Creating your shots now.', 'ask' => null, 'done' => true, 'skip' => null, 'element_round' => null,
             'shots' => [
-                ['takeaway' => 'Never walk under a suspended load.', 'context' => 'On the quay a crane lifts a container.', 'kind' => 'scene'],
-                ['takeaway' => 'Security keeps found items at reception.', 'context' => 'A visitor gets a lost phone back at the desk.', 'kind' => 'close-up'],
-                ['takeaway' => '', 'context' => 'Empty ones are skipped.'],
+                ['title' => 'Under the load', 'idea' => 'On the quay a worker stays clear of a container a crane lifts.', 'kind' => 'scene'],
+                ['title' => 'Lost phone', 'idea' => 'A visitor gets a lost phone back at the reception desk.', 'kind' => 'close-up'],
+                ['title' => 'Nothing', 'idea' => ''],
             ],
         ]]);
 
@@ -359,8 +359,8 @@ describe('generating shots', function () {
 
         expect($shots)->toHaveCount(2)
             ->and($shots->first())
-            ->takeaway->toBe('Never walk under a suspended load.')
-            ->notes->toBe('On the quay a crane lifts a container.')
+            ->title->toBe('Under the load')
+            ->idea->toBe('On the quay a worker stays clear of a container a crane lifts.')
             ->status->toBe(App\Enums\ShotStatus::STORYLINE_PENDING)
             ->and($shots->pluck('position')->all())->toBe([1, 2])
             ->and($shots->pluck('kind')->map->value->all())->toBe(['scene', 'close-up']);
@@ -391,7 +391,7 @@ describe('generating shots', function () {
             ->toContain('Last step, the shots.')
             ->toContain('Ask in one short question whether you should generate the shots for them')
             ->toContain('as many as the material needs to cover every point once')
-            ->toContain('One message per shot')
+            ->toContain('One action per shot')
             ->toContain('close-up: when the point is what hands do with one small object');
     });
 
@@ -403,7 +403,7 @@ describe('generating shots', function () {
         }
         ProjectIntake::fake([[
             'reply' => 'Creating them.', 'ask' => null, 'done' => true, 'skip' => null, 'element_round' => null,
-            'shots' => array_map(fn(int $n) => ['takeaway' => "Point {$n}.", 'context' => 'Context.'], range(1, 34)),
+            'shots' => array_map(fn(int $n) => ['title' => "Shot {$n}", 'idea' => "Idea {$n}."], range(1, 34)),
         ]]);
 
         actingAs($this->director, 'director')

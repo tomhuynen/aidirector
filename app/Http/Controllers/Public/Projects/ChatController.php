@@ -146,8 +146,8 @@ class ChatController
 
     /**
      * The shots the director asked the intake to generate: each gets its
-     * takeaway and context as its brief, and its storylines are suggested
-     * straight away, as if the director had filled in the brief.
+     * title and idea, and is planned straight away, as if the director had
+     * typed the idea.
      *
      * @param  array<mixed>  $shots
      */
@@ -156,18 +156,17 @@ class ChatController
         $position = (int) ($project->allShots()->max('position') ?? 0);
 
         foreach (array_slice($shots, 0, self::MAX_GENERATED_SHOTS) as $brief) {
-            $takeaway = trim((string) (is_array($brief) ? ($brief['takeaway'] ?? '') : ''));
+            $idea = trim((string) (is_array($brief) ? ($brief['idea'] ?? '') : ''));
 
-            if ($takeaway === '') {
+            if ($idea === '') {
                 continue;
             }
 
             $shot = $project->allShots()->create([
                 'position' => ++$position,
-                'title' => Str::limit($takeaway, 80),
-                'takeaway' => $takeaway,
+                'title' => Str::limit(trim((string) ($brief['title'] ?? '')), 80),
+                'idea' => $idea,
                 'kind' => ShotKind::tryFrom((string) ($brief['kind'] ?? '')) ?? ShotKind::SCENE,
-                'notes' => trim((string) ($brief['context'] ?? '')) ?: null,
                 'status' => ShotStatus::STORYLINE_PENDING,
             ]);
 

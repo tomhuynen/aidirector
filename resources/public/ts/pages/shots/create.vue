@@ -31,7 +31,7 @@ defineOptions({
 
 const props = defineProps<Inertia.Pages.Shots.Create>()
 
-/** The shot is made straight away; its takeaway and plan are worked out in the plan chat. */
+/** The shot is made straight away; its idea and plan are worked out in the plan chat. */
 onMounted(() => router.post(store.url({ project: props.project.id }), {}, { replace: true }))
 
 const shotList = computed(() =>

@@ -118,6 +118,7 @@ describe('generate', function () {
 
 describe('job', function () {
     it('starts the voice-over tracks of every language while the video renders', function () {
+        Illuminate\Support\Facades\Config::set('pipeline.voice_over.automatic', true);
         Queue::fake([App\Jobs\GenerateVoiceOverAudio::class, PollVideos::class]);
         VideoPromptWriter::fake([videoPromptParts()]);
         Http::fake(['openrouter.ai/api/v1/videos' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
@@ -157,11 +158,16 @@ describe('job', function () {
             ->toContain('Action sequence: The man lights the cigarette (keyframe 1)')
             ->toContain('The no-smoking sign stays on the yellow barrier.')
             ->toContain('Do not introduce new story events or visual elements.')
-            ->toContain('Primary objective: faithfully animate the supplied storyboard');
+            ->toContain('Primary objective: faithfully animate the supplied storyboard')
+            ->toContain('Let the people act, as animated characters do: facial expressions that fit the moment')
+            ->not->toContain('facial reactions, camera shots');
 
         VideoPromptWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "1. Moment 1: The man in moment 1.\n2. Moment 2")
             && count($prompt->attachments) === 4
+            && str_contains($prompt->prompt, 'Where a description and its image differ, the image is right')
+            && ! str_contains($prompt->prompt, 'Storyline')
             && str_contains((string) $prompt->agent->instructions(), 'describe every person exactly as drawn in the keyframes')
+            && str_contains((string) $prompt->agent->instructions(), 'how the people feel and react in each moment')
             && str_contains((string) $prompt->agent->instructions(), 'presses the handle down once, the door is locked and does not move, he lets go'));
 
         Http::assertSent(fn(Request $request) => $request->url() === 'https://openrouter.ai/api/v1/videos'
@@ -306,21 +312,32 @@ describe('poll', function () {
 });
 
 describe('page', function () {
-    it('links the video and the render settings', function () {
+    it('links the video', function () {
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_READY, 'video_prompt' => 'The prompt']);
         $shot->addMediaFromString(fakeMp4())->usingFileName('shot.mp4')->toMediaCollection(Shot::VIDEO);
 
         $response = actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $shot]))
             ->assertInertia(fn($page) => $page
-                ->where('shot.videoResolution', config('pipeline.video.resolution'))
-                ->where('shot.videoResolutions', config('pipeline.video.resolutions'))
                 ->where('shot.videoUrl', fn(string $url) => str_contains($url, 'signature='))
                 ->where('shot.links.videoGenerate', route('public.shots.video.generate', [$this->project, $shot])));
 
         actingAs($this->director, 'director')
             ->get($response->viewData('page')['props']['shot']['videoUrl'])
             ->assertSuccessful();
+    });
+
+    it('shows how long a video usually takes, from the latest videos, and when this one started', function () {
+        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'video_submitted_at' => now()->subMinute()]);
+        foreach ([100_000, 200_000, 300_000] as $waited) {
+            $shot->generations()->create(['director_id' => $this->director->id, 'kind' => 'video', 'provider' => 'openrouter', 'model' => 'm', 'prompt' => 'p', 'duration_ms' => $waited]);
+        }
+
+        actingAs($this->director, 'director')
+            ->get(route('public.shots.view', [$this->project, $shot]))
+            ->assertInertia(fn($page) => $page
+                ->where('shot.renderSeconds.video', 200)
+                ->where('shot.videoSubmittedAt', $shot->fresh()->video_submitted_at->toIso8601String()));
     });
 
     it('offers the video as a download under the shot code and title', function () {

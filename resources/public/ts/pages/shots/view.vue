@@ -13,6 +13,7 @@
       :create-url="project.links?.shotsCreate ?? '#'"
       :reorder-url="project.links?.shotsReorder"
       :merge-url="project.links?.shotsMerge"
+      :destroy-url="project.links?.shotsDestroy"
       :transitions="shotTransitions"
     />
 
@@ -33,7 +34,6 @@
         <MergedShot
           v-if="merge"
           :title="shot.title"
-          :takeaway="shot.takeaway"
           :merge="merge"
           :video-url="shot.videoUrl"
           :download-url="shot.videoDownloadUrl"
@@ -43,7 +43,6 @@
           :voice-over-tracks="shot.voiceOverTracks"
         />
         <template v-else>
-          <ShotDetails v-if="!planEditable && !planning" :shot="shot" :storyline="shot.chosenStoryline" />
           <!-- Planned in conversation; an agreed plan is drawn straight away. -->
           <div v-if="planEditable" class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-5 py-4">
             <PlanChat
@@ -55,6 +54,7 @@
               :new-elements="shot.newElements"
               :elements-url="shot.links?.planElements"
               :waiting-for="shot.waitingFor"
+              :voice-over-url="shot.links?.planVoiceOver"
             />
           </div>
           <PlanSkeleton v-else-if="planning" />
@@ -67,6 +67,8 @@
               elements,
               newElements: shot.newElements,
               elementsUrl: shot.links?.planElements,
+              changeUrl: shot.links?.planChange,
+              voiceOverUrl: shot.links?.planVoiceOver,
             }"
             :keyframes="panelKeyframes"
             :aspect-ratio="aspectRatio"
@@ -77,23 +79,22 @@
             :fix-all-url="shot.fixableIssues ? shot.links?.issuesFixAll : null"
             :dismiss-all-url="shot.links?.issuesDismissAll"
             :error="shot.storylineError"
-            :images-url="shot.links?.keyframesGenerate ?? '#'"
+            :retry-url="shot.links?.retry ?? '#'"
             :choosing="{
               // A montage draws every still straight away: no place or keyframe 1 to choose first.
               active:
                 (shot.kind === 'scene' || shot.kind === 'close-up') &&
                 (shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready'),
               pending: shot.status === 'first-keyframe-pending',
-              optionCount: usesPlates ? shot.plateOptionCount : shot.firstKeyframeOptions,
-              plates: usesPlates ? shot.plateOptions : null,
-              chooseUrl: (usesPlates ? shot.links?.plateChoose : shot.links?.firstKeyframeChoose) ?? '#',
+              optionCount: shot.firstKeyframeOptions,
+              chooseUrl: shot.links?.firstKeyframeChoose ?? '#',
               moreUrl: shot.links?.firstKeyframeMore ?? '#',
-              adjustUrl: usesPlates ? shot.links?.plateAdjust : shot.links?.firstKeyframeAdjust,
-              adjusting: shot.status === 'first-keyframe-ready' && Boolean(keyframes[0]?.rendering),
-              resetUrl: shot.plateChosen ? shot.links?.plateReset : null,
+              adjustUrl: shot.links?.firstKeyframeAdjust,
+              adjusting: shot.status === 'first-keyframe-ready' && isBusy(keyframes[0]?.status),
             }"
-            :montage="shot.kind === 'montage'"
             :presenter="shot.kind === 'presenter'"
+            :render-seconds="shot.renderSeconds"
+            :voice-over="shot.voiceOver"
             :reorder-url="shot.links?.keyframesReorder ?? '#'"
             :new-keyframe="{
               storeUrl: shot.links?.keyframesStore ?? '#',
@@ -103,9 +104,8 @@
               url: shot.videoUrl,
               downloadUrl: shot.videoDownloadUrl,
               error: shot.videoError,
-              resolution: shot.videoResolution,
-              resolutions: shot.videoResolutions,
               pending: shot.status === 'video-pending',
+              submittedAt: shot.videoSubmittedAt,
               generateUrl: shot.links?.videoGenerate ?? '#',
               languages: shot.languageVideos,
             }"
@@ -121,11 +121,11 @@ import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
 import KeyframesPanel, { type PanelKeyframe } from '@public:components/editor/KeyframesPanel.vue'
+import { isBusy } from '@public:components/editor/keyframeStatus'
 import MergedShot from '@public:components/editor/MergedShot.vue'
 import PlanChat from '@public:components/editor/PlanChat.vue'
 import PlanSkeleton from '@public:components/editor/PlanSkeleton.vue'
 import { shotCode } from '@public:components/editor/shotCode'
-import ShotDetails from '@public:components/editor/ShotDetails.vue'
 import ShotList from '@public:components/editor/ShotList.vue'
 import TopBar from '@public:components/editor/TopBar.vue'
 import { index as projectsIndex } from '@routes/public/projects'
@@ -145,14 +145,6 @@ const duration = computed(() => props.shot.seconds)
 /** The draft plan of a shot from the project setup is being written. */
 const planning = computed(() => props.shot.status === 'storyline-pending')
 
-/** The shot starts from empty places to choose from, instead of options for keyframe 1. */
-const usesPlates = computed(
-  () =>
-    props.shot.kind === 'scene' &&
-    !props.shot.plateChosen &&
-    (props.shot.plateOptions.length > 0 || (props.shot.startsWithPlate && !(props.keyframes[0]?.renders.length ?? 0))),
-)
-
 /** Nothing drawn yet: the plan is worked out in the plan chat. */
 const planEditable = computed(
   () => (props.shot.status === 'storyline-ready' || props.shot.status === 'draft') && props.keyframes.length === 0,
@@ -163,13 +155,16 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
     ? props.keyframes.map((keyframe) => ({
         id: keyframe.id,
         title: keyframe.title,
+        staging: keyframe.staging,
         description: keyframe.description,
         spatial: keyframe.spatial ?? '',
         needsDescription: keyframe.needsDescription,
         imageUrl: keyframe.imageUrl,
         thumbnailUrl: keyframe.thumbnailUrl,
-        rendering: keyframe.rendering,
-        renderStage: keyframe.renderStage,
+        status: keyframe.status,
+        layout: keyframe.layout,
+        layoutUrl: keyframe.links.layout,
+        moveUrl: keyframe.links.move,
         renderError: keyframe.renderError,
         renders: keyframe.renders,
         elements: keyframe.elements,
@@ -178,16 +173,15 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         chooseRenderUrl: keyframe.links.chooseRender,
         destroyUrl: keyframe.links.destroy,
         copyUrl: keyframe.links.copy,
-        moveSelectUrl: keyframe.links.moveSelect,
-        moveUrl: keyframe.links.move,
       }))
     : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
         id: String(i),
         title: keyframe.title,
+        staging: { summary: keyframe.staging?.summary ?? '', place: '', cast: [] },
         description: keyframe.description,
         imageUrl: null,
         thumbnailUrl: null,
-        rendering: props.shot.status === 'keyframes-pending',
+        status: props.shot.status === 'keyframes-pending' ? 'waiting' : 'planned',
         renderError: null,
         renders: [],
         elements: [],
@@ -207,7 +201,7 @@ const busy = computed(
     props.shot.status === 'keyframes-pending' ||
     props.shot.status === 'video-pending' ||
     props.shot.reviewing ||
-    props.keyframes.some((keyframe) => keyframe.rendering || keyframe.renderStage === 'checking') ||
+    props.keyframes.some((keyframe) => isBusy(keyframe.status)) ||
     props.shot.voiceOverTracks.some((track) => track.status === 'pending'),
 )
 

@@ -24,9 +24,7 @@
               <component :is="headingIcon" class="size-5 text-signal" />
               {{ heading }}
             </p>
-            <h2 v-if="current.shot" class="text-3xl font-semibold">
-              {{ current.shot.code }} {{ current.shot.title ?? current.shot.takeaway }}
-            </h2>
+            <h2 v-if="current.shot" class="text-3xl font-semibold">{{ current.shot.code }} {{ current.shot.title }}</h2>
           </header>
 
           <div v-if="current.shot?.voiceOver" class="flex items-start gap-3 rounded-lg border border-border p-4">
@@ -36,14 +34,6 @@
               <span class="block text-[15px] leading-relaxed text-muted-foreground italic"
                 >“{{ current.shot.voiceOver }}”</span
               >
-            </p>
-          </div>
-
-          <div v-if="current.shot?.takeaway" class="flex items-start gap-3 rounded-lg border border-border p-4">
-            <Lightbulb class="mt-0.5 size-6 shrink-0 text-amber-400" />
-            <p class="space-y-1">
-              <span class="block font-semibold">{{ $t('Takeaway') }}</span>
-              <span class="block text-[15px] leading-relaxed text-muted-foreground">{{ current.shot.takeaway }}</span>
             </p>
           </div>
 
@@ -175,7 +165,7 @@
             type="button"
             :disabled="busy"
             class="flex h-full min-w-0 flex-1 flex-col items-center gap-3 transition-opacity hover:opacity-80"
-            @click="send(current.chooseUrl, { [current.field ?? 'render']: option.id })"
+            @click="send(current.chooseUrl, { render: option.id })"
           >
             <span :class="badge">{{ i + 1 }}</span>
             <img :src="option.imageUrl" alt="" class="min-h-0 w-full flex-1 rounded-lg object-contain object-top" />
@@ -276,7 +266,6 @@ import {
   Clapperboard,
   ExternalLink,
   Image as ImageIcon,
-  Lightbulb,
   Mic,
   RefreshCw,
   Scale,
@@ -293,7 +282,6 @@ type DecisionShot = {
   id: string
   code: string
   title: string | null
-  takeaway: string
   storyline: string | null
   voiceOver: string | null
   url: string
@@ -304,7 +292,6 @@ type Decision = { id: string; waitingSince: string | null; shot?: DecisionShot }
   | {
       type: 'first-keyframe'
       options: { id: number; imageUrl: string }[]
-      field?: 'render' | 'plate'
       chooseUrl: string
       moreUrl: string
     }
@@ -449,7 +436,7 @@ const onKey = (event: KeyboardEvent) => {
   if (event.key.toLowerCase() === 's') {
     skip()
   } else if (decision.type === 'first-keyframe' && decision.options[index]) {
-    send(decision.chooseUrl, { [decision.field ?? 'render']: decision.options[index].id })
+    send(decision.chooseUrl, { render: decision.options[index].id })
   } else if (decision.type === 'plan' && event.key === 'Enter') {
     send(decision.drawUrl, {})
   } else if (decision.type === 'render' && event.key === 'Enter') {

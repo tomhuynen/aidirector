@@ -33,7 +33,7 @@ it('keeps the spatial fact apart in the plan and on the drawn keyframe', functio
     Bus::fake();
     App\Ai\Agents\PlanDirector::fake([[
         'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
-        'proposal' => ['takeaway' => '', 'kind' => 'scene', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => [['title' => 'Waits', 'description' => 'She holds an unlit cigarette.', 'spatial' => 'Both feet are outside the shelter boundary.', 'elements' => []]]],
+        'proposal' => ['title' => '', 'kind' => 'scene', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => [['title' => 'Waits', 'summary' => 'She holds an unlit cigarette.', 'place' => '', 'cast' => [], 'spatial' => 'Both feet are outside the shelter boundary.', 'elements' => []]]],
     ]]);
     $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['framing' => ['spot' => 'At the shelter.', 'seconds' => 5], 'keyframes' => []]]);
 
@@ -58,7 +58,7 @@ it('changes the spatial fact from the keyframe panel and renders it again', func
     $keyframe = Keyframe::factory()->for($shot)->create(['position' => 1, 'description' => 'She waits.', 'spatial' => 'Old fact.']);
 
     actingAs($this->director, 'director')
-        ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'She waits.', 'spatial' => 'Both feet are outside the shelter boundary.', 'redraw' => true])
+        ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => 'She waits.', 'cast' => [], 'spatial' => 'Both feet are outside the shelter boundary.', 'redraw' => true])
         ->assertSessionHasNoErrors();
 
     expect($keyframe->fresh()->spatial)->toBe('Both feet are outside the shelter boundary.')
@@ -70,13 +70,13 @@ it('has the storyline follow a changed description before the keyframe is review
     App\Ai\Agents\StorylineFollower::fake([['storyline' => 'The contractor lays the permit on the dashboard and drives on.']]);
     $shot = Shot::factory()->for($this->project)->create([
         'status' => ShotStatus::KEYFRAMES_READY,
-        'chosen_storyline' => ['title' => 'Permit', 'storyline' => 'The contractor puts the permit against the glass and drives on.'],
+        'chosen_storyline' => ['storyline' => 'The contractor puts the permit against the glass and drives on.'],
         'storyline' => ['keyframes' => [['title' => 'Permit', 'description' => 'He puts the permit against the glass.']]],
     ]);
     $keyframe = Keyframe::factory()->for($shot)->create(['position' => 1, 'description' => 'He puts the permit against the glass.']);
 
     actingAs($this->director, 'director')
-        ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He lays the permit on the dashboard.', 'redraw' => true])
+        ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => 'He lays the permit on the dashboard.', 'cast' => [], 'redraw' => true])
         ->assertSessionHasNoErrors();
 
     Queue::assertPushed(App\Jobs\FollowStoryline::class, fn($job) => $job->before === 'He puts the permit against the glass.');

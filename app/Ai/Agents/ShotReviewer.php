@@ -6,6 +6,8 @@ namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
 use App\Ai\Contracts\HasReasoningEffort;
+use App\Enums\ElementType;
+use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -17,9 +19,9 @@ use Stringable;
 
 /**
  * Looks at all keyframes of a shot together, the way a viewer will, and says
- * whether the sequence makes the takeaway clear: the danger and the safe
- * behaviour readable, the steps distinguishable, and the people, place and
- * objects continuous from one keyframe to the next.
+ * whether the sequence tells the storyline: what happens readable, the steps
+ * distinguishable, and the people, place and objects continuous from one
+ * keyframe to the next.
  */
 class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
 {
@@ -39,7 +41,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
         return <<<'INSTRUCTIONS'
             You review the keyframes of one shot of an animated e-learning film, the way a learner will see them. The images are the keyframes in order; the prompt says which keyframe each image is. Always refer to keyframes by their number, not by the image's place in the list.
 
-            Judge the sequence as a whole against what the shot teaches:
+            Judge the sequence as a whole against the storyline:
             - Can a viewer see the point of the shot, such as the danger and the safe behaviour, without reading any text?
             - Is what each keyframe's description says about positions and distances, such as where someone stands relative to a line or a hazard, clearly visible and readable?
             - Does every keyframe show a step a viewer can see? Two keyframes in a row that look almost the same, where only a small detail such as a hand angle changes, is an issue: name the step that cannot be seen.
@@ -50,7 +52,7 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
             - Does lettering stay the same throughout? Words, logos or numbers that appear or disappear between keyframes, on clothing, helmets, vehicles or walls, are an issue.
 
             Judge whether the keyframes read as one continuous moment, because a break makes a viewer lose the thread:
-            - Every person is recognisable as the same person throughout: face, hair, clothing and colours.
+            - Every person is recognisable as the same person throughout: face, hair, clothing and colours. The cast of each keyframe is named after it: people with different names are different people on purpose, also when they stand in the same spot or have the same role, such as two security staff at one desk. Only a person with the same name who looks different is an issue.
             - The place and the camera stay the same unless the keyframes say they change; a sign, vehicle or door does not move, appear or disappear between keyframes.
             - Objects stay where they were left and change state in an order that makes sense: what is picked up is held, what is opened stays open.
             - Positions and distances change in the direction the steps describe.
@@ -91,7 +93,9 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
                 return "{$keyframe->position}. A copy of another keyframe that the director has not described yet: judge it only as a step between the keyframes around it.";
             }
 
-            return "{$keyframe->position}. {$keyframe->title}: {$keyframe->fullDescription()}";
+            $cast = $keyframe->loadMissing('elements')->elements->filter(fn(Element $element) => $element->type === ElementType::PERSON)->pluck('name')->join(', ');
+
+            return "{$keyframe->position}. {$keyframe->title}: {$keyframe->fullDescription()}" . ($cast === '' ? '' : " (people: {$cast})");
         })->join("\n");
 
         $storyline = $this->shot->chosenStoryline()['storyline'] ?? '';
@@ -103,9 +107,9 @@ class ShotReviewer implements Agent, HasReasoningEffort, HasStructuredOutput
 
         // A montage is a row of separate stills: each has its own place, so the checks on one still place do not apply.
         $montage = $this->shot->isMontage()
-            ? "\n\nThis shot is a montage: every keyframe is a separate still with its own place and camera, joined with crossfades. Ignore the checks on the place staying still and on one continuous moment. Judge instead whether each still shows its own part of the takeaway at a glance, without text, boards or pictograms, whether the stills in order say the takeaway, and whether the people stay recognisable as the same people."
+            ? "\n\nThis shot is a montage: every keyframe is a separate still with its own place and camera, joined with crossfades. Ignore the checks on the place staying still and on one continuous moment. Judge instead whether each still shows its own part of the storyline at a glance, without text, boards or pictograms, whether the stills in order tell the storyline, and whether the people stay recognisable as the same people."
             : '';
 
-        return "The shot teaches: {$this->shot->takeaway}\nStoryline: {$storyline}{$montage}\n\nKeyframes:\n{$lines}\n\n{$images}";
+        return "Storyline: {$storyline}{$montage}\n\nKeyframes:\n{$lines}\n\n{$images}";
     }
 }

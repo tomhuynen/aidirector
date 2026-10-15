@@ -39,14 +39,6 @@ enum ShotKind: string
     }
 
     /**
-     * Whether the shot starts from an empty place to choose, every keyframe drawn on it.
-     */
-    public function usesPlace(): bool
-    {
-        return $this === self::SCENE;
-    }
-
-    /**
      * How close the camera is for this kind; a presenter has its own framing.
      */
     public function size(): ShotSize
@@ -60,9 +52,9 @@ enum ShotKind: string
     public function useWhen(): string
     {
         return match ($this) {
-            self::SCENE => 'the takeaway is a behaviour or a danger: something a person does or must not do at one place, such as putting on gear, stopping behind a line or keeping a door shut',
-            self::MONTAGE => 'the takeaway is an overview, a list or a range that spans places or time, such as "we design, build, repair and service vessels" or the steps of a process at different places',
-            self::PRESENTER => 'the takeaway is said straight to the viewer by a person: a welcome, an introduction, a summary or a call to action',
+            self::SCENE => 'the idea is something people do at one place: an action, a behaviour or a danger, such as putting on gear, stopping behind a line or keeping a door shut',
+            self::MONTAGE => 'the idea is an overview, a list or a range that spans places or time, such as "we design, build, repair and service vessels" or the steps of a process at different places',
+            self::PRESENTER => 'the idea is said straight to the viewer by a person: a welcome, an introduction, a summary or a call to action',
             self::CLOSE_UP => 'the point is what hands do with one small object, too small to read in a scene: clipping on a badge, closing a padlock or a buckle, reading a gauge, a damaged part handed over',
         };
     }

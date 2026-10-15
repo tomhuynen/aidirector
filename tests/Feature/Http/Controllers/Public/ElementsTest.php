@@ -18,6 +18,7 @@ use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Models\Upload;
+use App\Support\Shots\KeyframeChain;
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Queue\MaxAttemptsExceededException;
@@ -63,7 +64,7 @@ function castShot(Project $project, array $attributes = []): Shot
 {
     return Shot::factory()->for($project)->create([
         'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
-        'chosen_storyline' => ['title' => 'Straightforward', 'storyline' => 'He posts the letter.'],
+        'chosen_storyline' => ['storyline' => 'He posts the letter.'],
         'storyline' => ['keyframes' => [
             ['title' => 'At the mailbox', 'description' => 'A man stands at a red mailbox.', 'elements' => []],
             ['title' => 'Posting', 'description' => 'A man pushes an envelope into the slot.', 'elements' => ['mark, the visitor ']],
@@ -95,7 +96,7 @@ describe('writing', function () {
             ->toContain('Cast and sets of this project')
             ->toContain('- Mark, the visitor (person): A middle-aged man');
 
-        expect((string) (new StorylineWriter($shot))->instructions())->toContain('never force an existing one into a story where it does not belong');
+        expect((string) (new StorylineWriter($shot))->instructions())->toContain('never force an existing one into a story where it does not belong')->toContain('choose one and use that same name in every keyframe');
 
         expect((string) (new StorylineWriter($shot))->instructions())->toContain('Elements: the exact names of the cast and sets listed above')->toContain('the spot it came from is now empty');
     });
@@ -113,7 +114,7 @@ describe('linking', function () {
         $shot = castShot($this->project);
 
         $first = chooseFirstKeyframe($shot);
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         $second = $shot->keyframes()->where('position', 2)->firstOrFail();
 
@@ -141,7 +142,7 @@ describe('linking', function () {
         $elements = collect(range(1, 4))->map(fn(int $n) => withReference(Element::factory()->for($this->project)->object()->create(['name' => "Crate {$n}"])));
         $second->elements()->sync($elements->pluck('id')->all());
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
             && $prompt->contains('- Crate 4 (object)')
@@ -161,7 +162,7 @@ describe('reference images', function () {
         $first->elements()->attach($guard);
         $shot->keyframes()->where('position', 3)->firstOrFail()->elements()->attach($guard);
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         $firstBytes = Storage::disk(Disk::TENANT->value)->get($first->fresh()->render()->getPathRelativeToRoot());
 
@@ -190,7 +191,7 @@ describe('reference images', function () {
 
         Bus::fake();
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         Bus::assertBatched(fn(PendingBatch $batch) => $batch->jobs->count() === 2
             && $batch->allowsFailures()
@@ -225,7 +226,7 @@ describe('reference images', function () {
         $crate = Element::factory()->for($this->project)->object()->create();
         $shot->keyframes()->where('position', 2)->firstOrFail()->elements()->attach($crate);
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
             ->and($crate->fresh()->reference())->toBeNull()
@@ -572,7 +573,7 @@ describe('element page', function () {
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'openai/gpt-5.4-image-2'
             && $prompt->contains('Change only this: Give him glasses')
-            && $prompt->contains(ElementPainter::NO_TEXT)
+            && $prompt->contains(App\Ai\Briefs\TextRules::NO_TEXT)
             && $prompt->attachments->count() === 1
             && $prompt->attachments->first()->path === $current);
     });
@@ -697,7 +698,7 @@ describe('versions', function () {
 
         $shot = castShot($this->project);
         chooseFirstKeyframe($shot);
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         // Keyframe 1 comes first as the base image; the chosen picture of the element follows it.
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')

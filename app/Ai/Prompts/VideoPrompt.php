@@ -36,9 +36,11 @@ class VideoPrompt
 
             'Follow every supplied keyframe in chronological order and use them as temporal visual anchors. Preserve the important pose, composition, object placement, gaze direction and action represented by each keyframe.',
 
-            'Generate the natural intermediate body motion needed to connect these keyframes smoothly: hand and arm movement, head rotation, eye direction, posture changes, balance and weight transfer, leg movement, and appropriate secondary motion. These connecting movements may be inferred where necessary, but they must only serve to transition naturally from one supplied keyframe to the next.',
+            'Generate the natural intermediate body motion needed to connect these keyframes smoothly: hand and arm movement, head rotation, eye direction, facial expression, posture changes, balance and weight transfer, leg movement, and appropriate secondary motion. These connecting movements may be inferred where necessary, but they must only serve to transition naturally from one supplied keyframe to the next.',
 
-            'Do not introduce new story events or visual elements. Do not add new objects, characters, gestures, signs, props, facial reactions, camera shots or actions that are not required by the keyframe sequence. Do not embellish the story. At the same time, do not freeze the character or mechanically morph between poses: create whatever subtle physical movement is necessary for a believable continuous performance.',
+            'Do not introduce new story events or visual elements. Do not add new objects, characters, signs, props, camera shots or actions that are not required by the keyframe sequence. Do not embellish the story. At the same time, do not freeze the character or mechanically morph between poses: create whatever subtle physical movement is necessary for a believable continuous performance.',
+
+            'Let the people act, as animated characters do: facial expressions that fit the moment, such as concentration, surprise, relief or a friendly smile, eye contact between people, a nod, and small natural reactions to what happens. They bring the moment to life without adding a new action, object or story event.',
 
             $parts['details'],
 

@@ -54,14 +54,6 @@
         </p>
       </section>
 
-      <section v-if="takeaways.length > 0" class="space-y-2 border-t border-border pt-6">
-        <h3 class="flex items-center gap-2 font-semibold">
-          <Target class="size-4 text-muted-foreground" />
-          {{ $t('Takeaway') }}
-        </h3>
-        <p class="text-[15px] leading-relaxed">{{ takeaways.join(' ') }}</p>
-      </section>
-
       <section v-if="voiceOverTracks.length > 0" class="space-y-3 border-t border-border pt-6">
         <h3 class="flex items-center gap-2 font-semibold">
           <AudioLines class="size-4 text-muted-foreground" />
@@ -136,7 +128,7 @@ import { Link, useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { Button } from '@shared:ui/button'
-import { AudioLines, Combine, LoaderCircle, RefreshCw, Split, Target } from 'lucide-vue-next'
+import { AudioLines, Combine, LoaderCircle, RefreshCw, Split } from 'lucide-vue-next'
 import { computed, watch } from 'vue'
 
 import AudioTracks, { type AudioTrack } from './AudioTracks.vue'
@@ -150,7 +142,6 @@ export type ShotMerge = {
   parts: {
     id: string
     title: string
-    takeaway: string
     storyline: string | null
     duration: number
     thumbnailUrl: string | null
@@ -162,7 +153,6 @@ export type ShotMerge = {
 
 const props = defineProps<{
   title: string
-  takeaway: string | null
   merge: ShotMerge
   videoUrl: string | null
   downloadUrl?: string | null
@@ -171,11 +161,6 @@ const props = defineProps<{
   aspectRatio: string
   voiceOverTracks: AudioTrack[]
 }>()
-
-/**
- * The takeaway of every part, in order; the merged shot itself has none of its own.
- */
-const takeaways = computed(() => props.merge.parts.map((part) => part.takeaway).filter((line) => line.trim() !== ''))
 
 const join = useForm({ transition: props.merge.transition })
 

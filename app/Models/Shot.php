@@ -38,28 +38,6 @@ class Shot extends Model implements HasMedia
 
     public const VIDEO = 'video';
 
-    /**
-     * The place of the shot without people, made from keyframe 1 when it
-     * shows people, so later keyframes add people to it instead of moving
-     * them through a redrawn place.
-     */
-    public const PLATE = 'plate';
-
-    /** On the plate: the render of keyframe 1 it was made from. */
-    public const PLATE_FROM = 'from_render';
-
-    /** Empty places drawn from the whole plan, for the director to choose the one every keyframe is drawn on. */
-    public const PLATE_OPTIONS = 'plate_options';
-
-    /** On the plate: it was chosen from the options, so it is the base of every keyframe. */
-    public const PLATE_CHOSEN = 'chosen';
-
-    /** The place in a later state, such as a door that is closed by now: the keyframe it starts at and later ones are drawn on it. */
-    public const PLACE_STATES = 'place_states';
-
-    /** On a place state: the place and the changes up to its keyframe it was made for, so a new plan or place makes it unused. */
-    public const PLACE_STATE_KEY = 'key';
-
     /** The spoken voice-over tracks, one per language, with the locale as a custom property. */
     public const VOICE_OVERS = 'voice_overs';
 
@@ -168,15 +146,11 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * The brief as the writers read it: the takeaway, and the idea agreed for
-     * this shot when it is part of a sequence.
+     * The brief as the writers read it: the director's idea for the shot.
      */
     public function brief(): string
     {
-        return implode("\n", array_filter([
-            "Takeaway: {$this->takeaway}",
-            filled($this->notes) ? "The idea for this shot: {$this->notes}" : null,
-        ]));
+        return filled($this->idea) ? "Idea: {$this->idea}" : '';
     }
 
     /**
@@ -246,9 +220,7 @@ class Shot extends Model implements HasMedia
     /**
      * The keyframes planned for the chosen storyline.
      *
-     * Older plans also carry a `prompt`: an image instruction no longer written or used; the description goes to the image model.
-     *
-     * @return list<array{title: string, description: string, spatial?: string, place_change?: string, place_part?: string, prompt?: string, elements?: list<string>, copied?: bool}>
+     * @return list<array{title: string, description: string, staging?: array<string, mixed>, spatial?: string, elements?: list<string>, copied?: bool}>
      */
     public function storylineKeyframes(): array
     {
@@ -344,8 +316,8 @@ class Shot extends Model implements HasMedia
 
     /**
      * What the setting from another shot needs that is not there yet, such as
-     * "the place of SH100" before that place is chosen; null when it is ready
-     * or the shot has its own setting.
+     * "the place of SH100" before its keyframe 1 is chosen; null when it is
+     * ready or the shot has its own setting.
      */
     public function settingWaitsFor(): ?string
     {
@@ -358,27 +330,12 @@ class Shot extends Model implements HasMedia
         $source = $from['shot'];
 
         return match (true) {
-            $from['keyframe'] === 0 => $source->hasChosenPlate() || $source->keyframes()->where('position', 1)->whereNotNull('render_id')->exists() ? null : __('the place of :shot', ['shot' => $source->code()]),
-            $from['keyframe'] === self::LAST_KEYFRAME => in_array($source->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_PENDING, ShotStatus::VIDEO_READY], true) && ! $source->keyframes()->where('rendering', true)->exists()
+            $from['keyframe'] === 0 => $source->keyframes()->where('position', 1)->whereNotNull('render_id')->exists() ? null : __('the place of :shot', ['shot' => $source->code()]),
+            $from['keyframe'] === self::LAST_KEYFRAME => in_array($source->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_PENDING, ShotStatus::VIDEO_READY], true) && ! $source->keyframes()->busy()->exists()
                 ? null
                 : __('the keyframes of :shot', ['shot' => $source->code()]),
             default => $source->keyframes()->where('position', $from['keyframe'])->whereNotNull('render_id')->exists() ? null : __('keyframe :n of :shot', ['n' => $from['keyframe'], 'shot' => $source->code()]),
         };
-    }
-
-    /**
-     * The chosen place of the shot this scene takes its place from: the same
-     * place, used as it is, so nothing new is offered to choose from.
-     */
-    public function inheritedPlate(): ?Media
-    {
-        $from = $this->settingFrom();
-
-        if ($from === null || $from['keyframe'] !== 0 || ! $this->kindOrScene()->usesPlace()) {
-            return null;
-        }
-
-        return $from['shot']->media()->where('collection_name', self::PLATE)->where('custom_properties->' . self::PLATE_CHOSEN, true)->latest('id')->first();
     }
 
     /**
@@ -434,8 +391,8 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Starts the plan over after it was drawn: the keyframes, the places and
-     * the video are thrown away, and whatever is still drawn or rendered for
+     * Starts the plan over after it was drawn: the keyframes and the video
+     * are thrown away, and whatever is still drawn or rendered for
      * the old plan stops. The plan and the conversation stay.
      */
     public function startPlanOver(): void
@@ -444,9 +401,6 @@ class Shot extends Model implements HasMedia
         $this->increment('plan_version');
 
         $this->forgetKeyframes();
-        $this->clearMediaCollection(self::PLATE_OPTIONS);
-        $this->clearMediaCollection(self::PLATE);
-        $this->clearMediaCollection(self::PLACE_STATES);
         $this->clearMediaCollection(self::MONTAGE_CLIPS);
         $this->clearMediaCollection(self::PRESENTER_VIDEOS);
 
@@ -469,14 +423,6 @@ class Shot extends Model implements HasMedia
             && $this->storylineKeyframes() === []
             && count((array) ($this->plan_chat ?? [])) <= 1
             && ! $this->keyframes()->exists();
-    }
-
-    /**
-     * Whether the director chose the empty place every keyframe is drawn on.
-     */
-    public function hasChosenPlate(): bool
-    {
-        return $this->media()->where('collection_name', self::PLATE)->where('custom_properties->' . self::PLATE_CHOSEN, true)->exists();
     }
 
     /**
@@ -524,7 +470,7 @@ class Shot extends Model implements HasMedia
 
     /**
      * Change the planned keyframe at a position: merge `$changes` into it and
-     * drop the `$forget` keys, such as a must show that no longer fits.
+     * drop the `$forget` keys, such as a spatial fact that no longer fits.
      *
      * @param  array<string, mixed>  $changes
      * @param  list<string>  $forget
@@ -564,7 +510,7 @@ class Shot extends Model implements HasMedia
         }
 
         foreach ($keyframes as $keyframe) {
-            if ($keyframe->rendering) {
+            if ($keyframe->isBusy()) {
                 return false;
             }
         }
@@ -585,6 +531,7 @@ class Shot extends Model implements HasMedia
 
         $arranged = array_map(fn(Keyframe $keyframe) => $plans[$keyframe->position - 1] ?? array_filter([
             'title' => $keyframe->title,
+            'staging' => $keyframe->staging,
             'description' => $keyframe->description,
             'spatial' => $keyframe->spatial,
         ]), $keyframes);
@@ -692,9 +639,6 @@ class Shot extends Model implements HasMedia
     {
         $this->addMediaCollection(self::VOICE_OVERS)->acceptsMimeTypes(['audio/mpeg', 'audio/mp3']);
         $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
-        $this->addMediaCollection(self::PLATE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
-        $this->addMediaCollection(self::PLATE_OPTIONS)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
-        $this->addMediaCollection(self::PLACE_STATES)->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
         $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
     }

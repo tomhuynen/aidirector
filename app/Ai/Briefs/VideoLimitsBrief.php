@@ -44,6 +44,11 @@ class VideoLimitsBrief
                 'instead' => 'a close-up of the hands and the object',
             ],
             [
+                'risk' => 'Something appears, disappears or changes hands, place or state between two keyframes without a keyframe that shows it, such as gear that is suddenly there or a vest that is suddenly worn',
+                'why' => 'the model cannot invent where a thing comes from or how it changes, so it pops in, out or on at once',
+                'instead' => 'everything in the frame from keyframe 1 or visibly coming in, every keyframe saying where each thing is and in what state, a keyframe for each change, and one halfway for a change that is hard to animate, such as one arm in the vest when putting on clothing, with at least 3 seconds for it',
+            ],
+            [
                 'risk' => 'The action is hidden, behind a counter, a vehicle, a back or another person',
                 'why' => 'the viewer cannot see the point of the shot',
                 'instead' => 'another camera position where the action is in plain view',

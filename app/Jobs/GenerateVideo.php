@@ -103,7 +103,9 @@ class GenerateVideo implements ShouldQueue
         ])->save();
 
         // The spoken tracks are made while the video renders.
-        $shot->startVoiceOverAudio();
+        if (Config::boolean('pipeline.voice_over.automatic')) {
+            $shot->startVoiceOverAudio();
+        }
 
         PollVideos::start();
     }
@@ -164,7 +166,9 @@ class GenerateVideo implements ShouldQueue
             'video_error' => null,
         ])->save();
 
-        $shot->startVoiceOverAudio();
+        if (Config::boolean('pipeline.voice_over.automatic')) {
+            $shot->startVoiceOverAudio();
+        }
 
         PollShotClips::dispatch($shot)->delay((int) Config::get('pipeline.video.first_poll_seconds'));
     }

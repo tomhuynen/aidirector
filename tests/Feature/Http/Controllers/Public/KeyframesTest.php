@@ -8,14 +8,13 @@ use App\Ai\Agents\TweakInterpreter;
 use App\Ai\KeyframePainter;
 use App\Enums\CorrectionSource;
 use App\Enums\Disk;
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
-use App\Jobs\AdjustPlateOption;
 use App\Jobs\CheckKeyframePlace;
 use App\Jobs\ClassifyCorrection;
-use App\Jobs\GenerateKeyframeImage;
+use App\Jobs\DrawKeyframe;
 use App\Jobs\GenerateKeyframeOption;
 use App\Jobs\GenerateKeyframes;
-use App\Jobs\GeneratePlateOption;
 use App\Jobs\GenerateRemainingKeyframes;
 use App\Jobs\ReviewShot;
 use App\Jobs\TweakKeyframeImage;
@@ -27,6 +26,7 @@ use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Decisions\ShotIssues;
 use App\Support\Images\OpenRouterImageClient;
+use App\Support\Shots\KeyframeChain;
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Client\RequestException;
@@ -104,9 +104,16 @@ function renderAllKeyframes(Shot $shot): void
     drawFirstKeyframeOptions($shot);
 
     $first = $shot->keyframes()->firstOrFail();
-    $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
+    $first->forceFill(['render_id' => $first->renders()->first()->id, 'status' => KeyframeStatus::READY])->save();
 
-    (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+    (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
+
+    // With the queue faked the chain only records its draws; they are drawn here in order.
+    foreach ($shot->keyframes()->orderBy('position')->get() as $keyframe) {
+        if ($keyframe->refresh()->status !== KeyframeStatus::READY) {
+            drawKeyframeNow($keyframe);
+        }
+    }
 }
 
 /**
@@ -144,11 +151,21 @@ function numberedPng(): string
     return base64_encode((string) ob_get_clean());
 }
 
+/**
+ * Draws a keyframe straight away, as the chain does when its turn comes.
+ */
+function drawKeyframeNow(Keyframe $keyframe): void
+{
+    $keyframe->forceFill(['status' => KeyframeStatus::DRAWING])->save();
+
+    (new DrawKeyframe($keyframe, $keyframe->draw_version))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
+}
+
 function plannedShot(Project $project, array $attributes = []): Shot
 {
     return Shot::factory()->for($project)->create([
         'status' => ShotStatus::KEYFRAMES_PENDING,
-        'chosen_storyline' => ['title' => 'Straightforward', 'storyline' => 'He posts the letter.'],
+        'chosen_storyline' => ['storyline' => 'He posts the letter.'],
         'storyline' => ['keyframes' => plannedKeyframes()],
         ...$attributes,
     ]);
@@ -170,7 +187,7 @@ describe('job', function () {
             ->and($keyframes)->toHaveCount(3)
             ->and($keyframes->pluck('title')->all())->toBe(['At the mailbox', 'Posting', 'Thumbs up'])
             ->and($keyframes->pluck('position')->all())->toBe([1, 2, 3])
-            ->and($keyframes->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->rendering))->toBeTrue()
+            ->and($keyframes->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->isBusy()))->toBeTrue()
             ->and($keyframes->first()->prompt)->toContain('A man in a navy suit stands at a red mailbox')
             ->and($keyframes->first()->generations()->where('kind', 'image')->count())->toBe(GenerateKeyframes::optionCount())
             ->and($keyframes->get(1)->generations()->where('kind', 'image')->count())->toBe(1);
@@ -240,7 +257,7 @@ describe('job', function () {
 
         $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
 
-        (new GenerateKeyframeImage($keyframe))->handle(app(KeyframePainter::class));
+        drawKeyframeNow($keyframe);
 
         expect($keyframe->renders())->toHaveCount(2);
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope') && $prompt->attachments->count() === 1);
@@ -278,8 +295,8 @@ describe('job', function () {
         $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
         $shot->keyframes()->where('position', '>', 1)->get()->each(fn(Keyframe $keyframe) => $keyframe->elements()->attach($engineer));
 
-        (new GenerateKeyframeImage($shot->keyframes()->where('position', 2)->firstOrFail()))->handle(app(KeyframePainter::class));
-        (new GenerateKeyframeImage($fourth))->handle(app(KeyframePainter::class));
+        drawKeyframeNow($shot->keyframes()->where('position', 2)->firstOrFail());
+        drawKeyframeNow($fourth);
 
         // Keyframe 2: she is not in keyframe 1, which is only the reference for the place.
         KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Image 1: keyframe 1 of the shot: the reference for the place and the camera; Female engineer is not in it yet.')
@@ -303,8 +320,7 @@ describe('job', function () {
         $second = $shot->keyframes()->with('media')->where('position', 2)->firstOrFail();
 
         Queue::assertPushed(CheckKeyframePlace::class, fn(CheckKeyframePlace $job) => $job->keyframe->is($second) && $job->renderId === $second->render()->id);
-        expect($second->fresh()->render_stage)->toBe(Keyframe::STAGE_CHECKING)
-            ->and($second->fresh()->rendering)->toBeFalse();
+        expect($second->fresh()->isBusy())->toBeFalse();
 
         KeyframeChecker::fake(fn() => ['inventory' => [], 'issues' => [
             ['category' => 'place', 'change' => 'The yellow floor line runs under her feet instead of along the left.', 'severity' => 'high'],
@@ -314,7 +330,6 @@ describe('job', function () {
         (new CheckKeyframePlace($second, $second->render()->id))->handle(app(KeyframePainter::class));
 
         expect($second->fresh()->render()->getCustomProperty(Keyframe::PLACE_ISSUES))->toBe(['The yellow floor line runs under her feet instead of along the left.'])
-            ->and($second->fresh()->render_stage)->toBeNull()
             ->and($second->fresh()->renders())->toHaveCount(1);
         KeyframeChecker::assertPrompted(fn($prompt) => $prompt->model === 'place/model' && $prompt->attachments->count() === 2
             && str_contains((string) $prompt->agent->instructions(), 'something put into or taken out of a bin or box')
@@ -334,194 +349,14 @@ describe('job', function () {
         expect($issues->groups($shot->fresh(), $shot->keyframes()->with('media')->get()))->toBe([]);
     });
 
-    it('draws later keyframes on the place without people when keyframe 1 shows someone', function () {
-        Image::fake(fn() => fakePng());
-        $shot = plannedShot($this->project);
-        drawFirstKeyframeOptions($shot);
-        $first = $shot->keyframes()->firstOrFail();
-        $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
-        $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
-        $shot->keyframes()->get()->each(fn(Keyframe $keyframe) => $keyframe->elements()->attach($engineer));
-
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
-
-        $plate = $shot->fresh()->getFirstMedia(Shot::PLATE);
-
-        expect($plate)->not->toBeNull()
-            ->and($plate->getCustomProperty(Shot::PLATE_FROM))->toBe($first->fresh()->render()->id);
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('remove every person from it') && $prompt->attachments->count() === 1);
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
-            && $prompt->contains('It is the place of this shot without any people')
-            && $prompt->contains('Female engineer is not in the first image yet: add them into it')
-            && $prompt->attachments->first()->path === $plate->getPathRelativeToRoot()
-            && $prompt->contains('attached image is the keyframe directly before this one'));
-
-        // The plate is made once for this version of keyframe 1.
-        (new GenerateKeyframeImage($shot->keyframes()->where('position', 2)->firstOrFail()))->handle(app(KeyframePainter::class));
-
-        expect($shot->fresh()->getMedia(Shot::PLATE))->toHaveCount(1)
-            ->and($shot->generations()->where('prompt', 'like', '%remove every person%')->count())->toBe(1);
-    });
-
     it('uses keyframe 1 as it is when it shows no people', function () {
         Image::fake(fn() => fakePng());
         $shot = plannedShot($this->project);
         renderAllKeyframes($shot);
 
-        expect($shot->fresh()->getFirstMedia(Shot::PLATE))->toBeNull();
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('remove every person from it'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
             && $prompt->contains('It is keyframe 1 of this shot'));
-    });
-
-    it('starts from three empty places drawn from the whole plan, and draws every keyframe on the chosen one', function () {
-        Config::set('pipeline.keyframes.start_with_plate', true);
-        Image::fake(fn() => fakePng());
-        Bus::fake([GeneratePlateOption::class]);
-
-        $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle();
-
-        Bus::assertBatched(fn(PendingBatch $batch) => $batch->jobs->count() === 3 && $batch->jobs->every(fn($job) => $job instanceof GeneratePlateOption));
-
-        foreach (range(0, 2) as $variation) {
-            (new GeneratePlateOption($shot, $variation))->handle(app(KeyframePainter::class));
-        }
-        GenerateKeyframes::finishPlates($shot->id);
-
-        $shot->refresh();
-
-        expect($shot->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY)
-            ->and($shot->getMedia(Shot::PLATE_OPTIONS))->toHaveCount(3);
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Draw the place where this shot plays, empty: no people at all.')
-            && $prompt->contains('1. A man in a navy suit stands at a red mailbox holding a white envelope.')
-            && $prompt->contains('Leave free floor where the people will stand and walk'));
-
-        Queue::fake([GenerateRemainingKeyframes::class]);
-        $option = $shot->getMedia(Shot::PLATE_OPTIONS)->get(1);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plate.choose', [$this->project, $shot]), ['plate' => $option->id])
-            ->assertSessionHasNoErrors();
-
-        $plate = $shot->fresh()->getFirstMedia(Shot::PLATE);
-
-        // Keyframe 1 shows no people here, so it is the chosen place as it is, and the others start straight away.
-        expect($plate->getCustomProperty(Shot::PLATE_CHOSEN))->toBeTrue()
-            ->and($shot->keyframes()->with('media')->first()->render()->getCustomProperty(Keyframe::SENT)['images'])->toBe(['The chosen place'])
-            ->and($shot->keyframes()->where('rendering', true)->count())->toBe($shot->keyframes()->count() - 1)
-            ->and($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING);
-        Queue::assertPushed(GenerateRemainingKeyframes::class, fn(GenerateRemainingKeyframes $job) => ! $job->onlyFirst);
-
-        (new GenerateRemainingKeyframes($shot->fresh()))->handle(app(KeyframePainter::class));
-
-        $keyframes = $shot->keyframes()->with('media')->get();
-
-        expect($keyframes->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->rendering))->toBeTrue();
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
-            && $prompt->contains('It is the place of this shot without any people')
-            && $prompt->attachments->first()->path === $plate->getPathRelativeToRoot());
-    });
-
-    it('draws only keyframe 1 on the chosen place when it shows people, and the others once it is confirmed', function () {
-        Config::set('pipeline.keyframes.start_with_plate', true);
-        Image::fake(fn() => fakePng());
-        Bus::fake([GeneratePlateOption::class]);
-
-        $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle();
-        (new GeneratePlateOption($shot, 0))->handle(app(KeyframePainter::class));
-        GenerateKeyframes::finishPlates($shot->id);
-        $engineer = Element::factory()->for($this->project)->create(['name' => 'Female engineer']);
-        $shot->keyframes()->get()->each(fn(Keyframe $keyframe) => $keyframe->elements()->attach($engineer));
-
-        Queue::fake([GenerateRemainingKeyframes::class]);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plate.choose', [$this->project, $shot]), ['plate' => $shot->fresh()->getFirstMedia(Shot::PLATE_OPTIONS)->id])
-            ->assertSessionHasNoErrors();
-
-        expect($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
-            ->and($shot->keyframes()->where('rendering', true)->pluck('position')->all())->toBe([1]);
-        Queue::assertPushed(GenerateRemainingKeyframes::class, fn(GenerateRemainingKeyframes $job) => $job->onlyFirst);
-
-        (new GenerateRemainingKeyframes($shot->fresh(), elementsDrawn: true, onlyFirst: true))->handle(app(KeyframePainter::class));
-
-        $keyframes = $shot->keyframes()->with('media')->get();
-
-        expect($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY)
-            ->and($keyframes->firstWhere('position', 1)->render())->not->toBeNull()
-            ->and($keyframes->where('position', '>', 1)->every(fn(Keyframe $keyframe) => $keyframe->render() === null))->toBeTrue();
-
-        // The decision is to confirm keyframe 1, not to choose a place again.
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.first.choose', [$this->project, $shot]), ['render' => $keyframes->first()->render()->id])
-            ->assertSessionHasNoErrors();
-
-        expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
-            ->and($shot->keyframes()->where('rendering', true)->count())->toBe($keyframes->count() - 1);
-    });
-
-    it('adjusts a place before it is chosen and adds the result as a new place', function () {
-        Config::set('pipeline.keyframes.start_with_plate', true);
-        Image::fake(fn() => fakePng());
-        Bus::fake([GeneratePlateOption::class]);
-
-        $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle();
-        (new GeneratePlateOption($shot, 0))->handle(app(KeyframePainter::class));
-        GenerateKeyframes::finishPlates($shot->id);
-        $option = $shot->fresh()->getFirstMedia(Shot::PLATE_OPTIONS);
-
-        Queue::fake([AdjustPlateOption::class]);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plate.adjust', [$this->project, $shot]), ['plate' => $option->id, 'instruction' => 'Put the bin left of the door.'])
-            ->assertSessionHasNoErrors();
-
-        expect($shot->keyframes()->where('position', 1)->value('rendering'))->toBeTrue();
-        Queue::assertPushed(AdjustPlateOption::class, fn(AdjustPlateOption $job) => $job->option === $option->id && $job->instruction === 'Put the bin left of the door.');
-
-        // A place cannot be chosen while the adjusted one is drawn.
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plate.choose', [$this->project, $shot]), ['plate' => $option->id])
-            ->assertSessionHasErrors('plate');
-
-        (new AdjustPlateOption($shot, $option->id, 'Put the bin left of the door.'))->handle(app(KeyframePainter::class));
-
-        $places = $shot->fresh()->getMedia(Shot::PLATE_OPTIONS);
-
-        expect($places)->toHaveCount(2)
-            ->and($places->last()->getCustomProperty(Keyframe::TWEAK_REQUEST))->toBe('Put the bin left of the door.')
-            ->and($shot->keyframes()->where('position', 1)->value('rendering'))->toBeFalse()
-            ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY);
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this: Put the bin left of the door.')
-            && $prompt->contains('Do not add people.')
-            && $prompt->attachments->first()->path === $option->getPathRelativeToRoot());
-    });
-
-    it('goes back to the places while keyframe 1 on the chosen one waits', function () {
-        Config::set('pipeline.keyframes.start_with_plate', true);
-        Image::fake(fn() => fakePng());
-        Bus::fake([GeneratePlateOption::class]);
-
-        $shot = plannedShot($this->project);
-        (new GenerateKeyframes($shot))->handle();
-        (new GeneratePlateOption($shot, 0))->handle(app(KeyframePainter::class));
-        GenerateKeyframes::finishPlates($shot->id);
-        $option = $shot->fresh()->getFirstMedia(Shot::PLATE_OPTIONS);
-        $option->copy($shot, Shot::PLATE)->setCustomProperty(Shot::PLATE_CHOSEN, true)->save();
-        $first = $shot->keyframes()->firstOrFail();
-        $option->copy($first, Keyframe::RENDERS);
-
-        actingAs($this->director, 'director')
-            ->post(route('public.shots.plate.reset', [$this->project, $shot]))
-            ->assertSessionHasNoErrors();
-
-        expect($shot->fresh()->hasChosenPlate())->toBeFalse()
-            ->and($shot->fresh()->getMedia(Shot::PLATE_OPTIONS))->toHaveCount(1)
-            ->and($first->fresh()->renders())->toBeEmpty()
-            ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY);
     });
 
     it('draws a keyframe again when its background moved compared with the image it was drawn on', function () {
@@ -562,24 +397,6 @@ describe('job', function () {
             ->and($second->render()->getCustomProperty(Keyframe::BACKGROUND_MOVED))->toBeNull();
     });
 
-    it('adjusts a keyframe drawn on a place by editing the place again, with the current version for the people', function () {
-        Image::fake(fn() => fakePng());
-        $shot = plannedShot($this->project);
-        renderAllKeyframes($shot);
-        $second = $shot->keyframes()->with('media')->where('position', 2)->firstOrFail();
-        $plate = $second->render()->copy($shot, Shot::PLATE);
-        $plate->setCustomProperty(Shot::PLATE_CHOSEN, true)->save();
-
-        (new TweakKeyframeImage($second, 'he looks at the camera'))->handle(app(KeyframePainter::class));
-
-        Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Edit the first attached image. It is the place of this shot without any people')
-            && $prompt->contains('The second attached image is the current version of this keyframe.')
-            && $prompt->contains('Change only this compared with the current version: he looks at the camera')
-            && $prompt->attachments->first()->path === $plate->getPathRelativeToRoot()
-            && $prompt->attachments->count() === 3);
-        expect($second->fresh()->render()->getCustomProperty(Keyframe::SENT)['images'])->toBe(['The place without people, the image that is edited', 'This version, for the people and what changed', 'The keyframe before']);
-    });
-
     it('keeps the stillest attempt and notes it when the background keeps moving, and Fix draws it again', function () {
         $calls = 0;
         Image::fake(function () use (&$calls) {
@@ -604,23 +421,12 @@ describe('job', function () {
 
         expect($group['issues'])->toContain('The background moved compared with the place, also after drawing it again.');
 
-        Queue::fake([GenerateKeyframeImage::class, TweakKeyframeImage::class]);
+        Queue::fake([DrawKeyframe::class, TweakKeyframeImage::class]);
         $issues->fix($shot->fresh(), 'keyframe-2');
 
-        Queue::assertPushed(GenerateKeyframeImage::class);
+        Queue::assertPushed(DrawKeyframe::class);
         Queue::assertNotPushed(TweakKeyframeImage::class);
         expect($second->fresh()->render()->getCustomProperty(Keyframe::BACKGROUND_MOVED))->toBeNull();
-
-        // On a place the moved version goes back onto it as it is, so the pose and the asked changes stay.
-        $plate = $keyframes->firstWhere('position', 1)->render()->copy($shot, Shot::PLATE);
-        $plate->setCustomProperty(Shot::PLATE_CHOSEN, true)->save();
-        $second->fresh()->render()->setCustomProperty(Keyframe::BACKGROUND_MOVED, true)->save();
-        $second->newQuery()->whereKey($second->id)->update(['rendering' => false]);
-        $issues->fix($shot->fresh(), 'keyframe-2');
-
-        Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->fromCheck
-            && ! $job->rewrite
-            && str_contains($job->instruction, 'stay exactly as in the current version; only the background is the place\'s own again.'));
     });
 
     it('replaces the keyframes of an earlier render', function () {
@@ -650,7 +456,7 @@ describe('job', function () {
         expect($shot->status)->toBe(ShotStatus::STORYLINE_READY)
             ->and($shot->storyline_error)->not->toBeNull()
             ->and($shot->storylineKeyframes())->toEqual(plannedKeyframes())
-            ->and($shot->keyframes()->first()->rendering)->toBeFalse()
+            ->and($shot->keyframes()->first()->isBusy())->toBeFalse()
             ->and($shot->keyframes()->first()->render_error)->toBe('Provider down')
             ->and($shot->keyframes()->first()->generations()->whereNotNull('error')->count())->toBe(1);
     });
@@ -676,12 +482,12 @@ describe('first keyframe', function () {
         Image::fake(fn() => numberedPng());
 
         $shot = plannedShot($this->project, ['status' => ShotStatus::FIRST_KEYFRAME_PENDING]);
-        $first = Keyframe::factory()->for($shot)->create(['position' => 1, 'rendering' => true]);
+        $first = Keyframe::factory()->for($shot)->create(['position' => 1, 'status' => KeyframeStatus::DRAWING]);
 
         GenerateKeyframes::finishOptions($shot->id);
 
         expect($shot->fresh())->status->toBe(ShotStatus::STORYLINE_READY)->storyline_error->not->toBeNull()
-            ->and($first->fresh())->rendering->toBeFalse()->render_error->not->toBeNull();
+            ->and($first->fresh())->status->toBe(KeyframeStatus::FAILED)->render_error->not->toBeNull();
 
         (new GenerateKeyframeOption($first, 0))->handle(app(KeyframePainter::class));
         GenerateKeyframes::finishOptions($shot->id, failed: 2);
@@ -729,9 +535,9 @@ describe('first keyframe', function () {
             ->and($shot->keyframes()->count())->toBe(3)
             ->and($first->renders())->toHaveCount(3)
             ->and($first->render_id)->toBeNull()
-            ->and($first->rendering)->toBeFalse()
+            ->and($first->isBusy())->toBeFalse()
             ->and($second->renders())->toHaveCount(0)
-            ->and($second->rendering)->toBeFalse();
+            ->and($second->isBusy())->toBeFalse();
 
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope'));
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Variation for this option: Stage it as described.'));
@@ -759,7 +565,7 @@ describe('first keyframe', function () {
 
         expect($first->renders())->toHaveCount(GenerateKeyframes::optionCount() + 1)
             ->and($first->render_id)->toBeNull()
-            ->and($first->rendering)->toBeFalse()
+            ->and($first->isBusy())->toBeFalse()
             ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY)
             ->and($added->getCustomProperty(Keyframe::TWEAK_REQUEST))->toBe('Put the line across her path')
             ->and($first->description)->toBe($description);
@@ -787,7 +593,7 @@ describe('first keyframe', function () {
             && $prompt->contains('A man in a navy suit stands at a red mailbox'));
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->model === 'edit/model');
 
-        expect($first->fresh())->rendering->toBeFalse()->render_id->toBeNull()
+        expect($first->fresh()->isBusy())->toBeFalse()->and($first->fresh())->render_id->toBeNull()
             ->and($first->fresh()->renders())->toHaveCount(GenerateKeyframes::optionCount() + 1);
     });
 
@@ -797,7 +603,7 @@ describe('first keyframe', function () {
         $shot = plannedShot($this->project);
         drawFirstKeyframeOptions($shot);
         $first = $shot->keyframes()->firstOrFail();
-        $first->forceFill(['rendering' => true])->save();
+        $first->forceFill(['status' => KeyframeStatus::DRAWING])->save();
         Queue::fake();
 
         actingAs($this->director, 'director')
@@ -857,16 +663,16 @@ describe('first keyframe', function () {
 
         expect($first->fresh()->render()->id)->toBe($chosen->id)
             ->and($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_PENDING)
-            ->and($shot->keyframes()->where('position', 2)->first()->rendering)->toBeTrue();
+            ->and($shot->keyframes()->where('position', 2)->first()->isBusy())->toBeTrue();
 
         Queue::assertPushed(GenerateRemainingKeyframes::class, fn(GenerateRemainingKeyframes $job) => $job->shot->is($shot));
 
-        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class));
+        (new GenerateRemainingKeyframes($shot))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
         $chosenBytes = Storage::disk(Disk::TENANT->value)->get($chosen->getPathRelativeToRoot());
 
         expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
-            ->and($shot->keyframes()->get()->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->rendering))->toBeTrue();
+            ->and($shot->keyframes()->get()->every(fn(Keyframe $keyframe) => $keyframe->render() !== null && ! $keyframe->isBusy()))->toBeTrue();
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('pushes a white envelope')
             && $prompt->attachments->count() === 1
@@ -912,12 +718,12 @@ describe('first keyframe', function () {
 
     it('goes back to choosing when the other keyframes fail', function () {
         $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_PENDING]);
-        Keyframe::factory()->for($shot)->create(['position' => 2, 'rendering' => true]);
+        Keyframe::factory()->for($shot)->create(['position' => 2, 'status' => KeyframeStatus::DRAWING]);
 
         (new GenerateRemainingKeyframes($shot))->failed(new RuntimeException('Provider down'));
 
         expect($shot->fresh())->status->toBe(ShotStatus::FIRST_KEYFRAME_READY)->storyline_error->not->toBeNull()
-            ->and($shot->keyframes()->first()->rendering)->toBeFalse();
+            ->and($shot->keyframes()->first()->isBusy())->toBeFalse();
     });
 });
 
@@ -932,18 +738,19 @@ describe('add', function () {
         Queue::fake();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Walks away', 'description' => 'The man walks away from the mailbox, smiling.'])
+            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Walks away', 'summary' => 'The man walks away from the mailbox, smiling.'])
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
         $added = $shot->keyframes()->where('position', 4)->firstOrFail();
 
         expect($added->title)->toBe('Walks away')
-            ->and($added->rendering)->toBeTrue()
-            ->and($shot->fresh()->storylineKeyframes()[3])->toEqual(['title' => 'Walks away', 'description' => 'The man walks away from the mailbox, smiling.']);
+            ->and($added->isBusy())->toBeTrue()
+            ->and($shot->fresh()->storylineKeyframes()[3])->toMatchArray(['title' => 'Walks away', 'description' => 'The man walks away from the mailbox, smiling.'])
+            ->and($added->staged()->summary)->toBe('The man walks away from the mailbox, smiling.');
 
-        Queue::assertPushed(GenerateKeyframeImage::class, fn(GenerateKeyframeImage $job) => $job->keyframe->is($added));
+        Queue::assertPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->is($added));
 
-        (new GenerateKeyframeImage($added))->handle(app(KeyframePainter::class));
+        drawKeyframeNow($added);
 
         expect($added->fresh()->prompt)
             ->toContain('The man walks away from the mailbox, smiling.')
@@ -951,12 +758,12 @@ describe('add', function () {
             ->toContain('the keyframe directly before this one');
     });
 
-    it('requires a title and a description', function () {
+    it('requires a title and what happens', function () {
         $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => '', 'description' => ''])
-            ->assertSessionHasErrors(['title', 'description']);
+            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => '', 'summary' => ''])
+            ->assertSessionHasErrors(['title', 'summary']);
     });
 
     it('only adds keyframes once the shot is rendered and has room', function () {
@@ -967,8 +774,8 @@ describe('add', function () {
         Keyframe::factory()->for($choosing)->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.store', [$this->project, $choosing]), ['title' => 'Extra', 'description' => 'More.'])
-            ->assertSessionHasErrors('description');
+            ->post(route('public.shots.keyframes.store', [$this->project, $choosing]), ['title' => 'Extra', 'summary' => 'More.'])
+            ->assertSessionHasErrors('summary');
 
         config(['pipeline.keyframes.max_manual' => 3]);
         $full = plannedShot($this->project);
@@ -976,10 +783,10 @@ describe('add', function () {
         $full->forceFill(['status' => ShotStatus::KEYFRAMES_READY])->save();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.store', [$this->project, $full]), ['title' => 'Extra', 'description' => 'More.'])
-            ->assertSessionHasErrors('description');
+            ->post(route('public.shots.keyframes.store', [$this->project, $full]), ['title' => 'Extra', 'summary' => 'More.'])
+            ->assertSessionHasErrors('summary');
 
-        Queue::assertNotPushed(GenerateKeyframeImage::class);
+        Queue::assertNotPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->title === 'Extra');
     });
 
     it('copies a keyframe right after it with its plan, cast and image, without drawing', function () {
@@ -1006,7 +813,7 @@ describe('add', function () {
             ->and($copy->render())->not->toBeNull()
             ->and($copy->render()->id)->not->toBe($second->fresh()->render()->id)
             ->and($shot->fresh()->storylineKeyframes()[2]['title'])->toBe($titles[1]);
-        Queue::assertNotPushed(GenerateKeyframeImage::class);
+        Queue::assertNotPushed(DrawKeyframe::class);
     });
 
     it('marks a copy as undescribed so the check and the review do not judge it by the original\'s text', function () {
@@ -1041,7 +848,7 @@ describe('add', function () {
         renderAllKeyframes($shot);
         $shot->forceFill(['status' => ShotStatus::KEYFRAMES_PENDING])->save();
         $third = $shot->keyframes()->where('position', 3)->firstOrFail();
-        $third->update(['rendering' => true]);
+        $third->update(['status' => KeyframeStatus::DRAWING]);
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.keyframes.copy', [$this->project, $shot, $third]))
@@ -1066,7 +873,7 @@ describe('add', function () {
     });
 
     it('lets the director add keyframes beyond what the planner plans, up to the manual maximum', function () {
-        Queue::fake([GenerateKeyframeImage::class]);
+        Queue::fake([DrawKeyframe::class]);
         Image::fake(fn() => fakePng());
         config(['pipeline.keyframes.max' => 3, 'pipeline.keyframes.max_manual' => 4]);
 
@@ -1079,18 +886,18 @@ describe('add', function () {
             ->assertInertia(fn($page) => $page->where('shot.maxKeyframes', 4));
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Extra', 'description' => 'More.'])
+            ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Extra', 'summary' => 'More.'])
             ->assertSessionHasNoErrors();
 
         expect($shot->keyframes()->count())->toBe(4);
-        Queue::assertPushed(GenerateKeyframeImage::class);
+        Queue::assertPushed(DrawKeyframe::class);
     });
 
     it('forbids adding to another director\'s shot', function () {
         $shot = plannedShot(Project::factory()->create(), ['status' => ShotStatus::KEYFRAMES_READY]);
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.store', [$shot->project, $shot]), ['title' => 'Extra', 'description' => 'More.'])
+            ->post(route('public.shots.keyframes.store', [$shot->project, $shot]), ['title' => 'Extra', 'summary' => 'More.'])
             ->assertForbidden();
     });
 });
@@ -1098,22 +905,28 @@ describe('add', function () {
 describe('update', function () {
     beforeEach(fn() => Queue::fake());
 
-    it('changes the description and renders that keyframe again', function () {
+    it('stages the keyframe anew, builds its description and renders it again', function () {
         $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
         $keyframe = Keyframe::factory()->for($shot)->create(['position' => 2, 'title' => 'Posting', 'render_error' => 'Old error']);
+        $description = 'He drops the envelope in the slot. A red mailbox on a quiet street. The Man stands on the right, is side-on facing left, looks at the mailbox, holds the envelope in the right hand and smiles.';
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He drops the envelope in the slot and smiles.'])
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), [
+                'summary' => 'He drops the envelope in the slot',
+                'place' => 'A red mailbox on a quiet street',
+                'cast' => [['name' => 'Man', 'stands' => 'right', 'faces' => 'left', 'looks_at' => 'the mailbox', 'holds' => 'the envelope', 'hand' => 'right', 'doing' => 'smiles']],
+            ])
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
         $keyframe->refresh();
 
-        expect($keyframe->description)->toBe('He drops the envelope in the slot and smiles.')
-            ->and($keyframe->rendering)->toBeTrue()
+        expect($keyframe->description)->toBe($description)
+            ->and($keyframe->staged()->cast[0]['looks_at'])->toBe('the mailbox')
+            ->and($keyframe->isBusy())->toBeTrue()
             ->and($keyframe->render_error)->toBeNull()
-            ->and($shot->fresh()->storylineKeyframes()[1])->toEqual(['title' => 'Posting', 'description' => 'He drops the envelope in the slot and smiles.']);
+            ->and($shot->fresh()->storylineKeyframes()[1])->toMatchArray(['title' => 'Posting', 'description' => $description, 'staging' => $keyframe->staging]);
 
-        Queue::assertPushed(GenerateKeyframeImage::class, fn(GenerateKeyframeImage $job) => $job->keyframe->is($keyframe));
+        Queue::assertPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->is($keyframe));
     });
 
     it('adjusts the current image to a changed description and keeps the wording', function () {
@@ -1123,7 +936,7 @@ describe('update', function () {
         $keyframe->forceFill(['render_id' => $render->id])->save();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He drops the envelope in the slot.'])
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => 'He drops the envelope in the slot.', 'cast' => [], 'following' => true])
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
         expect($keyframe->fresh()->description)->toBe('He drops the envelope in the slot.');
@@ -1131,8 +944,9 @@ describe('update', function () {
         Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->is($keyframe)
             && $job->rewrite
             && $job->describedByDirector
+            && $job->following
             && str_contains($job->instruction, '"He holds the envelope." to "He drops the envelope in the slot."'));
-        Queue::assertNotPushed(GenerateKeyframeImage::class);
+        Queue::assertNotPushed(DrawKeyframe::class);
     });
 
     it('draws the keyframe again from its description when asked, also unchanged', function () {
@@ -1142,26 +956,26 @@ describe('update', function () {
         $keyframe->forceFill(['render_id' => $render->id])->save();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He holds the envelope.', 'redraw' => true])
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => 'He holds the envelope.', 'cast' => [], 'redraw' => true])
             ->assertSessionHasNoErrors();
 
-        Queue::assertPushed(GenerateKeyframeImage::class, fn(GenerateKeyframeImage $job) => $job->keyframe->is($keyframe));
+        Queue::assertPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->is($keyframe));
         Queue::assertNotPushed(TweakKeyframeImage::class);
     });
 
-    it('needs a changed description to adjust the image', function () {
+    it('needs a changed staging to adjust the image', function () {
         $shot = plannedShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
         $keyframe = Keyframe::factory()->for($shot)->create(['description' => 'He holds the envelope.']);
         $render = $keyframe->addMedia(UploadedFile::fake()->image('render.png'))->toMediaCollection(Keyframe::RENDERS);
         $keyframe->forceFill(['render_id' => $render->id])->save();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He holds the envelope. '])
-            ->assertSessionHasErrors('description');
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => 'He holds the envelope. ', 'cast' => []])
+            ->assertSessionHasErrors('summary');
 
         Queue::assertNotPushed(TweakKeyframeImage::class);
-        Queue::assertNotPushed(GenerateKeyframeImage::class);
-        expect($keyframe->fresh()->rendering)->toBeFalse();
+        Queue::assertNotPushed(DrawKeyframe::class);
+        expect($keyframe->fresh()->isBusy())->toBeFalse();
     });
 
     it('drops the copy mark of the old wording', function () {
@@ -1171,19 +985,19 @@ describe('update', function () {
         $keyframe = Keyframe::factory()->for($shot)->create(['position' => 2, 'title' => 'Posting']);
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'The street is empty; he is not there yet.']);
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => 'The street is empty; he is not there yet.', 'cast' => []]);
 
         expect($shot->fresh()->storylineKeyframes()[1])->not->toHaveKey('copied')
             ->and($shot->fresh()->plannedKeyframeIsCopy(2))->toBeFalse();
     });
 
-    it('requires a description', function () {
+    it('requires what happens and the cast', function () {
         $shot = plannedShot($this->project);
         $keyframe = Keyframe::factory()->for($shot)->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => ''])
-            ->assertSessionHasErrors('description');
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => ''])
+            ->assertSessionHasErrors(['summary', 'cast']);
 
         Queue::assertNothingPushed();
     });
@@ -1193,7 +1007,7 @@ describe('update', function () {
         $keyframe = Keyframe::factory()->for($shot)->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$shot->project, $shot, $keyframe]), ['description' => 'Changed'])
+            ->post(route('public.shots.keyframes.update', [$shot->project, $shot, $keyframe]), ['summary' => 'Changed', 'cast' => []])
             ->assertForbidden();
 
         Queue::assertNothingPushed();
@@ -1211,13 +1025,13 @@ describe('update', function () {
         $plan = $shot->storylineKeyframes();
         $plan[1]['description'] = 'A man in a navy suit smiles at the mailbox.';
         $shot->forceFill(['storyline' => ['keyframes' => $plan]])->save();
-        $keyframe->forceFill(['rendering' => true])->save();
+        $keyframe->forceFill(['status' => KeyframeStatus::DRAWING])->save();
 
-        (new GenerateKeyframeImage($keyframe))->handle(app(KeyframePainter::class));
+        drawKeyframeNow($keyframe);
 
         $keyframe->refresh();
 
-        expect($keyframe->rendering)->toBeFalse()
+        expect($keyframe->isBusy())->toBeFalse()
             ->and($keyframe->render()->id)->not->toBe($previous)
             ->and($keyframe->renders())->toHaveCount(2);
 
@@ -1229,11 +1043,11 @@ describe('update', function () {
 
     it('marks the keyframe when its render fails', function () {
         $shot = plannedShot($this->project);
-        $keyframe = Keyframe::factory()->for($shot)->create(['rendering' => true]);
+        $keyframe = Keyframe::factory()->for($shot)->create(['status' => KeyframeStatus::DRAWING]);
 
-        (new GenerateKeyframeImage($keyframe))->failed(new RuntimeException('Provider down'));
+        (new DrawKeyframe($keyframe, $keyframe->draw_version))->failed(new RuntimeException('Provider down'));
 
-        expect($keyframe->fresh())->rendering->toBeFalse()->render_error->not->toBeNull();
+        expect($keyframe->fresh()->isBusy())->toBeFalse()->and($keyframe->fresh())->render_error->not->toBeNull();
     });
 });
 
@@ -1281,11 +1095,11 @@ describe('tweak', function () {
         renderAllKeyframes($shot);
         $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
 
-        TweakInterpreter::fake([['instruction' => 'The helmet on his head is plain blue without any lettering.', 'approach' => 'redraw', 'description' => 'He wears a plain blue helmet.', 'absent' => []]]);
+        TweakInterpreter::fake([['instruction' => 'The helmet on his head is plain blue without any lettering.', 'approach' => 'redraw', 'restage' => true, 'staging' => ['summary' => 'He wears a plain blue helmet.', 'place' => '', 'cast' => []], 'absent' => []]]);
 
         (new TweakKeyframeImage($keyframe, 'Make his helmet plain blue'))->handle(app(KeyframePainter::class));
 
-        // The text model only brings the description up to date; the image model gets the request as typed, as an edit.
+        // The text model only brings the staging up to date; the image model gets the request as typed, as an edit.
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this: Make his helmet plain blue'));
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('plain blue without any lettering'));
         expect($keyframe->fresh()->description)->toBe('He wears a plain blue helmet.');
@@ -1329,7 +1143,7 @@ describe('tweak', function () {
         expect($keyframe->renders())->toHaveCount(2)
             ->and($keyframe->render()->id)->not->toBe($previous)
             ->and($keyframe->render_id)->toBe($keyframe->render()->id)
-            ->and($keyframe->rendering)->toBeFalse()
+            ->and($keyframe->isBusy())->toBeFalse()
             ->and($keyframe->prompt)->toContain('pushes a white envelope')
             ->and($keyframe->generations()->latest('id')->first()->prompt)->toContain('Change only this: Remove the lighter from his hand')
             ->and($keyframe->generations()->latest('id')->first()->model)->toBe('openai/gpt-5.4-image-2');
@@ -1363,7 +1177,7 @@ describe('tweak', function () {
         ShotReviewer::fake(fn() => ['clear' => true, 'notes' => []]);
         $stages = [];
         KeyframeChecker::fake(function () use (&$stages) {
-            $stages[] = Keyframe::query()->where('position', 2)->value('render_stage');
+            $stages[] = Keyframe::query()->where('position', 2)->value('status');
 
             return ['inventory' => [], 'issues' => [
                 ['category' => 'place', 'change' => 'The DAMEN logo is missing from the hall.', 'severity' => 'high'],
@@ -1376,9 +1190,8 @@ describe('tweak', function () {
 
         $second = $shot->keyframes()->with('media')->where('position', 2)->firstOrFail();
 
-        expect($stages[0])->toBe(Keyframe::STAGE_CHECKING)
-            ->and($second->rendering)->toBeFalse()
-            ->and($second->render_stage)->toBeNull()
+        expect($stages[0])->toBe(KeyframeStatus::CHECKING)
+            ->and($second->isBusy())->toBeFalse()
             ->and($second->renders())->toHaveCount(1)
             ->and($second->render()->getCustomProperty(Keyframe::CHECK_ISSUES))->toBe(['The DAMEN logo is missing from the hall.']);
         Image::assertNotGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Correct these mistakes'));
@@ -1408,7 +1221,7 @@ describe('tweak', function () {
             && str_contains((string) $prompt->agent->instructions(), 'Image 1: keyframe 1 of the shot: the reference for the place and the camera, and for how the people look.'));
     });
 
-    it('reviews all keyframes together against the takeaway and keeps the notes', function () {
+    it('reviews all keyframes together against the storyline and keeps the notes', function () {
         Config::set('pipeline.keyframe_check', true);
         Image::fake(fn() => fakePng());
         KeyframeChecker::fake(fn() => ['inventory' => [], 'issues' => []]);
@@ -1419,8 +1232,9 @@ describe('tweak', function () {
         renderAllKeyframes($shot);
 
         expect($shot->fresh()->keyframe_review)->toBe(['clear' => false, 'notes' => [['text' => 'The envelope looks the same, so posting cannot be seen.', 'keyframes' => [2, 3]]]]);
-        ShotReviewer::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'The shot teaches: Sending the letter is easy and final') && $prompt->attachments->count() === 3);
-        ShotReviewer::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'recognisable as the same person throughout'));
+        ShotReviewer::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Storyline: He posts the letter.') && $prompt->attachments->count() === 3);
+        ShotReviewer::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'recognisable as the same person throughout')
+            && str_contains((string) $prompt->agent->instructions(), 'people with different names are different people on purpose'));
         ShotReviewer::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Two keyframes in a row that look almost the same')
             && str_contains((string) $prompt->agent->instructions(), 'Someone who enters a place moves into it')
             && str_contains((string) $prompt->agent->instructions(), 'Words, logos or numbers that appear or disappear between keyframes')
@@ -1479,14 +1293,15 @@ describe('tweak', function () {
         expect($shot->fresh()->reviewing)->toBeFalse();
     });
 
-    it('rewrites the description and takes off the cast that an adjustment removes', function () {
+    it('stages the keyframe anew and takes off the cast that an adjustment removes', function () {
         Config::set('pipeline.rules.enabled', true);
         Queue::fake([ClassifyCorrection::class]);
         Image::fake(fn() => fakePng());
         TweakInterpreter::fake([[
             'instruction' => 'The man is removed; the mailbox stands alone.',
             'approach' => 'edit',
-            'description' => 'The red mailbox stands alone on the empty street.',
+            'restage' => true,
+            'staging' => ['summary' => 'The mailbox stands alone', 'place' => 'The red mailbox stands alone on the empty street.', 'cast' => []],
             'absent' => ['Mark, the visitor'],
         ]]);
         $shot = plannedShot($this->project);
@@ -1501,19 +1316,22 @@ describe('tweak', function () {
         $first->refresh()->load('elements');
         $plan = $shot->fresh()->storylineKeyframes()[0];
 
-        expect($first->description)->toBe('The red mailbox stands alone on the empty street.')
+        expect($first->description)->toBe('The mailbox stands alone. The red mailbox stands alone on the empty street.')
+            ->and($first->staged()->summary)->toBe('The mailbox stands alone')
             ->and($first->elements->pluck('name')->all())->toBe(['Red mailbox'])
-            ->and($plan['description'])->toBe('The red mailbox stands alone on the empty street.')
+            ->and($plan['description'])->toBe('The mailbox stands alone. The red mailbox stands alone on the empty street.')
+            ->and($plan['staging'])->toBe($first->staging)
             ->and($plan['elements'])->toBe(['Red mailbox'])
             ->and(Correction::query()->where('source', CorrectionSource::ADJUSTMENT)->value('context'))
             ->toContain('The keyframe should show: ' . plannedKeyframes()[0]['description'])
             ->not->toContain('Must show:');
-        TweakInterpreter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Cast and sets in the keyframe:'));
+        TweakInterpreter::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Cast and sets in the keyframe:')
+            && str_contains((string) $prompt->agent->instructions(), 'How the keyframe is staged now:'));
     });
 
-    it('keeps the description when an adjustment only changes a detail', function () {
+    it('keeps the staging when an adjustment only changes a detail', function () {
         Image::fake(fn() => fakePng());
-        TweakInterpreter::fake([['instruction' => 'The mailbox is a brighter red.', 'approach' => 'edit', 'description' => '', 'absent' => []]]);
+        TweakInterpreter::fake([['instruction' => 'The mailbox is a brighter red.', 'approach' => 'edit', 'restage' => false, 'staging' => ['summary' => 'Ignored.', 'place' => '', 'cast' => []], 'absent' => []]]);
         $shot = plannedShot($this->project);
         renderAllKeyframes($shot);
         $first = $shot->keyframes()->firstOrFail();
@@ -1525,9 +1343,9 @@ describe('tweak', function () {
             ->and($shot->fresh()->storylineKeyframes()[0]['description'])->toBe(plannedKeyframes()[0]['description']);
     });
 
-    it('keeps the description the director wrote when the adjustment comes from it', function () {
+    it('keeps the staging the director made when the adjustment comes from it', function () {
         Image::fake(fn() => fakePng());
-        TweakInterpreter::fake([['instruction' => 'He drops the envelope into the slot.', 'approach' => 'edit', 'description' => 'A rewritten description.', 'absent' => []]]);
+        TweakInterpreter::fake([['instruction' => 'He drops the envelope into the slot.', 'approach' => 'edit', 'restage' => true, 'staging' => ['summary' => 'A rewritten line.', 'place' => '', 'cast' => []], 'absent' => []]]);
         $shot = plannedShot($this->project);
         renderAllKeyframes($shot);
         $first = $shot->keyframes()->firstOrFail();
@@ -1700,7 +1518,7 @@ describe('tweak', function () {
             ->post(route('public.shots.keyframes.tweak', [$this->project, $shot, $keyframe]), ['instruction' => 'Make the sign bigger'])
             ->assertRedirect(route('public.shots.view', [$this->project, $shot]));
 
-        expect($keyframe->fresh()->rendering)->toBeTrue();
+        expect($keyframe->fresh()->isBusy())->toBeTrue();
 
         Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->is($keyframe) && $job->instruction === 'Make the sign bigger');
     });
@@ -1720,11 +1538,11 @@ describe('tweak', function () {
 
     it('marks the keyframe when the adjustment fails', function () {
         $shot = plannedShot($this->project);
-        $keyframe = Keyframe::factory()->for($shot)->create(['rendering' => true]);
+        $keyframe = Keyframe::factory()->for($shot)->create(['status' => KeyframeStatus::DRAWING]);
 
         (new TweakKeyframeImage($keyframe, 'Anything'))->failed(new RuntimeException('Provider down'));
 
-        expect($keyframe->fresh())->rendering->toBeFalse()->render_error->not->toBeNull();
+        expect($keyframe->fresh()->isBusy())->toBeFalse()->and($keyframe->fresh())->render_error->not->toBeNull();
     });
 });
 
@@ -1860,7 +1678,7 @@ describe('image', function () {
                 ->where('keyframes.0.imageUrl', fn(string $url) => str_contains($url, '/keyframes/') && str_contains($url, '?render='))
                 ->where('keyframes.0.thumbnailUrl', fn(string $url) => str_contains($url, '/thumbnail?render='))
                 ->where('siblings.0.thumbnailUrl', fn(string $url) => str_contains($url, '/thumbnail?render='))
-                ->where('shot.links.keyframesGenerate', route('public.shots.keyframes.generate', [$this->project, $shot])));
+                ->where('shot.links.retry', route('public.shots.retry', [$this->project, $shot])));
     });
 
     it('has no image links before a keyframe is rendered', function () {
@@ -1929,10 +1747,6 @@ describe('starting the plan over', function () {
         expect($runs($drawing))->toBeFalse()
             ->and($drawing->planReplaced())->toBeTrue()
             ->and($runs(new GenerateRemainingKeyframes($shot->fresh())))->toBeTrue();
-
-        // The places of the old plan are not offered once they are done.
-        GenerateKeyframes::finishPlates($shot->id, planVersion: 0);
-        expect($shot->fresh()->status)->toBe(ShotStatus::STORYLINE_READY);
     });
 });
 
@@ -1952,6 +1766,7 @@ describe('text and places in the checks', function () {
 
 describe('length', function () {
     it('times the shot again from its keyframes and writes the voice-over for the new length', function () {
+        Config::set('pipeline.voice_over.automatic', true);
         Queue::fake([App\Jobs\GenerateVoiceOver::class]);
         App\Ai\Agents\ShotTimer::fake([['seconds' => 2]]);
         $shot = Shot::factory()->for($this->project)->create(['duration' => null, 'voice_over' => 'An old text.', 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 5], 'keyframes' => plannedKeyframes()]]);
@@ -1963,6 +1778,22 @@ describe('length', function () {
         Queue::assertPushed(App\Jobs\GenerateVoiceOver::class);
         App\Ai\Agents\ShotTimer::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '2. Posting: A man in a navy suit pushes a white envelope')
             && str_contains((string) $prompt->agent->instructions(), 'picking up, handing over or putting down an object: 1 second'));
+    });
+
+    it('leaves the voice-over to the director unless voice-overs are made automatically, except for a presenter', function () {
+        Queue::fake([App\Jobs\GenerateVoiceOver::class]);
+        App\Ai\Agents\ShotTimer::fake([['seconds' => 2], ['seconds' => 2]]);
+        $shot = Shot::factory()->for($this->project)->create(['duration' => null, 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 5], 'keyframes' => plannedKeyframes()]]);
+
+        (new App\Jobs\RetimeShot($shot))->handle();
+
+        Queue::assertNotPushed(App\Jobs\GenerateVoiceOver::class);
+
+        $presenter = Shot::factory()->for($this->project)->create(['kind' => 'presenter', 'duration' => null, 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 5], 'keyframes' => plannedKeyframes()]]);
+
+        (new App\Jobs\RetimeShot($presenter))->handle();
+
+        Queue::assertPushed(App\Jobs\GenerateVoiceOver::class, fn($job) => $job->shot->is($presenter));
     });
 
     it('keeps a length the director set', function () {
@@ -1978,12 +1809,12 @@ describe('length', function () {
     });
 
     it('times the shot again once a keyframe is added or described differently', function () {
-        Queue::fake([App\Jobs\RetimeShot::class, App\Jobs\GenerateKeyframeImage::class, App\Jobs\TweakKeyframeImage::class, App\Jobs\FollowStoryline::class]);
+        Queue::fake([App\Jobs\RetimeShot::class, App\Jobs\DrawKeyframe::class, App\Jobs\TweakKeyframeImage::class, App\Jobs\FollowStoryline::class]);
         $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY, 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 4], 'keyframes' => plannedKeyframes()]]);
         $keyframe = Keyframe::factory()->for($shot)->create(['position' => 1, 'description' => 'Old.']);
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['description' => 'He walks all the way across the hall.', 'redraw' => true])
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $keyframe]), ['summary' => 'He walks all the way across the hall.', 'cast' => [], 'redraw' => true])
             ->assertSessionHasNoErrors();
 
         Queue::assertPushed(App\Jobs\RetimeShot::class);

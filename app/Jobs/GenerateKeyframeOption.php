@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Jobs\Concerns\FollowsPlan;
+use App\Jobs\Concerns\RetriesHiccups;
 use App\Models\Keyframe;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -24,8 +25,7 @@ class GenerateKeyframeOption implements ShouldQueue
     use Batchable;
     use FollowsPlan;
     use Queueable;
-
-    public int $tries = 1;
+    use RetriesHiccups;
 
     public int $timeout = 300;
 
@@ -47,6 +47,6 @@ class GenerateKeyframeOption implements ShouldQueue
         $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
         $first = $siblings->firstWhere('id', $this->keyframe->id) ?? $this->keyframe->setRelation('shot', $shot);
 
-        $painter->render($first, $siblings, KeyframeImageBrief::variation($this->variation), choose: false);
+        $this->retryingHiccups(fn() => $painter->render($first, $siblings, KeyframeImageBrief::variation($this->variation), choose: false));
     }
 }

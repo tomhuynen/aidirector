@@ -35,6 +35,10 @@ return [
         // Makes a person in one still speak a text to the camera, lip-synced, with a voice of its own.
         'presenter' => env('AI_PRESENTER_MODEL', 'heygen/avatar-iv'),
         // Checks each drawn keyframe and decides on a redraw: few false alarms (benchmark of 2026-10-04).
+        // Draws a keyframe on the image before it, keeping that image and drawing only the boxes of the cast who change: FLUX 3 on Replicate.
+        'keyframe_layout' => env('AI_KEYFRAME_LAYOUT_MODEL', 'black-forest-labs/flux-3-image'),
+        // Blocks a keyframe on the image before it: where each of the cast stands, faces and how they pose.
+        'keyframe_stager' => env('AI_KEYFRAME_STAGER_MODEL', 'google/gemini-3.8-flash'),
         'keyframe_check' => env('AI_KEYFRAME_CHECK_MODEL', 'google/gemini-3.8-flash'),
         // Checks afterwards whether the place stayed the same; sees shifted floor lines best, its findings become notes.
         'place_check' => env('AI_PLACE_CHECK_MODEL', 'openai/gpt-5.5'),
@@ -65,16 +69,17 @@ return [
         'tweak_interpreter' => null,
         'video_prompt_writer' => null,
         'keyframe_checker' => env('AI_KEYFRAME_CHECK_REASONING', 'low'),
+        'keyframe_stager' => 'low',
+        'keyframe_fix_locator' => 'low',
         'shot_reviewer' => env('AI_SHOT_REVIEW_REASONING', 'medium'),
         'correction_classifier' => env('AI_CORRECTION_REASONING', 'low'),
         'voice_over_writer' => env('AI_VOICE_OVER_REASONING', 'low'),
         'voice_over_translator' => env('AI_VOICE_OVER_REASONING', 'low'),
         'bench_judge' => 'low',
-        'moved_person_describer' => 'low',
         'voice_judge' => 'low',
         'storyline_follower' => 'low',
         'shot_timer' => 'low',
-        'plan_director' => 'low',
+        'plan_director' => 'medium',
     ],
 
     /*
@@ -109,8 +114,9 @@ return [
 
     /*
      * After drawing, a second model compares the place with keyframe 1; what it finds becomes notes.
+     * Off: the layout model keeps the place, and the check mostly reported drift a viewer does not see.
      */
-    'place_check' => env('AI_PLACE_CHECK', true),
+    'place_check' => env('AI_PLACE_CHECK', false),
 
     /*
      * Changes and check findings are labelled in the background; a kind of
@@ -127,34 +133,18 @@ return [
         // The most the planner plans; the director may add more by hand, up to max_manual.
         'max' => 6,
         'max_manual' => 10,
-        // Variations of keyframe 1 the director chooses from before the rest renders; with 1 the rest follows straight away.
-        'first_options' => (int) env('AI_FIRST_KEYFRAME_OPTIONS', 1),
-        // Start a shot with empty places to choose from, all keyframes are then drawn on the chosen one.
-        'start_with_plate' => (bool) env('AI_START_WITH_PLATE', true),
-        'plate_options' => (int) env('AI_PLATE_OPTIONS', 3),
+        // Versions of keyframe 1, each drawn whole in the shot's place, the director chooses from before the rest is drawn.
+        'first_options' => (int) env('AI_FIRST_KEYFRAME_OPTIONS', 3),
         // Reference images of the cast and sets attached to one keyframe render.
         'max_element_references' => 3,
-        // Moving a person by hand: the pose is redrawn for the new spot, again when the redraw moves them off it.
-        'move' => [
-            'attempts' => 2,
-            // How far the feet may end up from where they were put, as a share of the image.
-            'tolerance' => 0.06,
-        ],
+        // Measures the depth of a place, so a person or a thing is drawn at the size it has where it stands: Depth Anything 3 metric on Replicate.
+        'depth_model' => env('AI_DEPTH_MODEL', 'd2ef7653aa75f87e3b502738a3f57ca2b09ba92f6f286075c8929a69937a013f'),
         // Measured in code after each edit: a render whose background moved compared with the image it was drawn on is drawn again.
         'drift' => [
             'enabled' => (bool) env('AI_DRIFT_CHECK', true),
             // With this share of the background in place nothing is searched; below it, the render counts as moved only when a shift or zoom lines it up clearly better.
             'min_stillness' => (float) env('AI_DRIFT_MIN_STILLNESS', 0.85),
             'attempts' => (int) env('AI_DRIFT_ATTEMPTS', 3),
-        ],
-        // A keyframe drawn on a place keeps only its people and the objects named in it; everything else is the place itself, pixel for pixel.
-        // A change to the place, such as a door that closes, becomes its own version of the place the same way. Needs a Replicate token.
-        'composite' => [
-            'enabled' => (bool) env('AI_COMPOSITE', true),
-            // Cuts out the people: BiRefNet.
-            'people_model' => env('AI_COMPOSITE_PEOPLE_MODEL', 'f74986db0355b58403ed20963af156525e2891ea3c2d499bfbfb2a28cd87c5d7'),
-            // Cuts out a thing by its name: Lang-SAM.
-            'object_model' => env('AI_COMPOSITE_OBJECT_MODEL', '891411c38a6ed2d44c004b7b9e44217df7a5b07848f29ddefd2e28bc7cbf93bc'),
         ],
     ],
 
@@ -195,6 +185,8 @@ return [
      * MAI Voice 2.1 on OpenRouter, the widest multilingual set there.
      */
     'voice_over' => [
+        // Whether a shot's voice-over is written once its plan is made and spoken while its video renders; off, the director asks for it.
+        'automatic' => (bool) env('AI_VOICE_OVER_AUTOMATIC', false),
         'locales' => [
             'nl-NL', 'en-GB', 'en-US', 'de-DE', 'fr-FR', 'es-ES', 'it-IT', 'pt-PT', 'pt-BR', 'pl-PL',
             'da-DK', 'sv-SE', 'nb-NO', 'fi-FI', 'cs-CZ', 'hu-HU', 'ro-RO', 'ru-RU', 'tr-TR', 'es-MX',

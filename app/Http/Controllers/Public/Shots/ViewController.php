@@ -50,7 +50,7 @@ class ViewController
             /**
              * For a merged shot: its parts and how their clips are joined.
              *
-             * @var array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, takeaway: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null, url: string}>, links: array{update: string, unmerge: string}}|null
+             * @var array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null, url: string}>, links: array{update: string, unmerge: string}}|null
              */
             'merge' => fn() => $this->merge($project, $shot),
             /**
@@ -69,7 +69,7 @@ class ViewController
     }
 
     /**
-     * @return array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, takeaway: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null, url: string}>, links: array{update: string, unmerge: string}}|null
+     * @return array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null, url: string}>, links: array{update: string, unmerge: string}}|null
      */
     private function merge(Project $project, Shot $shot): ?array
     {
@@ -85,7 +85,6 @@ class ViewController
             'parts' => $parts->map(fn(Shot $part) => [
                 'id' => $part->sqid,
                 'title' => $part->title,
-                'takeaway' => (string) $part->takeaway,
                 'storyline' => $part->chosen_storyline['storyline'] ?? null,
                 'duration' => $part->durationInSeconds(),
                 'thumbnailUrl' => ShotListItemResource::make($part)->resolve()['thumbnailUrl'],

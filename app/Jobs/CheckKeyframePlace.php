@@ -43,8 +43,6 @@ class CheckKeyframePlace implements ShouldQueue
     public static function start(Keyframe $keyframe, Media $render): void
     {
         if (Config::get('pipeline.keyframe_check') && Config::get('pipeline.place_check') && $keyframe->position > 1) {
-            // Shown as checking in the editor, without blocking the keyframe for changes.
-            $keyframe->forceFill(['render_stage' => Keyframe::STAGE_CHECKING])->save();
             self::dispatch($keyframe, (int) $render->id);
         }
     }
@@ -56,36 +54,15 @@ class CheckKeyframePlace implements ShouldQueue
         $keyframe = $siblings->firstWhere('id', $this->keyframe->id);
         $render = $keyframe?->renders()->firstWhere('id', $this->renderId);
 
-        try {
-            // The keyframe was drawn again or moved to the front meanwhile.
-            if ($keyframe === null || $render === null || $keyframe->position === 1) {
-                return;
-            }
-
-            $issues = $painter->checkPlace($keyframe, $render, $painter->referencesFor($keyframe, $siblings));
-
-            if ($issues !== null) {
-                $render->setCustomProperty(Keyframe::PLACE_ISSUES, $issues)->save();
-            }
-        } finally {
-            $this->doneChecking();
+        // The keyframe was drawn again or moved to the front meanwhile.
+        if ($keyframe === null || $render === null || $keyframe->position === 1) {
+            return;
         }
-    }
 
-    public function failed(): void
-    {
-        $this->doneChecking();
-    }
+        $issues = $painter->checkPlace($keyframe, $render, $painter->referencesFor($keyframe, $siblings));
 
-    /**
-     * Clear the checking label, unless the keyframe is being drawn again and shows its own progress.
-     */
-    private function doneChecking(): void
-    {
-        Keyframe::query()
-            ->whereKey($this->keyframe->getKey())
-            ->where('render_stage', Keyframe::STAGE_CHECKING)
-            ->where('rendering', false)
-            ->update(['render_stage' => null]);
+        if ($issues !== null) {
+            $render->setCustomProperty(Keyframe::PLACE_ISSUES, $issues)->save();
+        }
     }
 }

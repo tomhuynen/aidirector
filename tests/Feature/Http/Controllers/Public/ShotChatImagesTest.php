@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 use App\Ai\Agents\PlanDirector;
 use App\Enums\Disk;
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
-use App\Jobs\AdjustPlateOption;
+use App\Jobs\ChangeCastMember;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\TweakKeyframeImage;
 use App\Models\Director;
@@ -80,7 +81,7 @@ it('goes on about the drawn images: the selected one is attached and a clear cha
         ->assertJsonPath('messages.2.about', 'keyframe 2, Badge shown')
         ->assertJsonPath('messages.3.changes', ['Keyframe 2: She holds the badge in her right hand.']);
 
-    expect($second->fresh()->rendering)->toBeTrue()
+    expect($second->fresh()->isBusy())->toBeTrue()
         ->and($shot->fresh()->plan_chat)->toHaveCount(4);
     Bus::assertChained([fn(TweakKeyframeImage $job) => $job->keyframe->is($second) && $job->rewrite]);
     // The same conversation, with what was agreed before, and the image it is about.
@@ -106,24 +107,25 @@ it('changes several keyframes one after the other, in their order', function () 
     ]);
 });
 
-it('adjusts the selected place while the places wait for a choice', function () {
+it('adjusts the selected option for keyframe 1 while the options wait for a choice', function () {
     $shot = drawnShot($this->project);
     $shot->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_READY])->save();
-    $place = $shot->addMediaFromString(drawnImagePng())->usingFileName('place.png')->toMediaCollection(Shot::PLATE_OPTIONS);
-    PlanDirector::fake([imagesReply(['changes' => [['keyframe' => 0, 'change' => 'Put the bin left of the door.']]])]);
+    $first = $shot->keyframes()->where('position', 1)->firstOrFail();
+    $option = $first->render();
+    PlanDirector::fake([imagesReply(['changes' => [['keyframe' => 0, 'change' => 'Put the bin left of the door.', 'description' => '']]])]);
 
     actingAs($this->director, 'director')
-        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'the bin should be left of the door', 'target' => 'place', 'option' => $place->id])
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'the bin should be left of the door', 'target' => 'option', 'option' => $option->id])
         ->assertOk()
         ->assertJsonPath('reload', true);
 
-    Bus::assertDispatched(AdjustPlateOption::class, fn(AdjustPlateOption $job) => $job->option === $place->id && $job->instruction === 'Put the bin left of the door.');
+    Bus::assertDispatched(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->is($first) && $job->option === $option->id && $job->instruction === 'Put the bin left of the door.');
 });
 
 it('starts the plan over when a new plan is agreed for a drawn shot', function () {
     $shot = drawnShot($this->project);
     PlanDirector::fake([imagesReply(['proposal' => [
-        'takeaway' => '', 'kind' => 'scene', 'storyline' => 'He waits behind the line.', 'seconds' => 3, 'setting_from' => null,
+        'title' => '', 'kind' => 'scene', 'storyline' => 'He waits behind the line.', 'seconds' => 3, 'setting_from' => null,
         'keyframes' => [['title' => 'Waits', 'description' => 'He waits behind the line.', 'spatial' => '', 'elements' => []]],
     ]])]);
 
@@ -151,4 +153,62 @@ it('says why a change has to wait while something is being drawn', function () {
         ->assertJsonPath('messages.3.text', 'I am changing it. (I can change it once it is drawn and nothing else is being drawn.)');
 
     Bus::assertNothingChained();
+});
+
+describe('with one of the cast selected', function () {
+    beforeEach(function () {
+        $this->shot = drawnShot($this->project);
+        $this->second = $this->shot->keyframes()->where('position', 2)->firstOrFail();
+        $this->second->forceFill(['status' => KeyframeStatus::READY, 'layout' => ['cast' => [['name' => 'Visitor', 'box' => [300, 400, 900, 600], 'facing' => 'facing the gate', 'pose' => 'standing', 'changed' => true]]]])->save();
+    });
+
+    it('proposes the change to them, and makes it only once the director confirms it', function () {
+        $this->second->restage(App\Support\Shots\KeyframeStaging::fromArray(['cast' => [['name' => 'Visitor', 'stands' => 'centre', 'faces' => 'right', 'looks_at' => 'the badge', 'holds' => 'the badge', 'hand' => 'right', 'doing' => 'holds it up']]]))->save();
+        $member = ['name' => 'Visitor', 'stands' => 'centre', 'faces' => 'away', 'looks_at' => 'the gate', 'holds' => 'the badge', 'hand' => 'right', 'doing' => 'holds it up'];
+        PlanDirector::fake([imagesReply(['reply' => 'I will turn the visitor toward the gate. Shall I?', 'changes' => [['keyframe' => 0, 'change' => 'The visitor turns to look at the gate.', 'member' => [...$member, 'name' => 'visitor']]]])]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.chat', [$this->project, $this->shot]), ['message' => 'look at the gate', 'target' => 'keyframe', 'keyframe' => $this->second->sqid, 'member' => 'visitor'])
+            ->assertOk()
+            ->assertJsonPath('reload', false)
+            ->assertJsonPath('messages.2.about', 'Visitor in keyframe 2, Badge shown, outlined in the image')
+            ->assertJsonPath('messages.3.proposed', ['keyframe' => $this->second->sqid, 'name' => 'Visitor', 'change' => 'The visitor turns to look at the gate.', 'member' => $member, 'fields' => [
+                ['field' => 'faces', 'from' => 'right', 'to' => 'away'],
+                ['field' => 'looks_at', 'from' => 'the badge', 'to' => 'the gate'],
+            ]]);
+
+        Bus::assertNothingDispatched();
+        expect($this->second->fresh()->isBusy())->toBeFalse();
+        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Selected: Visitor in keyframe 2')
+            && str_contains($prompt->prompt, 'their fields now: {"name":"Visitor","stands":"centre","faces":"right","looks_at":"the badge"'));
+        expect((string) (new PlanDirector($this->shot, []))->instructions())->toContain('read in the attached image where it is from them and set faces by the rule for faces')
+            ->toContain('what lies behind them, deeper in the frame or in the background, means away');
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.change', [$this->project, $this->shot]), ['turn' => 3, 'apply' => true, 'following' => true])
+            ->assertOk()
+            ->assertJsonPath('messages.3.proposed.state', 'made');
+
+        expect($this->second->fresh()->status)->toBe(KeyframeStatus::DRAWING)
+            ->and($this->second->fresh()->staged()->cast)->toBe([$member])
+            ->and($this->second->fresh()->description)->toBe('The Visitor stands in the centre, has the back to the camera, looks at the gate, holds the badge in the right hand and holds it up.')
+            ->and($this->shot->fresh()->storylineKeyframes()[1]['description'])->toBe($this->second->fresh()->description);
+        Bus::assertDispatched(ChangeCastMember::class, fn(ChangeCastMember $job) => $job->keyframe->is($this->second) && $job->name === 'Visitor' && $job->change === 'The visitor turns to look at the gate.' && $job->following);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.change', [$this->project, $this->shot]), ['turn' => 3, 'apply' => true])
+            ->assertJsonValidationErrors('turn');
+    });
+
+    it('leaves the keyframe as it is when the director cancels the change', function () {
+        $this->shot->forceFill(['plan_chat' => [...$this->shot->plan_chat, ['role' => 'director', 'text' => 'a blue jacket'], ['role' => 'assistant', 'text' => 'Shall I?', 'proposed' => ['keyframe' => $this->second->sqid, 'name' => 'Visitor', 'change' => 'The visitor wears a blue jacket.']]]])->save();
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.change', [$this->project, $this->shot]), ['turn' => 3, 'apply' => false])
+            ->assertOk()
+            ->assertJsonPath('messages.3.proposed.state', 'cancelled');
+
+        Bus::assertNothingDispatched();
+        expect($this->second->fresh()->isBusy())->toBeFalse();
+    });
 });

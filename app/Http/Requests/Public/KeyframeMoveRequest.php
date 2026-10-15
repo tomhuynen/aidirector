@@ -14,16 +14,13 @@ class KeyframeMoveRequest extends FormRequest
     public function rules(): array
     {
         return [
-            /** Where the director clicked the person, as shares of the image width and height. */
-            'x' => ['required', 'numeric', 'between:0,1'],
-            'y' => ['required', 'numeric', 'between:0,1'],
-            /** How far the person's feet move, as shares of the image width and height. */
-            'dx' => ['required', 'numeric', 'between:-1,1'],
-            'dy' => ['required', 'numeric', 'between:-1,1'],
-            /** How much larger or smaller the person becomes, around their feet. */
-            'scale' => ['required', 'numeric', 'between:0.3,3'],
-            /** What the person does from the new spot; without it, what the keyframe description says. */
-            'instruction' => ['nullable', 'string', 'max:500'],
+            /** The name of the one of the cast that is moved, as the keyframe's layout has it. */
+            'name' => ['required', 'string', 'max:120'],
+            /** Its new box: top, left, bottom and right on a 0 to 1000 grid of the frame; past the edge it is cut off, wholly past it it leaves the shot. */
+            'box' => ['required', 'array', 'size:4'],
+            'box.*' => ['required', 'integer', 'between:-3000,4000'],
+            /** Also draw the keyframes after it again, so they follow the move. */
+            'following' => ['sometimes', 'boolean'],
         ];
     }
 }

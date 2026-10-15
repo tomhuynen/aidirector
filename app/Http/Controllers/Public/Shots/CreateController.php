@@ -17,7 +17,7 @@ use Inertia\Response;
 
 /**
  * A new shot: it is added at the end of the sequence with an empty plan and
- * opens in the plan chat, where its takeaway and plan are worked out.
+ * opens in the plan chat, where its idea and plan are worked out.
  */
 class CreateController
 {
@@ -43,9 +43,8 @@ class CreateController
         $shot = $project->allShots()->create([
             'position' => ($project->shots()->max('position') ?? 0) + 1,
             'title' => '',
-            'takeaway' => '',
             'status' => ShotStatus::STORYLINE_READY,
-            'chosen_storyline' => ['title' => '', 'storyline' => ''],
+            'chosen_storyline' => ['storyline' => ''],
             'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => []],
         ]);
 

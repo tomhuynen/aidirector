@@ -40,7 +40,7 @@ class RecordCorrection
     public static function keyframeContext(Keyframe $keyframe): string
     {
         return implode(' ', [
-            "Takeaway of the shot: {$keyframe->shot->takeaway}.",
+            'Storyline of the shot: ' . ($keyframe->shot->chosenStoryline()['storyline'] ?? ''),
             "The keyframe should show: {$keyframe->fullDescription()}",
         ]);
     }

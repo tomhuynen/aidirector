@@ -66,7 +66,7 @@ it('keeps the framing when the planned keyframes change', function () {
         ->and($shot->fresh()->storylineKeyframes())->toHaveCount(2);
 });
 
-it('puts the action in the centre and keeps the place\'s own logos and signs', function () {
+it('puts the action in the centre and allows no text anywhere, also not on the place\'s signs', function () {
     $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences()))
@@ -74,8 +74,8 @@ it('puts the action in the centre and keeps the place\'s own logos and signs', f
         ->toContain('together in the centre of the frame, large and clear')
         ->toContain('Keep the background simple and subdued')
         ->toContain('vehicles, containers and machines stand on open ground at their real size, never on or against a wall')
-        ->toContain('Logos, signs and markings that belong to the place stay exactly as they are.')
-        ->not->toContain('No text, captions, logos or watermarks');
+        ->toContain(App\Ai\Briefs\TextRules::NO_TEXT)
+        ->not->toContain('lettering');
 });
 
 it('draws later keyframes as an edit of keyframe 1, so every fixed part of the place stays', function () {
@@ -131,20 +131,21 @@ it('takes the people from their pictures and the state of things from the keyfra
         ->toContain('The third attached image is the keyframe directly before this one. Carry over the state and position of every object from it');
 });
 
-it('never lets the image model write labels on cards, badges or permits', function () {
-    expect(KeyframeImageBrief::tweak('the permit lies on the dashboard'))
-        ->toContain('never write words, labels, numbers or ID details on cards, badges, permits')
-        ->and(KeyframeImageBrief::tweakOnPlate('the permit lies on the dashboard'))
-        ->toContain('never write words, labels, numbers or ID details on cards, badges, permits');
+it('never lets the image model write text, also not on cards, badges or permits', function () {
+    expect(KeyframeImageBrief::tweak(App\Models\Project::factory()->create(), 'the permit lies on the dashboard'))
+        ->toContain('not on signs, buildings, vehicles, clothing, helmets, cards, badges, permits');
 });
 
 it('plans around what the video model cannot do, and has the plan director explain it and propose another way', function () {
     $shot = Shot::factory()->create();
 
-    expect(App\Ai\Briefs\VideoLimitsBrief::limits())->toHaveCount(10)
+    expect(App\Ai\Briefs\VideoLimitsBrief::limits())->toHaveCount(11)
         ->and((string) (new App\Ai\Agents\StorylineWriter($shot->load('project')))->instructions())
         ->toContain('What the video model cannot do in one shot')
         ->toContain('The place changes within the shot, such as driving through a gate')
+        ->toContain('Something appears, disappears or changes hands, place or state between two keyframes without a keyframe that shows it')
+        ->toContain('everything the shot uses, people and things, is in the frame from keyframe 1, or visibly comes in')
+        ->toContain('putting on or taking off clothing or gear, such as a vest, a jacket or a helmet: 3 to 4 seconds')
         ->and((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
         ->toContain('tell the director in plain words why it will not work')
         ->toContain('Never write a plan that runs into one of these limits');

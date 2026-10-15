@@ -85,6 +85,26 @@ it('adds them to the cast and sets with their picture drawn, and waits for it be
         ->assertInertia(fn($page) => $page->where('shot.addedElements', [$office->sqid])->where('shot.newElements', []));
 });
 
+it('puts what it made into the cast offered last in the chat, to use with the rest', function () {
+    Queue::fake();
+    $shot = shotNeedingElements($this->project);
+    $guard = Element::factory()->for($this->project)->create(['name' => 'Security officer', 'type' => ElementType::PERSON]);
+    $shot->forceFill(['plan_chat' => [
+        ['role' => 'director', 'text' => 'ok'],
+        ['role' => 'assistant', 'text' => 'Which of these?', 'stage' => 'cast', 'cast' => [$guard->sqid]],
+        ['role' => 'assistant', 'text' => 'Shall I make the Design office?'],
+    ]])->save();
+
+    actingAs($this->director, 'director')
+        ->post(route('public.shots.plan.elements', [$this->project, $shot]))
+        ->assertSessionHasNoErrors();
+
+    $office = $this->project->elements()->where('name', 'Design office')->firstOrFail();
+
+    expect($shot->fresh()->plan_chat[1]['cast'])->toBe([$guard->sqid, $office->sqid])
+        ->and($shot->fresh()->plan_chat)->toHaveCount(3);
+});
+
 it('leaves them out when the director says so', function () {
     $shot = shotNeedingElements($this->project);
 

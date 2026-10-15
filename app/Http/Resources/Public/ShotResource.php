@@ -12,6 +12,7 @@ use App\Jobs\GenerateVoiceOver;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Support\Decisions\ShotIssues;
+use App\Support\Shots\RenderEstimates;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -40,9 +41,8 @@ class ShotResource extends JsonResource
             /** @var int */
             'position' => $this->position,
             'title' => $this->title,
-            'takeaway' => $this->takeaway,
             /** @var string|null */
-            'notes' => $this->notes,
+            'idea' => $this->idea,
             'status' => $this->status,
             /** A scene at one place, or a montage of separate stills; scene until planned. */
             'kind' => $this->kind ?? ShotKind::SCENE,
@@ -61,32 +61,29 @@ class ShotResource extends JsonResource
             'seconds' => $this->durationInSeconds(),
             /** @var array{title: string, storyline: string}|null */
             'chosenStoryline' => $this->chosen_storyline,
-            /** @var array{keyframes: array<int, array{title: string, description: string, prompt?: string}>}|null */
+            /** @var array{keyframes: array<int, array{title: string, description: string, staging?: array{summary: string}, prompt?: string}>}|null */
             'storyline' => $this->storyline,
             /** @var string|null */
             'storylineError' => $this->storyline_error,
             /**
              * What the checks found, grouped per keyframe (position) or for the whole shot (position null), with what can be done about it.
              *
-             * @var array<int, array{key: string, position: int|null, issues: array<int, string>, fixUrl: string|null, dismissUrl: string}>
+             * @var array<int, array{key: string, position: int|null, issues: array<int, string>, fixUrl: string|null, redrawUrl: string|null, dismissUrl: string}>
              */
             'issueGroups' => $this->issueGroups(),
             /** Whether the keyframes are being reviewed together right now. */
             'reviewing' => (bool) $this->reviewing,
             /**
-             * The empty places to choose the one every keyframe is drawn on.
+             * How long a keyframe and a video usually take, in seconds, for the progress shown while they are made.
              *
-             * @var array<int, array{id: int, imageUrl: string}>
+             * @var array{keyframe: int, video: int}
              */
-            'plateOptions' => $this->resource->exists
-                ? $this->getMedia(Shot::PLATE_OPTIONS)->map(fn(Media $media) => ['id' => $media->id, 'imageUrl' => (string) $this->mediaUrl($media)])->values()->all()
-                : [],
-            /** Whether a place is chosen and keyframe 1 is drawn on it. */
-            'plateChosen' => $this->resource->exists && $this->resource->hasChosenPlate(),
-            /** New drawings start from empty places to choose from. */
-            'startsWithPlate' => (bool) config('pipeline.keyframes.start_with_plate'),
-            /** @var int How many places one round draws. */
-            'plateOptionCount' => max(1, (int) config('pipeline.keyframes.plate_options')),
+            'renderSeconds' => [
+                'keyframe' => app(RenderEstimates::class)->keyframeSeconds(),
+                'video' => app(RenderEstimates::class)->videoSeconds(),
+            ],
+            /** When the video was handed to the video model, so its progress continues after a reload. */
+            'videoSubmittedAt' => $this->video_submitted_at?->toIso8601String(),
             /**
              * Whether Fix all can redraw keyframes the checks found something wrong with.
              *
@@ -112,9 +109,6 @@ class ShotResource extends JsonResource
             'firstKeyframeOptions' => GenerateKeyframes::optionCount(),
             /** @var int */
             'maxKeyframes' => (int) config('pipeline.keyframes.max_manual'),
-            'videoResolution' => $this->videoResolution(),
-            /** @var array<int, string> */
-            'videoResolutions' => config('pipeline.video.resolutions'),
             /** @var string|null */
             'videoError' => $this->video_error,
             /** @var string|null */
@@ -142,7 +136,7 @@ class ShotResource extends JsonResource
             /**
              * The conversation about the plan: the director's messages and the plan director's replies, some with the plan they wrote into the shot.
              *
-             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}}>
+             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}, about?: string, changes?: array<int, string>, proposed?: array{keyframe: string, name: string, change: string, fields?: array<int, array{field: string, from: string, to: string}>, state?: string}, storylines?: array<int, array{title: string, kind: string, storyline: string, needs?: string}>, confirm?: bool, pickPlace?: bool, voiceOver?: array{text: string, seconds?: int, state?: string}}>
              */
             'planChat' => array_values((array) ($this->plan_chat ?? [])),
             /**
@@ -155,7 +149,7 @@ class ShotResource extends JsonResource
             'links' => $this->when($this->resource->exists, fn() => [
                 'view' => route('public.shots.view', [$this->project, $this->resource]),
                 'destroy' => route('public.shots.destroy', [$this->project, $this->resource]),
-                'keyframesGenerate' => route('public.shots.keyframes.generate', [$this->project, $this->resource]),
+                'retry' => route('public.shots.retry', [$this->project, $this->resource]),
                 'keyframesStore' => route('public.shots.keyframes.store', [$this->project, $this->resource]),
                 'keyframesReorder' => route('public.shots.keyframes.reorder', [$this->project, $this->resource]),
                 'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
@@ -163,10 +157,9 @@ class ShotResource extends JsonResource
                 'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
                 'planChat' => route('public.shots.plan.chat', [$this->project, $this->resource]),
+                'planChange' => route('public.shots.plan.change', [$this->project, $this->resource]),
+                'planVoiceOver' => route('public.shots.plan.voice-over', [$this->project, $this->resource]),
                 'planElements' => route('public.shots.plan.elements', [$this->project, $this->resource]),
-                'plateChoose' => route('public.shots.plate.choose', [$this->project, $this->resource]),
-                'plateReset' => route('public.shots.plate.reset', [$this->project, $this->resource]),
-                'plateAdjust' => route('public.shots.plate.adjust', [$this->project, $this->resource]),
                 'issuesFixAll' => route('public.shots.issues.fix-all', [$this->project, $this->resource]),
                 'issuesDismissAll' => route('public.shots.issues.dismiss-all', [$this->project, $this->resource]),
                 'voiceOver' => route('public.shots.voice-over', [$this->project, $this->resource]),
@@ -238,7 +231,7 @@ class ShotResource extends JsonResource
     }
 
     /**
-     * @return list<array{key: string, position: int|null, issues: list<string>, fixUrl: string|null, dismissUrl: string}>
+     * @return list<array{key: string, position: int|null, issues: list<string>, fixUrl: string|null, redrawUrl: string|null, dismissUrl: string}>
      */
     private function issueGroups(): array
     {
@@ -247,6 +240,7 @@ class ShotResource extends JsonResource
             'position' => $group['position'],
             'issues' => $group['issues'],
             'fixUrl' => $group['fixable'] ? route('public.shots.issues.fix', [$this->project, $this->resource, $group['key']]) : null,
+            'redrawUrl' => $group['fixable'] ? route('public.shots.issues.redraw', [$this->project, $this->resource, $group['key']]) : null,
             'dismissUrl' => route('public.shots.issues.dismiss', [$this->project, $this->resource, $group['key']]),
         ], $this->checkedGroups());
     }

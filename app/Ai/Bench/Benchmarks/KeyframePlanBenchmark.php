@@ -11,7 +11,7 @@ use App\Models\Shot;
 use Illuminate\Support\Collection;
 
 /**
- * Planning a shot from its takeaway: the storyline, the keyframes and their
+ * Planning a shot from its idea: the storyline, the keyframes and their
  * descriptions, as the planner drafts it for a shot made in the project setup.
  */
 class KeyframePlanBenchmark extends Benchmark
@@ -23,12 +23,12 @@ class KeyframePlanBenchmark extends Benchmark
 
     public function description(): string
     {
-        return 'Plan a shot from its takeaway: storyline and keyframe descriptions.';
+        return 'Plan a shot from its idea: storyline and keyframe descriptions.';
     }
 
     public function cases(): Collection
     {
-        return Shot::query()->with('project')->where('takeaway', '!=', '')->orderBy('id')->get()
+        return Shot::query()->with('project')->whereNotNull('idea')->where('idea', '!=', '')->orderBy('id')->get()
             ->map(fn(Shot $shot) => new BenchCase(
                 key: "shot-{$shot->getKey()}",
                 label: "{$shot->project->title} · {$shot->title}",
@@ -38,7 +38,7 @@ class KeyframePlanBenchmark extends Benchmark
     }
 
     /**
-     * The shot with only its takeaway, before anything is planned.
+     * The shot with only its idea, before anything is planned.
      */
     public function agent(BenchCase $case): StorylineWriter
     {
@@ -62,7 +62,7 @@ class KeyframePlanBenchmark extends Benchmark
     public function criteria(): array
     {
         return [
-            'storyline' => 'The storyline lands the takeaway with one clear, visible action, and the keyframes tell it from start to end with the fewest keyframes that do so.',
+            'storyline' => 'The storyline tells the idea with one clear, visible action, and the keyframes tell it from start to end with the fewest keyframes that do so.',
             'readable' => 'Every keyframe is one clearly readable state (pose, position, object state), not motion.',
             'consistent' => 'The subject, the spot in the place and the objects are described with the same wording in every description.',
             'staging' => 'Every keyframe plays at one spot that belongs to the place, with no invented wall in front of it, nothing crossing a figure, at most two context objects and plain ground.',

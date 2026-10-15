@@ -40,7 +40,7 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
 
             Style: two or three sentences that tell the model to preserve the exact visual style of the keyframes. Name the medium and rendering (for example flat 2D cartoon or soft 3D illustration), shapes, shading, level of detail, colours, background and proportions. Then describe every person exactly as drawn in the keyframes, so they cannot be redrawn differently: build, hair, headwear with its shape and colour, each piece of clothing with its colour, shoes, and what they carry. Then the key objects and setting that must stay consistent. End with a sentence that forbids making the result more realistic, more detailed or different in style than the keyframes.
 
-            Action: the action sequence in chronological order, one or two sentences per keyframe, written as continuous present-tense narration. Mention each keyframe number in brackets where its moment is reached, for example (keyframe 2). Describe only what the keyframes show and the minimal motion needed to get from one to the next. Do not add events, gestures, reactions or objects that are not in the keyframes.
+            Action: the action sequence in chronological order, one or two sentences per keyframe, written as continuous present-tense narration. Mention each keyframe number in brackets where its moment is reached, for example (keyframe 2). Describe only what the keyframes show and the motion needed to get from one to the next, and how the people feel and react in each moment: their facial expressions, where they look and small natural gestures that fit what happens. Do not add events, actions or objects that are not in the keyframes.
 
             Details: two to four sentences about continuity that is easy to get wrong in this shot: which objects must stay the same and where they are, where the character looks and when, how a key object moves between frames, and the exact final pose.
 
@@ -76,14 +76,11 @@ class VideoPromptWriter implements Agent, HasReasoningEffort, HasStructuredOutpu
             ->map(fn(Keyframe $keyframe) => "{$keyframe->position}. {$keyframe->title}: {$keyframe->fullDescription()}")
             ->join("\n");
 
-        $storyline = $shot->chosenStoryline();
-
-        return implode("\n\n", array_filter([
+        return implode("\n\n", [
             "Write the video prompt for this shot of about {$duration} seconds.",
             "Visual style of the project: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
-            "Shot: {$shot->title}. Takeaway: {$shot->takeaway}.",
-            $storyline ? "Storyline the keyframes were planned from: {$storyline['storyline']}" : null,
             "Keyframes, in order:\n{$frames}",
-        ]));
+            'Where a description and its image differ, the image is right: the director may have changed it by hand.',
+        ]);
     }
 }

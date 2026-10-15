@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ai;
 
+use App\Ai\Briefs\TextRules;
 use App\Enums\ElementType;
 use App\Models\Element;
 use App\Models\Project;
@@ -80,7 +81,7 @@ class ProjectCoverPainter
             'Draw every person, place and object exactly as in its attached image: same faces, clothes, shapes and colours.',
             $listing,
             $styleSheet !== null ? 'The last attached image is the project\'s style reference sheet. Match its rendering style exactly; do not copy its subjects or layout.' : null,
-            'No text, captions, logos or watermarks in the image.',
+            TextRules::forImages($project),
         ]));
 
         $model = Config::get('pipeline.models.image');

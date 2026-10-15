@@ -15,7 +15,7 @@
           <span class="relative inline-flex max-h-full max-w-full" :style="tileSize">
             <img
               :src="option.imageUrl"
-              :alt="field === 'plate' ? $t('Place :n', { n: String(i + 1) }) : $t('Option :n', { n: String(i + 1) })"
+              :alt="$t('Option :n', { n: String(i + 1) })"
               :class="
                 cn(
                   'size-full rounded-xl border border-border bg-card object-cover transition',
@@ -45,13 +45,10 @@
         >
           <Button type="button" class="shadow-lg" :disabled="choice.processing" @click="choose">
             <LoaderCircle v-if="choice.processing" class="size-4 animate-spin" />
-            {{ field === 'plate' ? $t('Use this place') : $t('Use this keyframe') }}
+            {{ $t('Use this keyframe') }}
             <ArrowRight v-if="!choice.processing" class="size-4" />
           </Button>
-          <InputError
-            class="rounded bg-background/90 px-2 py-1"
-            :message="choice.errors.render ?? choice.errors.plate"
-          />
+          <InputError class="rounded bg-background/90 px-2 py-1" :message="choice.errors.render" />
         </div>
       </div>
 
@@ -66,15 +63,7 @@
       </div>
     </div>
 
-    <FirstKeyframeActions
-      :selected="selectedId"
-      :choose-url="chooseUrl"
-      :more-url="moreUrl"
-      :field="field"
-      :reset-url="resetUrl"
-      :disabled="pending || adjusting"
-      hide-choose
-    />
+    <FirstKeyframeActions :more-url="moreUrl" :disabled="pending || adjusting" />
   </div>
 </template>
 <script setup lang="ts">
@@ -98,10 +87,6 @@ const props = defineProps<{
   moreUrl: string
   /** An adjusted option is being drawn. */
   adjusting?: boolean
-  /** What the choice is sent as: an option of keyframe 1, or an empty place. */
-  field?: 'render' | 'plate'
-  /** Keyframe 1 is drawn on a chosen place; this goes back to the places. */
-  resetUrl?: string | null
 }>()
 
 /** The option the director selected; shared with the column on the right, which adjusts it. */
@@ -125,14 +110,12 @@ const tileSize = computed(() => ({
   height: '100%',
 }))
 
-const choice = useForm<{ render?: number | null; plate?: number | null }>({})
+const choice = useForm<{ render?: number | null }>({})
 
 const choose = () => {
   if (selectedId.value === null) return
 
-  choice
-    .transform(() => ({ [props.field ?? 'render']: selectedId.value }))
-    .post(props.chooseUrl, { preserveScroll: true })
+  choice.transform(() => ({ render: selectedId.value })).post(props.chooseUrl, { preserveScroll: true })
 }
 
 const row = useTemplateRef<HTMLElement>('row')

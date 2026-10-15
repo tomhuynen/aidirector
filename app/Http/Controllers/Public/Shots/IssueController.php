@@ -16,13 +16,25 @@ class IssueController
     use ReturnsToDecisions;
 
     /**
-     * Redraw a keyframe, told what the checks found wrong with it.
+     * Fix a keyframe only where the checks found something wrong with it.
      */
     public function fix(Project $project, Shot $shot, string $group, ShotIssues $issues)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
 
         $issues->fix($shot, $group);
+
+        return $this->afterAction($project, $shot);
+    }
+
+    /**
+     * Draw a keyframe again from its description, instead of fixing it.
+     */
+    public function redraw(Project $project, Shot $shot, string $group, ShotIssues $issues)
+    {
+        Gate::authorize(ShotPolicy::UPDATE, $shot);
+
+        $issues->redraw($shot, $group);
 
         return $this->afterAction($project, $shot);
     }

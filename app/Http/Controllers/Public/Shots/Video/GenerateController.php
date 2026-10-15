@@ -29,7 +29,7 @@ class GenerateController
 
         $keyframes = $shot->keyframes()->with('media')->get();
 
-        if ($keyframes->isEmpty() || $keyframes->contains(fn(Keyframe $keyframe) => $keyframe->rendering || $keyframe->render() === null)) {
+        if ($keyframes->isEmpty() || $keyframes->contains(fn(Keyframe $keyframe) => $keyframe->isBusy() || $keyframe->render() === null)) {
             throw ValidationException::withMessages([
                 'video' => __('Wait until every keyframe has an image.'),
             ]);

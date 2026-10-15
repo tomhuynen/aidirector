@@ -23,8 +23,7 @@ class ShotFactory extends Factory
             'project_id' => Project::factory(),
             'position' => 1,
             'title' => fake()->sentence(3),
-            'takeaway' => 'Sending the letter is easy and final',
-            'notes' => null,
+            'idea' => 'A woman posts a letter at the corner postbox.',
             'status' => ShotStatus::DRAFT,
         ];
     }

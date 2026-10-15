@@ -35,6 +35,17 @@ class GenerateVoiceOver implements ShouldQueue
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
+    /**
+     * Writes the voice-over of a shot whose plan changed, when voice-overs are
+     * made automatically. A presenter always gets one: it is what they say.
+     */
+    public static function automatically(Shot $shot): void
+    {
+        if ($shot->isPresenter() || Config::boolean('pipeline.voice_over.automatic')) {
+            self::dispatch($shot);
+        }
+    }
+
     public static function maxWords(Shot $shot): int
     {
         return max(4, (int) floor($shot->durationInSeconds() * self::WORDS_PER_SECOND));

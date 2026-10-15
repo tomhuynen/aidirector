@@ -9,12 +9,10 @@ use App\Enums\Disk;
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateKeyframes;
-use App\Jobs\GeneratePlateOption;
 use App\Models\Director;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
@@ -29,7 +27,7 @@ function closeUpShot(Project $project): Shot
     return Shot::factory()->for($project)->create([
         'kind' => ShotKind::CLOSE_UP,
         'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
-        'chosen_storyline' => ['title' => 'Badge On', 'storyline' => 'She clips the badge high on her chest.'],
+        'chosen_storyline' => ['storyline' => 'She clips the badge high on her chest.'],
         'storyline' => ['framing' => ['spot' => 'The chest of her hi-vis vest.', 'seconds' => 4], 'keyframes' => [
             ['title' => 'Badge In Hand', 'description' => 'The vest pocket, the badge held in her right hand.', 'spatial' => 'The badge is a hand away from the pocket.'],
             ['title' => 'Badge Clipped', 'description' => 'The badge clipped on the vest pocket.', 'spatial' => 'The badge is high and centred on the chest.'],
@@ -47,15 +45,13 @@ it('plans a close-up by its own rules', function () {
         ->not->toContain('Keyframe 1 sets the camera for the whole shot');
 });
 
-it('starts from keyframe 1 drawn with the hands and the object, not from an empty place', function () {
-    Config::set('pipeline.keyframes.start_with_plate', true);
+it('starts from options for keyframe 1 drawn with the hands and the object', function () {
     Bus::fake();
     $shot = closeUpShot($this->project);
 
     (new GenerateKeyframes($shot))->handle();
 
     Bus::assertBatched(fn($batch) => $batch->jobs->every(fn($job) => $job instanceof App\Jobs\GenerateKeyframeOption));
-    Bus::assertNotDispatched(GeneratePlateOption::class);
 });
 
 it('adds hands that are not in keyframe 1 yet, and checks it as a close-up', function () {
@@ -137,11 +133,11 @@ it('takes no setting from a shot that is not planned together with it, unless ch
 
 it('lets the plan chat see the other shots and take the setting of one by its code', function () {
     $before = shotBefore($this->project, 'group-1');
-    $before->forceFill(['title' => 'Arrival at reception', 'chosen_storyline' => ['title' => 'Arrival', 'storyline' => 'The visitor walks up to the counter.'], 'storyline' => ['keyframes' => [['title' => 'At The Counter', 'description' => 'The visitor holds out the broken badge holder over the counter.']]]])->save();
+    $before->forceFill(['title' => 'Arrival at reception', 'chosen_storyline' => ['storyline' => 'The visitor walks up to the counter.'], 'storyline' => ['keyframes' => [['title' => 'At The Counter', 'description' => 'The visitor holds out the broken badge holder over the counter.']]]])->save();
     $shot = Shot::factory()->for($this->project)->create(['position' => 2, 'kind' => ShotKind::CLOSE_UP, 'status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => []]]);
     App\Ai\Agents\PlanDirector::fake([
         ['reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'shots' => [], 'proposal' => [
-            'takeaway' => 'Hand the broken badge over',
+            'title' => 'Hand the badge over',
             'kind' => 'close-up',
             'storyline' => 'Hands pass the broken badge holder over the counter.',
             'keyframes' => [['title' => 'Hand Over', 'description' => 'Hands pass the broken badge holder over the counter.', 'spatial' => '', 'elements' => []]],
@@ -164,10 +160,10 @@ describe('sequences', function () {
     it('records where each shot of a split plays: continuing from the shot before, or in the place of an earlier one', function () {
         App\Ai\Agents\PlanDirector::fake([
             ['reply' => 'Four shots, the last one back at the counter.', 'stage' => 'kind', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'proposal' => null, 'shots' => [
-                ['takeaway' => 'Report it', 'kind' => 'scene', 'idea' => 'He walks up to the counter.', 'setting' => 'new_place', 'same_place_as' => 0],
-                ['takeaway' => 'Hand it over', 'kind' => 'close-up', 'idea' => 'Hands pass the badge over.', 'setting' => 'continues', 'same_place_as' => 0],
-                ['takeaway' => 'Get a new one', 'kind' => 'close-up', 'idea' => 'A new badge comes back.', 'setting' => 'continues', 'same_place_as' => 0],
-                ['takeaway' => 'Wear it', 'kind' => 'scene', 'idea' => 'He walks away from the counter.', 'setting' => 'same_place', 'same_place_as' => 1],
+                ['title' => 'Report it', 'kind' => 'scene', 'idea' => 'He walks up to the counter.', 'setting' => 'new_place', 'same_place_as' => 0],
+                ['title' => 'Hand it over', 'kind' => 'close-up', 'idea' => 'Hands pass the badge over.', 'setting' => 'continues', 'same_place_as' => 0],
+                ['title' => 'Get a new one', 'kind' => 'close-up', 'idea' => 'A new badge comes back.', 'setting' => 'continues', 'same_place_as' => 0],
+                ['title' => 'Wear it', 'kind' => 'scene', 'idea' => 'He walks away from the counter.', 'setting' => 'same_place', 'same_place_as' => 1],
             ]],
         ]);
         $shot = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::STORYLINE_READY, 'storyline' => ['keyframes' => []]]);
@@ -184,8 +180,7 @@ describe('sequences', function () {
             ->and($shots[3]->settingWaitsFor())->toBe('the place of SH010');
     });
 
-    it('waits to draw until the place of the earlier shot is chosen, then draws on that same place', function () {
-        Config::set('pipeline.keyframes.start_with_plate', true);
+    it('waits to draw until keyframe 1 of the earlier shot is chosen, then draws in that same place', function () {
         Bus::fake();
         $first = Shot::factory()->for($this->project)->create(['position' => 1, 'status' => ShotStatus::FIRST_KEYFRAME_READY]);
         $later = Shot::factory()->for($this->project)->create([
@@ -203,21 +198,18 @@ describe('sequences', function () {
             ->and($later->fresh()->waitsToDraw())->toBeTrue();
         Bus::assertNotDispatched(GenerateKeyframes::class);
 
-        // The earlier shot's place is chosen: the waiting shot is drawn now, on that same place.
+        // Keyframe 1 of the earlier shot is chosen: the waiting shot is drawn now, in that same place.
         $image = imagecreatetruecolor(16, 9);
         ob_start();
         imagepng($image);
-        $first->addMediaFromString((string) ob_get_clean())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
+        $keyframe = App\Models\Keyframe::factory()->for($first)->create(['position' => 1]);
+        $render = $keyframe->addMediaFromString((string) ob_get_clean())->usingFileName('k1.png')->toMediaCollection(App\Models\Keyframe::RENDERS);
+        $keyframe->forceFill(['render_id' => $render->id])->save();
         Shot::drawWaitingShots($this->project->id);
 
         expect($later->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($later->fresh()->waitsToDraw())->toBeFalse()
-            ->and($later->fresh()->inheritedPlate()?->getKey())->toBe($first->media()->where('collection_name', Shot::PLATE)->value('id'));
+            ->and(app(App\Ai\KeyframePainter::class)->settingFor($later->fresh())['label'])->toBe('the place of SH010');
         Bus::assertDispatched(GenerateKeyframes::class, fn($job) => $job->shot->is($later));
-
-        (new GenerateKeyframes($later->fresh()))->handle();
-
-        expect($later->fresh()->hasChosenPlate())->toBeTrue();
-        Bus::assertNotDispatched(GeneratePlateOption::class);
     });
 });

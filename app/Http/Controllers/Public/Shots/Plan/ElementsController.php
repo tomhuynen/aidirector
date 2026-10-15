@@ -17,6 +17,7 @@ use Illuminate\Validation\ValidationException;
  * The places and objects the planner found missing from the cast and sets:
  * adding them makes them cast and sets like any other, with their picture
  * drawn right away, so every keyframe that shows them draws them the same.
+ * They join the cast offered last in the chat, to use with the rest.
  */
 class ElementsController
 {
@@ -54,6 +55,14 @@ class ElementsController
             ...array_diff_key($storyline ?? [], ['new_elements' => true]),
             'added_elements' => array_values(array_unique([...($storyline['added_elements'] ?? []), ...$added])),
         ]);
+
+        $turns = array_values((array) ($shot->plan_chat ?? []));
+        $offered = collect($turns)->keys()->reverse()->first(fn(int $index) => ($turns[$index]['role'] ?? '') === 'assistant' && ! empty($turns[$index]['cast']));
+
+        if ($offered !== null) {
+            $turns[$offered]['cast'] = array_values(array_unique([...$turns[$offered]['cast'], ...$added]));
+            $shot->forceFill(['plan_chat' => $turns])->save();
+        }
 
         return $this->afterAction($project, $shot);
     }

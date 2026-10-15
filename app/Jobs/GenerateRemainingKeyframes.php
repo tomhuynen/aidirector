@@ -5,60 +5,60 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Ai\KeyframePainter;
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
 use App\Jobs\Concerns\FollowsPlan;
+use App\Jobs\Concerns\RetriesHiccups;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
 use App\Notifications\Public\GenerationFinished;
+use App\Support\Shots\KeyframeChain;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
 use RuntimeException;
 use Throwable;
 
 /**
- * Renders keyframes 2 to N once keyframe 1 is chosen; with `$onlyFirst`,
- * keyframe 1 on the chosen place, for the director to confirm first. Elements without a reference image get one first, side by side
- * in a batch of {@see GenerateElementReference} jobs; then every
- * keyframe renders with the style sheet, its elements, the chosen first
- * keyframe and the keyframe just before it as references.
+ * Starts drawing a shot's keyframes once keyframe 1 is chosen: keyframe 1
+ * is read and put right first, so the others are drawn from where everyone
+ * stands in it. Cast and sets without a picture get one first, side by side in a
+ * batch of {@see GenerateElementReference} jobs; then the keyframes are
+ * drawn one after another by the {@see KeyframeChain}.
  */
 #[DeleteWhenMissingModels]
 class GenerateRemainingKeyframes implements ShouldQueue
 {
     use FollowsPlan;
     use Queueable;
-
-    public int $tries = 1;
+    use RetriesHiccups;
 
     public int $timeout = 900;
 
     public function __construct(
         public readonly Shot $shot,
         public readonly bool $elementsDrawn = false,
-        public readonly bool $onlyFirst = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
         $this->followPlan($this->shot);
     }
 
-    public function handle(KeyframePainter $painter): void
+    public function handle(KeyframePainter $painter, KeyframeChain $chain): void
     {
-        $shot = $this->shot->load('project');
+        $this->retryingHiccups(fn() => $this->start($painter, $chain));
+    }
+
+    private function start(KeyframePainter $painter, KeyframeChain $chain): void
+    {
+        $shot = $this->shot->refresh()->load('project');
         $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
         $first = $siblings->first();
-        $plate = $painter->chosenPlate($shot);
 
-        if ($first !== null && $shot->drawsStandalone()) {
-            $this->drawStills($painter, $shot, $siblings, $first);
-
-            return;
-        }
-
-        if ($first === null || ($plate === null && $first->render() === null)) {
+        if ($first === null || (! $shot->drawsStandalone() && $first->render() === null)) {
             throw new RuntimeException('Choose the first keyframe before rendering the others.');
         }
 
@@ -66,110 +66,21 @@ class GenerateRemainingKeyframes implements ShouldQueue
             return;
         }
 
-        if ($this->onlyFirst) {
-            $this->drawFirst($painter, $shot, $siblings, $first);
+        // The chosen version of keyframe 1 is read and put right once, before the keyframes after it are drawn from it.
+        if (! $shot->drawsStandalone() && $first->layout === null && $painter->reads($first)) {
+            $first->forceFill(['status' => KeyframeStatus::CHECKING])->save();
+            $painter->settleFirst($first, $first->render());
+            $first->forceFill(['status' => KeyframeStatus::READY])->save();
 
-            return;
-        }
-
-        // Keyframe 1 with people gets a version without them, for the other keyframes to be drawn on; a chosen place is that already.
-        // A close-up is drawn on keyframe 1 itself: without its people there is nothing left to draw the hands on.
-        if ($plate === null && $shot->kindOrScene()->usesPlace()) {
-            $painter->ensurePlate($shot, $siblings);
-        }
-
-        // A change to the place, such as a door that closes, gets its own version of the place before the keyframes are drawn on it.
-        $painter->ensurePlaceStates($shot, $siblings);
-
-        foreach ($siblings->skip(1) as $keyframe) {
             if ($this->planReplaced()) {
                 return;
             }
-
-            $painter->render($keyframe, $siblings);
-            $keyframe->load('media');
         }
 
-        if ($this->planReplaced()) {
-            return;
-        }
-
-        $shot->forceFill([
-            'storyline_error' => null,
-            'keyframe_review' => null,
-            'status' => ShotStatus::KEYFRAMES_READY,
-        ])->save();
-
-        // The keyframes are shown straight away; the review of them together follows as its own job.
-        ReviewShot::after($shot);
-
-        // Shots of the sequence that continue from these keyframes can be drawn now.
-        Shot::drawWaitingShots($shot->project_id);
-
-        GenerationFinished::ready(__('All keyframes of “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $siblings->last()?->render(), Keyframe::THUMBNAIL)
-            ->sendTo($shot->project);
-    }
-
-    /**
-     * Draws keyframe 1 on the chosen place and waits for the director to
-     * confirm it before the others are drawn.
-     *
-     * @param  \Illuminate\Support\Collection<int, Keyframe>  $siblings
-     */
-    private function drawFirst(KeyframePainter $painter, Shot $shot, \Illuminate\Support\Collection $siblings, Keyframe $first): void
-    {
-        $painter->render($first, $siblings);
-
-        if ($this->planReplaced()) {
-            return;
-        }
-
-        $shot->forceFill([
-            'storyline_error' => null,
-            'status' => ShotStatus::FIRST_KEYFRAME_READY,
-        ])->save();
-
-        GenerationFinished::ready(__('The first keyframe of “:shot” is ready to confirm', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $first->refresh()->render(), Keyframe::THUMBNAIL)
-            ->sendTo($shot->project);
-    }
-
-    /**
-     * Draws every keyframe of a montage or a presenter shot on its own, once the cast and sets have pictures.
-     *
-     * @param  \Illuminate\Support\Collection<int, Keyframe>  $siblings
-     */
-    private function drawStills(KeyframePainter $painter, Shot $shot, \Illuminate\Support\Collection $siblings, Keyframe $first): void
-    {
-        if (! $this->elementsDrawn && $this->drawMissingElements($shot, $siblings, $first)) {
-            return;
-        }
-
-        foreach ($siblings as $keyframe) {
-            if ($this->planReplaced()) {
-                return;
-            }
-
-            $painter->render($keyframe, $siblings);
-            $keyframe->load('media');
-        }
-
-        if ($this->planReplaced()) {
-            return;
-        }
-
-        $shot->forceFill([
-            'storyline_error' => null,
-            'keyframe_review' => null,
-            'status' => ShotStatus::KEYFRAMES_READY,
-        ])->save();
-
-        ReviewShot::after($shot);
-
-        // Shots of the sequence that continue from these keyframes can be drawn now.
-        Shot::drawWaitingShots($shot->project_id);
-
-        GenerationFinished::ready(__('All keyframes of “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $siblings->last()?->render(), Keyframe::THUMBNAIL)
-            ->sendTo($shot->project);
+        $shot->forceFill(['status' => ShotStatus::KEYFRAMES_PENDING, 'storyline_error' => null])->save();
+        $chain->link($shot);
+        // Every still of a montage or a presenter shot is drawn on its own; a scene from keyframe 2 on, in order.
+        $chain->draw($shot->drawsStandalone() ? $siblings : $siblings->skip(1)->values());
     }
 
     /**
@@ -177,7 +88,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
      */
     public static function startStandalone(Shot $shot): void
     {
-        $shot->keyframes()->update(['rendering' => true, 'render_error' => null]);
+        $shot->keyframes()->update(['status' => KeyframeStatus::WAITING, 'render_error' => null]);
 
         $shot->forceFill([
             'status' => ShotStatus::KEYFRAMES_PENDING,
@@ -192,9 +103,9 @@ class GenerateRemainingKeyframes implements ShouldQueue
      * starts this job again to render the keyframes. Returns false when every
      * element already has an image.
      *
-     * @param  \Illuminate\Support\Collection<int, Keyframe>  $siblings
+     * @param  Collection<int, Keyframe>  $siblings
      */
-    private function drawMissingElements(Shot $shot, \Illuminate\Support\Collection $siblings, Keyframe $first): bool
+    private function drawMissingElements(Shot $shot, Collection $siblings, Keyframe $first): bool
     {
         $missing = $siblings
             ->flatMap(fn(Keyframe $keyframe) => $keyframe->elements)
@@ -207,7 +118,6 @@ class GenerateRemainingKeyframes implements ShouldQueue
         }
 
         $shotId = $shot->id;
-        $onlyFirst = $this->onlyFirst;
         $planVersion = $this->planVersion;
 
         Bus::batch($missing->map(fn(Element $element) => new GenerateElementReference(
@@ -217,12 +127,12 @@ class GenerateRemainingKeyframes implements ShouldQueue
             ->name("Cast and sets for shot {$shot->id}")
             ->onQueue(Config::get('pipeline.queue'))
             ->allowFailures()
-            ->finally(static function () use ($shotId, $onlyFirst, $planVersion) {
+            ->finally(static function () use ($shotId, $planVersion) {
                 $shot = Shot::query()->find($shotId);
 
-                // Reopened meanwhile: the keyframes of the old plan are no longer drawn.
+                // A plan that was reopened meanwhile is not drawn.
                 if ($shot !== null && $shot->plan_version === $planVersion) {
-                    self::dispatch($shot, elementsDrawn: true, onlyFirst: $onlyFirst);
+                    self::dispatch($shot, elementsDrawn: true);
                 }
             })
             ->dispatch();
@@ -231,37 +141,11 @@ class GenerateRemainingKeyframes implements ShouldQueue
     }
 
     /**
-     * Starts drawing keyframe 1 on the chosen place. A keyframe 1 without
-     * people is that place itself, so the others start straight away.
-     */
-    public static function startOnPlate(Shot $shot, KeyframePainter $painter): void
-    {
-        $first = $shot->keyframes()->with(['media', 'elements'])->firstOrFail();
-        $plate = $painter->chosenPlate($shot) ?? throw new RuntimeException('Choose a place first.');
-
-        if (! $painter->needsPlate($first)) {
-            $painter->useChosenPlate($first, $plate);
-            self::startFor($shot);
-
-            return;
-        }
-
-        $first->forceFill(['rendering' => true, 'render_error' => null])->save();
-
-        $shot->forceFill([
-            'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
-            'storyline_error' => null,
-        ])->save();
-
-        self::dispatch($shot, onlyFirst: true);
-    }
-
-    /**
-     * Starts rendering keyframes 2 to N, once keyframe 1 is chosen.
+     * Starts drawing keyframes 2 to N, once keyframe 1 is chosen.
      */
     public static function startFor(Shot $shot): void
     {
-        $shot->keyframes()->where('position', '>', 1)->update(['rendering' => true, 'render_error' => null]);
+        $shot->keyframes()->where('position', '>', 1)->update(['status' => KeyframeStatus::WAITING, 'render_error' => null]);
 
         $shot->forceFill([
             'status' => ShotStatus::KEYFRAMES_PENDING,
@@ -277,8 +161,8 @@ class GenerateRemainingKeyframes implements ShouldQueue
             return;
         }
 
-        $this->shot->keyframes()->where('rendering', true)->update([
-            'rendering' => false,
+        $this->shot->keyframes()->busy()->update([
+            'status' => KeyframeStatus::FAILED,
             'render_error' => $exception?->getMessage(),
         ]);
 
@@ -286,9 +170,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
             'storyline_error' => __('Not every still could be drawn. Draw the missing ones again.'),
             'status' => ShotStatus::KEYFRAMES_READY,
         ] : [
-            'storyline_error' => $this->onlyFirst
-                ? __('The first keyframe could not be drawn on this place. Try again or choose another place.')
-                : __('The other keyframes could not be rendered. Please try again.'),
+            'storyline_error' => __('The other keyframes could not be rendered. Please try again.'),
             'status' => ShotStatus::FIRST_KEYFRAME_READY,
         ])->save();
 

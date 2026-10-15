@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use App\Enums\Disk;
+use App\Enums\KeyframeStatus;
 use App\Enums\ProjectRuleStatus;
 use App\Enums\ShotStatus;
-use App\Jobs\GenerateKeyframeImage;
+use App\Jobs\DrawKeyframe;
+use App\Jobs\FixKeyframe;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateStoryline;
 use App\Jobs\TweakKeyframeImage;
@@ -72,7 +74,7 @@ it('asks to render only once the keyframes are reviewed together', function () {
 it('asks to draw a shot that is planned but not drawn yet', function () {
     $shot = Shot::factory()->for($this->project)->create([
         'status' => ShotStatus::STORYLINE_READY,
-        'chosen_storyline' => ['title' => 'Gate Bin', 'storyline' => 'She drops the cigarette in the bin.'],
+        'chosen_storyline' => ['storyline' => 'She drops the cigarette in the bin.'],
         'storyline' => ['keyframes' => [['title' => 'At the gate', 'description' => 'She holds a cigarette.'], ['title' => 'In the bin', 'description' => 'The cigarette lies in the bin.']]],
     ]);
 
@@ -94,7 +96,7 @@ it('asks to draw a shot that is planned but not drawn yet', function () {
 
 it('leaves out shots whose keyframes are still being drawn', function () {
     $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY]);
-    Keyframe::factory()->for($shot)->create(['rendering' => true]);
+    Keyframe::factory()->for($shot)->create(['status' => KeyframeStatus::DRAWING]);
 
     expect(app(DecisionQueue::class)->count($this->project))->toBe(0);
 });
@@ -153,10 +155,10 @@ describe('retry', function () {
             ->post(route('public.shots.retry', [$this->project, $shot]), ['return' => 'decisions'])
             ->assertRedirect(route('public.projects.decisions', $this->project));
 
-        expect($failed->fresh())->rendering->toBeTrue()->render_error->toBeNull();
-        Queue::assertPushed(GenerateKeyframeImage::class, 1);
-        Queue::assertPushed(GenerateKeyframeImage::class, fn(GenerateKeyframeImage $job) => $job->keyframe->is($failed));
-        expect($fine->fresh()->rendering)->toBeFalse();
+        expect($failed->fresh()->isBusy())->toBeTrue()->and($failed->fresh())->render_error->toBeNull();
+        Queue::assertPushed(DrawKeyframe::class, 1);
+        Queue::assertPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->is($failed));
+        expect($fine->fresh()->isBusy())->toBeFalse();
     });
 
     it('draws the options for keyframe 1 again when none could be drawn', function () {
@@ -267,7 +269,7 @@ describe('issues', function () {
         expect(array_column($groups, 'position'))->toBe([3]);
     });
 
-    it('redraws one keyframe with all its issues and keeps a shared note for the other keyframes', function () {
+    it('fixes one keyframe with all its issues and keeps a shared note for the other keyframes', function () {
         $shot = reviewedShot($this->project, ['In keyframes 2 and 3 the padlock already hangs.']);
         $shot->keyframes()->where('position', 2)->first()->render()->setCustomProperty(Keyframe::CHECK_ISSUES, ['The hand does not point at the valve.'])->save();
 
@@ -275,15 +277,27 @@ describe('issues', function () {
             ->post(route('public.shots.issues.fix', [$this->project, $shot, 'keyframe-2']), ['return' => 'decisions'])
             ->assertRedirect(route('public.projects.decisions', $this->project));
 
-        Queue::assertPushed(TweakKeyframeImage::class, 1);
-        Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->position === 2
-            && $job->fromCheck
-            && str_contains($job->instruction, 'the padlock already hangs')
-            && str_contains($job->instruction, 'The hand does not point at the valve.'));
+        Queue::assertPushed(FixKeyframe::class, 1);
+        Queue::assertPushed(FixKeyframe::class, fn(FixKeyframe $job) => $job->keyframe->position === 2
+            && $job->version === $shot->keyframes()->where('position', 2)->first()->draw_version
+            && $job->problems === ['In keyframes 2 and 3 the padlock already hangs.', 'The hand does not point at the valve.']);
+        Queue::assertNotPushed(TweakKeyframeImage::class);
 
         $groups = app(ShotIssues::class)->groups($shot->fresh(), $shot->keyframes()->with('media')->get());
 
         expect(array_column($groups, 'key'))->toBe(['keyframe-3']);
+    });
+
+    it('draws a keyframe again from its description instead of fixing it', function () {
+        $shot = reviewedShot($this->project, ['In keyframe 2 the padlock already hangs.']);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.issues.redraw', [$this->project, $shot, 'keyframe-2']))
+            ->assertRedirect();
+
+        Queue::assertPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->position === 2);
+        Queue::assertNotPushed(FixKeyframe::class);
+        expect(app(ShotIssues::class)->groups($shot->fresh(), $shot->keyframes()->with('media')->get()))->toBe([]);
     });
 
     it('dismisses the issues of a keyframe or of the whole shot without redrawing anything', function () {
@@ -309,9 +323,9 @@ describe('issues', function () {
             ->post(route('public.shots.issues.fix-all', [$this->project, $shot]), ['return' => 'decisions'])
             ->assertRedirect(route('public.projects.decisions', $this->project));
 
-        Queue::assertPushed(TweakKeyframeImage::class, 2);
-        Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->position === 2);
-        Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->position === 4);
+        Queue::assertPushed(FixKeyframe::class, 2);
+        Queue::assertPushed(FixKeyframe::class, fn(FixKeyframe $job) => $job->keyframe->position === 2);
+        Queue::assertPushed(FixKeyframe::class, fn(FixKeyframe $job) => $job->keyframe->position === 4);
         expect(array_column(app(ShotIssues::class)->groups($shot->fresh(), $shot->keyframes()->with('media')->get()), 'key'))->toBe(['shot']);
         // The editor shows only what is left.
         actingAs($this->director, 'director')
@@ -363,7 +377,7 @@ describe('issues', function () {
             ->post(route('public.shots.issues.fix-all', [$this->project, $shot]))
             ->assertSessionHasNoErrors();
 
-        Queue::assertPushed(TweakKeyframeImage::class, fn(TweakKeyframeImage $job) => $job->keyframe->position === 3);
+        Queue::assertPushed(FixKeyframe::class, fn(FixKeyframe $job) => $job->keyframe->position === 3);
     });
 
     it('refuses issues that are gone', function () {

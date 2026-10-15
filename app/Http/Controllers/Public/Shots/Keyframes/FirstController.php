@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
 use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Http\Requests\Public\FirstKeyframeAdjustRequest;
@@ -38,11 +39,11 @@ class FirstController
         $render = $first->renders()->firstWhere('id', $request->integer('render'))
             ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the first keyframe.')]);
 
-        if ($first->rendering) {
+        if ($first->isBusy()) {
             throw ValidationException::withMessages(['render' => __('Wait until the adjusted option is drawn.')]);
         }
 
-        $first->forceFill(['render_id' => $render->id])->save();
+        $first->forceFill(['render_id' => $render->id, 'status' => KeyframeStatus::READY])->save();
 
         GenerateRemainingKeyframes::startFor($shot);
 
@@ -58,21 +59,18 @@ class FirstController
 
         $this->ensureChoosing($shot, 'keyframes');
 
-        if ($shot->keyframes()->where('position', 1)->where('rendering', true)->exists()) {
+        if ($shot->keyframes()->where('position', 1)->busy()->exists()) {
             throw ValidationException::withMessages(['keyframes' => __('Wait until the adjusted option is drawn.')]);
         }
 
-        $shot->keyframes()->where('position', 1)->update(['rendering' => true, 'render_error' => null]);
+        $shot->keyframes()->where('position', 1)->update(['status' => KeyframeStatus::DRAWING, 'render_error' => null]);
 
         $shot->forceFill([
             'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
             'storyline_error' => null,
         ])->save();
 
-        // On a chosen place another version of keyframe 1 is drawn on it; otherwise another round of options.
-        $shot->hasChosenPlate()
-            ? GenerateRemainingKeyframes::dispatch($shot, onlyFirst: true)
-            : GenerateKeyframes::dispatch($shot, more: true);
+        GenerateKeyframes::dispatch($shot, more: true);
 
         return $this->afterAction($project, $shot);
     }
@@ -91,11 +89,11 @@ class FirstController
         $render = $first->renders()->firstWhere('id', $request->integer('render'))
             ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the first keyframe.')]);
 
-        if ($first->rendering) {
+        if ($first->isBusy()) {
             throw ValidationException::withMessages(['instruction' => __('Wait until the current adjustment is done.')]);
         }
 
-        $first->forceFill(['rendering' => true, 'render_error' => null])->save();
+        $first->forceFill(['status' => KeyframeStatus::DRAWING, 'render_error' => null])->save();
 
         TweakKeyframeImage::dispatch($first, $request->validated('instruction'), $render->id, rewrite: $request->boolean('rewrite'));
 

@@ -21,16 +21,16 @@
       </div>
 
       <div class="space-y-1.5">
-        <Label for="new-keyframe-description">{{ $t('Description') }}</Label>
+        <Label for="new-keyframe-summary">{{ $t('What happens') }}</Label>
         <Textarea
-          id="new-keyframe-description"
-          v-model="form.description"
-          rows="6"
-          maxlength="2000"
-          :placeholder="$t('Describe exactly what is visible at this moment: the pose, the key object and its state.')"
+          id="new-keyframe-summary"
+          v-model="form.summary"
+          rows="3"
+          maxlength="300"
+          :placeholder="$t('For example: The guard hands the permit back')"
           class="text-[15px] leading-relaxed"
         />
-        <InputError :message="form.errors.description" />
+        <InputError :message="form.errors.summary" />
         <p class="text-sm text-muted-foreground">
           {{ $t('It is added at the end and drawn to match the first keyframe.') }}
         </p>
@@ -39,7 +39,7 @@
       <Button
         type="submit"
         class="w-full"
-        :disabled="form.processing || form.title.trim() === '' || form.description.trim() === ''"
+        :disabled="form.processing || form.title.trim() === '' || form.summary.trim() === ''"
       >
         <LoaderCircle v-if="form.processing" class="size-4 animate-spin" />
         <Plus v-else class="size-4" />
@@ -65,7 +65,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ added: [] }>()
 
-const form = useForm({ title: '', description: '' })
+const form = useForm({ title: '', summary: '' })
 
 const submit = () =>
   form.post(props.storeUrl, {

@@ -22,7 +22,7 @@ trait GuardsBusyShots
      */
     protected function ensureShotIdle(Shot $shot, string $field): void
     {
-        if ($shot->status->isWorking() || $shot->keyframes()->where('rendering', true)->exists()) {
+        if ($shot->status->isWorking() || $shot->keyframes()->busy()->exists()) {
             throw ValidationException::withMessages([
                 $field => __('Wait until the shot is done working.'),
             ]);
@@ -38,7 +38,7 @@ trait GuardsBusyShots
      */
     protected function ensureKeyframeIdle(Shot $shot, Keyframe $keyframe, string $field): void
     {
-        if ($keyframe->rendering) {
+        if ($keyframe->isBusy()) {
             throw ValidationException::withMessages([
                 $field => __('Wait until this keyframe is drawn.'),
             ]);

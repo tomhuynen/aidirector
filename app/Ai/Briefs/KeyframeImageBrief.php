@@ -7,8 +7,8 @@ namespace App\Ai\Briefs;
 use App\Ai\KeyframeReferences;
 use App\Enums\ElementType;
 use App\Enums\ShotKind;
-use App\Enums\ShotSize;
 use App\Models\Keyframe;
+use App\Models\Project;
 use App\Models\Shot;
 
 /**
@@ -76,13 +76,17 @@ class KeyframeImageBrief
             $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';
             $lines[] = 'Staging: the people are inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches a figure: no railings, pillars, poles, barriers or machines directly behind or in front of the people. Any sign or context object sits on that surface beside the people, clearly readable, not touching them. The ground near the feet is plain.';
         }
-        $lines[] = 'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that belong to the place stay exactly as they are.';
+        $lines[] = TextRules::forImages($shot->project);
 
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
         $attached = 0;
 
         if ($references->style !== null) {
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly: the same medium, shading, line work, colours and lighting. Do not copy its subjects, panels or layout.';
+        }
+
+        if ($references->place !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the place of this shot. Draw this same place, with its buildings, signs, furniture and objects, colours and light, and put the cast into it as described. Choose the camera and the framing for the action, as the framing says, not the view of the picture.';
         }
 
         if ($references->setting !== null) {
@@ -120,7 +124,7 @@ class KeyframeImageBrief
             Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null),
             'Framing: a medium close-up from the chest up. The person is centred, faces the camera straight on and looks into the lens, shoulders square, with a friendly, calm expression and the mouth closed. The head and face fill about a third of the frame height, the eyes in the upper third.',
             'Background: the place, softly out of focus, calm and muted, with no readable details and nothing behind the head that draws attention.',
-            'Soft, even light on the face. Only this one person. Do not add text, captions or watermarks; logos on clothing and helmets stay as in the picture.',
+            'Soft, even light on the face. Only this one person. ' . TextRules::forImages($shot->project),
         ];
 
         $ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
@@ -156,9 +160,7 @@ class KeyframeImageBrief
         $castNames = implode(' and ', $references->castNames);
 
         $lines = [
-            $references->firstIsPlate
-                ? 'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move.'
-                : 'Edit the first attached image. It is keyframe 1 of this shot: the place, seen from a camera that does not move.',
+            'Edit the first attached image. It is keyframe 1 of this shot: the place, seen from a camera that does not move.',
             // The place stays put; what the story changes in it, such as a door that is shut by now, follows the story.
             'Change only what this keyframe needs: the people, their poses and positions, and the objects they handle. The place itself stays exactly as it is in the first image: the walls, the floor and every line on it, signs, windows, fixed machines and the background, at the same place, size and angle, with the same framing, camera, light and style.',
             'The state of things follows the story: open or closed, on or off, full or empty, smoke or none, held or in its place, as this keyframe shows and the keyframe before, even when the first image or a picture shows it otherwise. Whatever is picked up or taken out leaves its spot empty: a handset lifted off its hook leaves the cradle empty, and the object is never drawn twice.',
@@ -167,8 +169,7 @@ class KeyframeImageBrief
                 // A close-up shows the hands at work on the surface; the people's sleeves and gloves show who they are.
                 $shot->kindOrScene() === ShotKind::CLOSE_UP => "Add the hands and forearms of {$castNames} into it, reaching in from the edge of the frame at the size this close framing gives, with their sleeves, gloves and cuffs exactly as in their pictures; their faces stay out of the frame.",
                 default => "{$castNames} " . (count($references->castNames) > 1 ? 'are' : 'is') . ' not in the first image yet: add them into it, standing on the floor of the place at a natural size for where they stand.',
-            }
-                    . ($references->firstIsPlate && $references->previous !== null ? ' The keyframe before shows how they look in this shot.' : ''),
+            },
             '',
         ];
 
@@ -207,54 +208,7 @@ class KeyframeImageBrief
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the people hold, what is in their pockets and what lies in a bin or box, unless this keyframe changes it, and keep the people looking the same as there. Do not copy its pose.';
         }
 
-        $lines[] = 'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are.';
-
-        return implode("\n", $lines);
-    }
-
-    /**
-     * The prompt for an empty place to start the shot from: the camera, the
-     * spot, the light and every object the story needs, written from the
-     * whole plan, with room for what the people will do, but without them.
-     */
-    public static function plate(Shot $shot, KeyframeReferences $references, int $variation): string
-    {
-        $style = $shot->project->style;
-        $framing = $shot->storylineFraming();
-        $steps = collect($shot->storylineKeyframes())->map(fn(array $keyframe, int $index) => ($index + 1) . '. ' . Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null))->join("\n");
-
-        $lines = [
-            "Visual style: {$style['look']}. Medium: {$style['medium']}. Mood: {$style['mood']}. Palette: {$style['palette']}.",
-            '',
-            'Draw the place where this shot plays, empty: no people at all. Every keyframe of the shot is drawn on top of this picture later, so the camera, the framing and the place must suit all of them.',
-            'Framing: ' . ShotSize::FULL->framing() . ' Frame it for the people who will stand at the spot: an adult standing there fills about two thirds of the frame height.',
-        ];
-
-        if (filled($framing['spot'] ?? null)) {
-            $lines[] = "Spot: {$framing['spot']}";
-        }
-
-        array_push($lines, '', "What happens at this spot during the shot; place the fixed objects and zones so all of it can happen in this picture, for example a hanging load right above the path someone must not walk. Do not draw the people or what they hold:\n{$steps}", '');
-
-        array_push(
-            $lines,
-            'Put every fixed object the story uses where it is needed, such as a sign, a bin, a door, a crane or a marked zone, large enough to read. Leave free floor where the people will stand and walk, and keep a door they go through visible. Leave out anything that only appears during the story, such as an object in someone\'s hand or something put in a bin later.',
-            'Draw everything in its state at step 1, such as a door open or closed as step 1 says; later changes to the place are made on this picture.',
-            'Keep the background simple and subdued, and everything in it physically sensible. Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours.',
-            self::plateVariation($variation),
-        );
-
-        $ordinals = ['first', 'second', 'third', 'fourth', 'fifth'];
-        $attached = 0;
-
-        if ($references->style !== null) {
-            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the project\'s style reference sheet. Match its rendering style exactly. Do not copy its subjects or layout.';
-        }
-
-        foreach ($references->elementImages as $entry) {
-            $element = $entry['element'];
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image shows {$element->name} ({$element->type->value})" . ($element->type === ElementType::PLACE ? ': use it only for the materials, colours and the kind of things in the place. Never copy its viewpoint, its framing or its layout; the camera for this option decides those.' : ': draw it exactly like it, at its place in the scene.');
-        }
+        $lines[] = TextRules::forImages($shot->project) . ' Signs and markings already in the first image stay where they are.';
 
         return implode("\n", $lines);
     }
@@ -291,83 +245,27 @@ class KeyframeImageBrief
     }
 
     /**
-     * A camera direction per place option, so the places offer a real choice.
-     * The directions repeat for further rounds.
-     */
-    public static function plateVariation(int $index): string
-    {
-        $directions = [
-            'The camera faces the spot straight on, at eye level, as described.',
-            'The camera is turned around: it stands at the other end of the place and looks back at the spot, so the background behind the spot is another part of the place, and what stood left now stands right.',
-            'The camera stands side-on across the place, close and a little lower: the spot and the object the story turns on are large in the foreground, and the far side of the place fills the back.',
-        ];
-
-        return 'Camera for this option, it must look clearly different from the other options in where the camera stands and what is behind the spot: ' . $directions[$index % count($directions)] . ' Keep the framing for the people as above.';
-    }
-
-    /**
-     * The prompt for a change to an empty place before it is chosen: only the
-     * asked change is made, and the place stays without people.
-     */
-    public static function tweakPlate(string $instruction): string
-    {
-        return implode("\n", [
-            'Edit the attached image. It is the empty place of this shot, without any people, seen from a camera that does not move.',
-            "Change only this: {$instruction}",
-            'Keep everything else exactly as it is: the walls, doors, machines, objects, the floor and every marking or painted line on it, the background, the framing, the camera, the light and the style.',
-            'Do not add people.',
-            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the image stay exactly as they are.',
-        ]);
-    }
-
-    /**
-     * The prompt for a later state of the empty place, such as a door that is
-     * closed by now: only the change is made, the place stays without people.
-     */
-    public static function placeState(string $change): string
-    {
-        return implode("\n", [
-            'Edit the attached image. It is the empty place where a shot plays, without any people, seen from a camera that does not move.',
-            "Change only this, which is how it looks from now on in the shot: {$change}",
-            'Everything else stays exactly as it is: the walls, the floor and every line on it, the ceiling, doors, windows, signs, machines, objects and the background, at the same place, size and angle, with the same framing, camera, light and style.',
-            'Do not add people.',
-            'Do not add text, captions or watermarks. Signs and markings already in the image stay exactly as they are.',
-        ]);
-    }
-
-    /**
-     * The prompt for a change to a keyframe drawn on a place: the place is
-     * edited again, with the current version attached for the people and
-     * everything that differs from the empty place, so only the asked change
-     * is new and the background stays the place's own.
-     */
-    public static function tweakOnPlate(string $instruction, bool $withPreviousKeyframe = false): string
-    {
-        return implode("\n", array_filter([
-            'Edit the first attached image. It is the place of this shot without any people, seen from a camera that does not move. The place itself stays exactly as it is: the walls, the floor and every line on it, signs, windows, fixed machines and the background, at the same place, size and angle, with the same framing, camera, light and style. The state of things, such as a door open or closed, follows the current version of this keyframe; whatever is picked up or taken out leaves its spot empty, such as the cradle of a lifted handset.',
-            'The second attached image is the current version of this keyframe. Put into the place exactly what it shows that the empty place does not: the people with their look, pose, size and position, what they hold, and any thing of the place in another state or position, such as a load that is lowered or a door that is open. Copy only those from it, never its framing or background.',
-            "Change only this compared with the current version: {$instruction}",
-            $withPreviousKeyframe
-                ? 'The third attached image is the keyframe directly before this one in the same shot, for how the people and objects look. Do not copy its pose.'
-                : null,
-            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Signs and markings already in the first image stay exactly as they are.',
-        ]));
-    }
-
-    /**
      * The prompt for correcting the current render of a keyframe with a small change.
-     * With `$withPreviousKeyframe` the keyframe before it is attached second, as context.
+     * With `$withPreviousKeyframe` the keyframe before it is attached second, as context;
+     * the logos of the branding the change asks for follow, so they are drawn from their picture.
+     *
+     * @param  list<string>  $logos  the brands of the attached logos, in order
      */
-    public static function tweak(string $instruction, bool $withPreviousKeyframe = false): string
+    public static function tweak(Project $project, string $instruction, bool $withPreviousKeyframe = false, array $logos = []): string
     {
+        $ordinals = ['second', 'third', 'fourth', 'fifth'];
+        $attached = $withPreviousKeyframe ? 1 : 0;
+
         return implode("\n", array_filter([
-            $withPreviousKeyframe ? 'Edit the first attached image.' : 'Edit the attached image.',
+            $withPreviousKeyframe || $logos !== [] ? 'Edit the first attached image.' : 'Edit the attached image.',
             "Change only this: {$instruction}",
             'Keep everything else exactly as it is: the character, the environment, the objects, the framing, the colours and the style.',
             $withPreviousKeyframe
                 ? 'The second attached image is the keyframe directly before this one in the same shot. Use it to see how the character and the objects look and where they are, and copy them from it when the change asks for something that is missing. Do not copy its pose or framing.'
                 : null,
-            'Do not add text, captions or watermarks, and never write words, labels, numbers or ID details on cards, badges, permits, papers or screens: draw them with plain shapes and colours. Logos, signs and markings that are already in the image stay exactly as they are.',
+            // At most two logos follow, so the ordinals always reach.
+            ...array_map(fn(string $brand) => 'The ' . $ordinals[$attached++] . " attached image is the {$brand} logo.", $logos),
+            ($logos === [] ? TextRules::forEdits($project) : TextRules::withLogos($logos)) . ' Signs and markings already in the image stay where they are.',
         ]));
     }
 }

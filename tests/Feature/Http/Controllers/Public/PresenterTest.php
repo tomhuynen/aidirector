@@ -24,6 +24,7 @@ use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Projects\ProjectSettings;
+use App\Support\Shots\KeyframeChain;
 use App\Support\Video\ClipJoiner;
 use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Http\Client\Request;
@@ -70,7 +71,7 @@ function presenterShot(Project $project, array $attributes = []): Shot
         'kind' => ShotKind::PRESENTER,
         'status' => ShotStatus::KEYFRAMES_PENDING,
         'voice_over' => 'Your safety comes first at Damen Naval.',
-        'chosen_storyline' => ['title' => 'Welcome', 'storyline' => 'The host welcomes the viewer.'],
+        'chosen_storyline' => ['storyline' => 'The host welcomes the viewer.'],
         'storyline' => ['framing' => ['size' => 'medium', 'spot' => '', 'light' => 'as the visual style', 'seconds' => 5], 'keyframes' => presenterPlan()],
         ...$attributes,
     ]);
@@ -116,7 +117,7 @@ it('draws the still frontal and close, with the place only as a blurred backgrou
     $host->addMediaFromString(presenterPng())->usingFileName('host.png')->toMediaCollection(Element::REFERENCE);
 
     (new GenerateKeyframes($shot))->handle();
-    (new GenerateRemainingKeyframes($shot->fresh()))->handle(app(KeyframePainter::class));
+    (new GenerateRemainingKeyframes($shot->fresh()))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
     expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
         ->and($shot->keyframes()->with('media')->first()->render())->not->toBeNull();
@@ -192,7 +193,7 @@ it('switches to a presenter when the plan agreed in the chat says so', function 
     Queue::fake();
     App\Ai\Agents\PlanDirector::fake([[
         'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
-        'proposal' => ['takeaway' => '', 'kind' => 'presenter', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => presenterPlan()],
+        'proposal' => ['title' => '', 'kind' => 'presenter', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => presenterPlan()],
     ]]);
     $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'kind' => ShotKind::SCENE, 'storyline' => ['keyframes' => presenterPlan()]]);
 
@@ -204,13 +205,11 @@ it('switches to a presenter when the plan agreed in the chat says so', function 
 
 });
 
-it('offers no moving, no extra keyframes and no separate audio tracks on a presenter', function () {
+it('offers no extra keyframes and no separate audio tracks on a presenter', function () {
     Queue::fake();
     $this->project->settings = new ProjectSettings(voiceOver: true, voiceOverLocales: ['en-GB', 'nl-NL']);
     $this->project->save();
     $shot = presenterShot($this->project, ['status' => ShotStatus::KEYFRAMES_READY]);
-    // A place left over from when the shot was a scene.
-    $shot->addMediaFromString(presenterPng())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
     Keyframe::factory()->for($shot)->create(['position' => 1])
         ->addMediaFromString(presenterPng())->usingFileName('still.png')->toMediaCollection(Keyframe::RENDERS);
 
@@ -219,8 +218,8 @@ it('offers no moving, no extra keyframes and no separate audio tracks on a prese
     Queue::assertNotPushed(App\Jobs\GenerateVoiceOverAudio::class);
     actingAs($this->director, 'director')
         ->get(route('public.shots.view', [$this->project, $shot]))
-        ->assertInertia(fn($page) => $page->where('shot.voiceOverTracks', [])->where('keyframes.0.links.move', null));
+        ->assertInertia(fn($page) => $page->where('shot.voiceOverTracks', []));
     actingAs($this->director, 'director')
-        ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Second', 'description' => 'Another still.'])
-        ->assertSessionHasErrors('description');
+        ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Second', 'summary' => 'Another still.'])
+        ->assertSessionHasErrors('summary');
 });

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\KeyframeStatus;
 use App\Models\Shot;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -22,6 +23,7 @@ class KeyframeFactory extends Factory
             'position' => 1,
             'title' => fake()->words(3, true),
             'description' => fake()->sentence(),
+            'status' => KeyframeStatus::PLANNED,
         ];
     }
 }

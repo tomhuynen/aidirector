@@ -2,186 +2,241 @@
 
 declare(strict_types=1);
 
-use App\Ai\Agents\MovedPersonDescriber;
-use App\Ai\KeyframePainter;
+use App\Ai\Agents\KeyframeReader;
 use App\Enums\Disk;
+use App\Enums\ElementType;
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
-use App\Jobs\PoseMovedPerson;
+use App\Jobs\ChangeCastMember;
+use App\Jobs\DrawKeyframe;
+use App\Jobs\MoveCastMember;
 use App\Models\Director;
+use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Support\Images\BackgroundDrift;
-use App\Support\Images\PersonCutout;
+use App\Support\Images\DepthGrid;
+use App\Support\Images\PlaceDepth;
+use App\Support\Shots\KeyframeChain;
+use App\Support\Shots\KeyframeLayout;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
-use Laravel\Ai\Image;
-use Laravel\Ai\Prompts\ImagePrompt;
 
 use function Pest\Laravel\actingAs;
 
-beforeEach(function () {
-    Storage::fake(Disk::TENANT->value);
-
-    $this->director = Director::factory()->create();
-    $this->project = Project::factory()->ownedBy($this->director)->create();
-});
-
-/**
- * A grey place, optionally with a red "person" standing with their feet at the given point.
- */
-function placePng(?array $person = null): string
+function movePng(): string
 {
-    $image = imagecreatetruecolor(432, 768);
-    imagefill($image, 0, 0, (int) imagecolorallocate($image, 128, 128, 128));
-    imagefilledrectangle($image, 0, 500, 431, 767, (int) imagecolorallocate($image, 90, 110, 160));
-
-    if ($person !== null) {
-        [$feetX, $feetY] = $person;
-        imagefilledrectangle($image, $feetX - 25, $feetY - 160, $feetX + 25, $feetY, (int) imagecolorallocate($image, 220, 40, 40));
-    }
-
+    $image = imagecreatetruecolor(9, 16);
     ob_start();
     imagepng($image);
 
     return (string) ob_get_clean();
 }
 
-/**
- * A keyframe drawn on a chosen place, with a person whose feet are at (300, 600).
- */
-function keyframeOnPlace(Project $project): Keyframe
-{
-    $shot = Shot::factory()->for($project)->create(['status' => ShotStatus::KEYFRAMES_READY]);
-    $shot->addMediaFromString(placePng())->usingFileName('place.png')->withCustomProperties([Shot::PLATE_CHOSEN => true])->toMediaCollection(Shot::PLATE);
-    $keyframe = Keyframe::factory()->for($shot)->create(['position' => 1, 'description' => 'He looks up at the container and points at it.']);
-    $render = $keyframe->addMediaFromString(placePng([300, 600]))->usingFileName('keyframe-1.png')->toMediaCollection(Keyframe::RENDERS);
-    $keyframe->forceFill(['render_id' => $render->id])->save();
+beforeEach(function () {
+    Storage::fake(Disk::TENANT->value);
+    Config::set(['services.replicate.token' => 'test-token', 'pipeline.keyframe_check' => false, 'pipeline.models.keyframe_layout' => 'black-forest-labs/flux-3-image']);
 
-    return $keyframe->fresh();
-}
-
-function pixelAt(string $path, int $x, int $y): array
-{
-    $image = imagecreatefrompng($path);
-    // A png with few colours comes back as a palette, where a pixel is an index into it.
-    $colour = imagecolorsforindex($image, imagecolorat($image, $x, $y));
-
-    return [$colour['red'], $colour['green'], $colour['blue']];
-}
-
-it('finds the person the director clicks by what differs from the place', function () {
-    $keyframe = keyframeOnPlace($this->project);
-    $shot = $keyframe->shot;
-
-    $response = actingAs($this->director, 'director')
-        ->postJson(route('public.shots.keyframes.move.select', [$this->project, $shot, $keyframe]), ['x' => 300 / 432, 'y' => 520 / 768])
-        ->assertOk();
-
-    expect($response->json('box.x'))->toEqualWithDelta(275 / 432, 0.03)
-        ->and($response->json('box.y'))->toEqualWithDelta(440 / 768, 0.03)
-        ->and($response->json('cutout'))->toStartWith('data:image/png;base64,')
-        ->and($response->json('overlay'))->toStartWith('data:image/png;base64,');
-
-    actingAs($this->director, 'director')
-        ->postJson(route('public.shots.keyframes.move.select', [$this->project, $shot, $keyframe]), ['x' => 0.1, 'y' => 0.2])
-        ->assertJsonValidationErrors('x');
+    $this->director = Director::factory()->create();
+    $this->project = Project::factory()->ownedBy($this->director)->create();
+    $this->shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY]);
+    $this->guard = Element::factory()->for($this->project)->create(['name' => 'Security guard', 'type' => ElementType::PERSON]);
+    $this->first = Keyframe::factory()->for($this->shot)->create(['position' => 1, 'status' => KeyframeStatus::READY, 'layout' => ['cast' => [
+        ['name' => 'Security guard', 'box' => [555, 139, 711, 250], 'facing' => 'side-on, facing the car', 'pose' => 'arms down', 'changed' => true],
+        ['name' => 'Visitor car', 'box' => [650, 330, 920, 800], 'facing' => 'rear to the camera', 'pose' => 'stopped', 'changed' => true],
+    ]]]);
+    $this->first->addMediaFromString(movePng())->usingFileName('first.png')->toMediaCollection(Keyframe::RENDERS);
+    $this->first->elements()->attach($this->guard);
+    $this->second = Keyframe::factory()->for($this->shot)->create(['position' => 2, 'status' => KeyframeStatus::READY]);
+    $this->second->addMediaFromString(movePng())->usingFileName('second.png')->toMediaCollection(Keyframe::RENDERS);
+    app(KeyframeChain::class)->link($this->shot);
 });
 
-it('moves the person, shows the place where they stood, and has the pose redrawn for the new spot', function () {
+it('offers the layout and the move for a drawn keyframe of a scene', function () {
+    actingAs($this->director, 'director')
+        ->get(route('public.shots.view', [$this->project, $this->shot]))
+        ->assertInertia(fn($page) => $page
+            ->where('keyframes.0.layout.0', ['name' => 'Security guard', 'box' => [555, 139, 711, 250]])
+            ->where('keyframes.0.links.move', route('public.shots.keyframes.move', [$this->project, $this->shot, $this->first]))
+            ->where('keyframes.1.layout', []));
+});
+
+it('reads where the cast stands when a keyframe has no layout yet', function () {
+    KeyframeReader::fake([['cast' => [['name' => 'Security guard', 'box' => ['top' => 500, 'left' => 100, 'bottom' => 700, 'right' => 200], 'facing' => 'facing the camera', 'pose' => 'arms down', 'placed_right' => true, 'target' => ['top' => 500, 'left' => 100, 'bottom' => 700, 'right' => 200], 'looks_right' => true, 'problem' => '']]]]);
+    $this->second->elements()->attach($this->guard);
+    $this->guard->addMediaFromString(movePng())->usingFileName('guard.png')->toMediaCollection(Element::REFERENCE);
+
+    actingAs($this->director, 'director')
+        ->post(route('public.shots.keyframes.layout', [$this->project, $this->shot, $this->second]))
+        ->assertSessionHasNoErrors();
+
+    expect(KeyframeLayout::fromArray($this->second->fresh()->layout)->member('Security guard')['box'])->toBe([500, 100, 700, 200]);
+});
+
+it('moves one of the cast to the box the director dragged them to', function () {
     Queue::fake();
-    $keyframe = keyframeOnPlace($this->project);
-    $shot = $keyframe->shot;
 
     actingAs($this->director, 'director')
-        ->post(route('public.shots.keyframes.move', [$this->project, $shot, $keyframe]), ['x' => 300 / 432, 'y' => 520 / 768, 'dx' => -200 / 432, 'dy' => 0, 'scale' => 1, 'instruction' => ''])
+        ->post(route('public.shots.keyframes.move', [$this->project, $this->shot, $this->first]), ['name' => 'Security guard', 'box' => [600, 290, 780, 410], 'following' => true])
         ->assertSessionHasNoErrors();
 
-    $moved = $keyframe->fresh()->render();
-
-    expect(pixelAt($moved->getPath(), 300, 540))->toBe([90, 110, 160])
-        ->and(pixelAt($moved->getPath(), 100, 540)[0])->toBeGreaterThan(200)
-        ->and($keyframe->fresh()->rendering)->toBeTrue();
-    Queue::assertPushed(PoseMovedPerson::class, fn(PoseMovedPerson $job) => str_contains($job->instruction, 'Keep the person exactly where they stand')
-        && str_contains($job->instruction, 'He looks up at the container and points at it.')
-        && abs($job->box['x'] + $job->box['width'] / 2 - 100 / 432) < 0.03);
+    expect($this->first->fresh()->status)->toBe(KeyframeStatus::DRAWING);
+    Queue::assertPushed(MoveCastMember::class, fn(MoveCastMember $job) => $job->name === 'Security guard' && $job->box === [600, 290, 780, 410] && $job->following && $job->version === $this->first->fresh()->draw_version);
 });
 
-it('only offers moving on a keyframe drawn on a place', function () {
-    $keyframe = keyframeOnPlace($this->project);
-    $keyframe->shot->clearMediaCollection(Shot::PLATE);
+it('refuses a move of someone who is not in the keyframe, or while it is drawn', function () {
+    Queue::fake();
 
     actingAs($this->director, 'director')
-        ->postJson(route('public.shots.keyframes.move.select', [$this->project, $keyframe->shot, $keyframe]), ['x' => 0.7, 'y' => 0.7])
-        ->assertJsonValidationErrors('x');
+        ->post(route('public.shots.keyframes.move', [$this->project, $this->shot, $this->first]), ['name' => 'Nobody', 'box' => [600, 290, 780, 410]])
+        ->assertSessionHasErrors('move');
+
+    $this->first->forceFill(['status' => KeyframeStatus::DRAWING])->save();
+
+    actingAs($this->director, 'director')
+        ->post(route('public.shots.keyframes.move', [$this->project, $this->shot, $this->first]), ['name' => 'Security guard', 'box' => [600, 290, 780, 410]])
+        ->assertSessionHasErrors('move');
+
+    Queue::assertNothingPushed();
 });
 
-it('redraws the pose on a crop around the person, again when they wander off, and makes the plan true to the image before the review', function () {
-    $keyframe = keyframeOnPlace($this->project);
-    $keyframe->shot->forceFill(['storyline' => ['keyframes' => [['title' => 'Wrong Zone', 'description' => $keyframe->description, 'must_show' => 'He stands inside the red zone.']]]])->save();
-    $box = app(PersonCutout::class)->select($keyframe->shot->getFirstMedia(Shot::PLATE)->getPath(), $keyframe->render()->getPath(), 300 / 432, 520 / 768)['box'];
-    $calls = 0;
-    // The first redraw loses the person; the second gives back the crop it was sent, so the person stays put.
-    Image::fake(function (ImagePrompt $prompt) use (&$calls) {
-        $calls++;
+it('draws the move on the keyframe itself, sized by the depth, and the keyframes after it when asked', function () {
+    Queue::fake([DrawKeyframe::class]);
+    Http::fake([
+        'api.replicate.com/v1/models/black-forest-labs/flux-3-image/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/out.png']),
+        'replicate.delivery/*' => Http::response(movePng()),
+    ]);
+    // The island is 4 m away; the road 80% down the frame and lower 2 m, so the guard comes out twice as large there.
+    $this->first->render()->setCustomProperty(PlaceDepth::DEPTH, (new DepthGrid(1, 10, [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 2.0, 2.0]))->toArray())->save();
+    $this->first->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 1])->save();
 
-        return $calls === 1 ? base64_encode(placePng()) : base64_encode(Storage::disk('local')->get($prompt->attachments->first()->path));
+    (new MoveCastMember($this->first->fresh(), 1, 'Security guard', [600, 290, 900, 400], following: true))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
+
+    $first = $this->first->fresh();
+
+    expect($first->status)->toBe(KeyframeStatus::READY)
+        ->and($first->renders())->toHaveCount(2)
+        ->and(KeyframeLayout::fromArray($first->layout)->member('Security guard')['box'])->toBe([588, 234, 900, 456])
+        ->and(KeyframeLayout::fromArray($first->layout)->member('Visitor car')['box'])->toBe([650, 330, 920, 800])
+        ->and($this->second->fresh()->status)->toBe(KeyframeStatus::DRAWING);
+    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
+        && count($request['input']['images']) === 1
+        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[579,201,937,489]')
+        && ! str_contains($request['input']['prompt'], 'soft shadow')
+        && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.'));
+    Queue::assertPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->is($this->second));
+});
+
+describe('past the edge of the frame', function () {
+    beforeEach(function () {
+        Queue::fake([DrawKeyframe::class]);
+        Http::fake([
+            'api.replicate.com/v1/models/black-forest-labs/flux-3-image/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/out.png']),
+            'replicate.delivery/*' => Http::response(movePng()),
+        ]);
+        $this->first->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 1])->save();
     });
-    $keyframe->shot->forceFill(['chosen_storyline' => ['title' => 'Under the load', 'storyline' => 'He steps into the red zone and points at the container.']])->save();
-    MovedPersonDescriber::fake([['description' => 'He stands in the blue lane, side-on, and points at the container.', 'storyline' => 'He stops in the blue lane and points at the container.', 'title' => 'Safe Lane', 'warning' => 'He never enters the red zone, so the mistake the shot warns about is not shown.']]);
-    $keyframe->forceFill(['rendering' => true])->save();
 
-    (new PoseMovedPerson($keyframe, 'Keep the person exactly where they stand. He points at the container.', $box))->handle(app(KeyframePainter::class), app(PersonCutout::class), app(BackgroundDrift::class));
+    it('takes someone out of the shot when they are dragged wholly past the edge', function () {
+        (new MoveCastMember($this->first->fresh(), 1, 'Security guard', [555, -400, 711, -289]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
 
-    $keyframe->refresh();
-    $render = $keyframe->render();
+        expect(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Security guard'))->toBeNull()
+            ->and(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Visitor car'))->not->toBeNull();
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":null')
+            && str_contains($request['input']['prompt'], '<security_guard> leaves the frame'));
+    });
 
-    expect($calls)->toBe(2)
-        ->and($keyframe->rendering)->toBeFalse()
-        ->and($render->getCustomProperty(Keyframe::TWEAK_REQUEST))->toContain('He points at the container.')
-        ->and($render->getCustomProperty(Keyframe::MOVE_WARNING))->toBe('He never enters the red zone, so the mistake the shot warns about is not shown.')
-        ->and($keyframe->title)->toBe('Safe Lane')
-        ->and($keyframe->shot->storylineKeyframes()[0]['title'])->toBe('Safe Lane')
-        ->and($keyframe->shot->fresh()->chosenStoryline())->toBe(['title' => 'Under the load', 'storyline' => 'He stops in the blue lane and points at the container.'])
-        ->and($keyframe->description)->toBe('He stands in the blue lane, side-on, and points at the container.')
-        ->and($render->getCustomProperty(Keyframe::SENT)['images'])->toBe(['A crop around the person moved by hand, the image that is edited']);
-    Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Change only this: Keep the person exactly where they stand.'));
-    MovedPersonDescriber::assertPrompted(fn($prompt) => ! str_contains($prompt->prompt, 'Must show'));
+    it('leaves someone cut off by the edge when they are dragged partly past it, and keeps only what shows', function () {
+        (new MoveCastMember($this->first->fresh(), 1, 'Security guard', [555, -50, 711, 61]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
+
+        expect(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Security guard')['box'])->toBe([555, 0, 711, 61]);
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[550,0,730,70]')
+            && str_contains($request['input']['prompt'], 'only the part of them inside the box shows'));
+    });
+
+    it('draws someone who was cut off from their picture when they come back in, so they are whole', function () {
+        $this->guard->addMediaFromString(movePng())->usingFileName('guard.png')->toMediaCollection(Element::REFERENCE);
+        $this->first->forceFill(['layout' => ['cast' => [['name' => 'Security guard', 'box' => [555, 0, 711, 61], 'facing' => 'facing the car', 'pose' => 'arms down', 'changed' => true]]]])->save();
+
+        (new MoveCastMember($this->first->fresh(), 1, 'Security guard', [555, 139, 711, 250]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
+
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && count($request['input']['images']) === 2
+            && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_1","src_bbox":[0,0,1000,1000],"tgt_bbox":[555,139,711,250]')
+            && str_contains($request['input']['prompt'], 'looks exactly like <ref_image_1>, the whole of them'));
+    });
 });
 
-it('still makes the plan true to the moved image when the pose cannot be redrawn', function () {
-    $keyframe = keyframeOnPlace($this->project);
-    $keyframe->shot->forceFill(['storyline' => ['keyframes' => [['title' => 'Wrong Zone', 'description' => $keyframe->description]]]])->save();
-    MovedPersonDescriber::fake([['description' => 'He stands in the blue lane.', 'storyline' => '', 'title' => '', 'warning' => '']]);
-    $keyframe->forceFill(['rendering' => true])->save();
+it('changes one of the cast where they stand, keeping everyone else', function () {
+    Queue::fake([DrawKeyframe::class]);
+    Http::fake([
+        'api.replicate.com/v1/models/black-forest-labs/flux-3-image/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/out.png']),
+        'replicate.delivery/*' => Http::response(movePng()),
+    ]);
+    $this->first->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 1])->save();
 
-    (new PoseMovedPerson($keyframe, 'Keep the person where they stand.', ['x' => 0.6, 'y' => 0.5, 'width' => 0.1, 'height' => 0.2]))->failed(new RuntimeException('Provider down'));
+    (new ChangeCastMember($this->first->fresh(), 1, 'Security guard', 'He raises his left hand.'))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
 
-    expect($keyframe->fresh()->rendering)->toBeFalse()
-        ->and($keyframe->fresh()->render_error)->toContain('the pose could not be redrawn')
-        ->and($keyframe->fresh()->description)->toBe('He stands in the blue lane.');
+    $first = $this->first->fresh();
+
+    expect($first->status)->toBe(KeyframeStatus::READY)
+        ->and($first->renders())->toHaveCount(2)
+        ->and($first->render()->getCustomProperty(Keyframe::TWEAK_REQUEST))->toBe('He raises his left hand.');
+    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions')
+        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[550,122,730,267],"desc":"Security guard, He raises his left hand","kind":"move"')
+        && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.'));
 });
 
-it('lets the director move people in keyframe 1 and pick its versions before the other keyframes are drawn', function () {
-    $keyframe = keyframeOnPlace($this->project);
-    $shot = $keyframe->shot;
-    $shot->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_READY])->save();
-    $first = $keyframe->render_id;
-    $second = $keyframe->addMediaFromString(placePng([300, 600]))->usingFileName('keyframe-1-b.png')->toMediaCollection(Keyframe::RENDERS);
-    $later = Keyframe::factory()->for($shot)->create(['position' => 2]);
+it('fixes what the check found only where it is, from the picture of whoever it is about', function () {
+    Queue::fake([DrawKeyframe::class]);
+    Http::fake([
+        'api.replicate.com/v1/models/black-forest-labs/flux-3-image/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/out.png']),
+        'replicate.delivery/*' => Http::response(movePng()),
+    ]);
+    App\Ai\Agents\KeyframeFixLocator::fake([['fixes' => [
+        ['problem' => 'The lettering disappeared from the front of his hard hat.', 'box' => ['top' => 555, 'left' => 150, 'bottom' => 600, 'right' => 240], 'member' => 'security guard', 'looks' => true, 'shows' => 'His hard hat with the lettering on the front, as in his picture.'],
+        ['problem' => 'Nothing to find.', 'box' => ['top' => 0, 'left' => 0, 'bottom' => 2, 'right' => 2], 'member' => '', 'shows' => 'Nothing.'],
+    ]]]);
+    $this->guard->addMediaFromString(movePng())->usingFileName('guard.png')->toMediaCollection(Element::REFERENCE);
+    $this->first->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 1])->save();
 
-    actingAs($this->director, 'director')
-        ->postJson(route('public.shots.keyframes.move.select', [$this->project, $shot, $keyframe]), ['x' => 300 / 432, 'y' => 520 / 768])
-        ->assertOk();
+    (new App\Jobs\FixKeyframe($this->first->fresh(), 1, ['The lettering disappeared from the front of his hard hat.']))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
 
-    actingAs($this->director, 'director')
-        ->post(route('public.shots.keyframes.render', [$this->project, $shot, $keyframe]), ['render' => $second->id])
-        ->assertSessionHasNoErrors();
+    $first = $this->first->fresh();
 
-    actingAs($this->director, 'director')
-        ->post(route('public.shots.keyframes.render', [$this->project, $shot, $later]), ['render' => $first])
-        ->assertSessionHasErrors('render');
+    expect($first->status)->toBe(KeyframeStatus::READY)
+        ->and($first->render()->getCustomProperty(Keyframe::TWEAK_FROM_CHECK))->toBeTrue()
+        ->and(KeyframeLayout::fromArray($first->layout)->member('Security guard')['box'])->toBe([555, 139, 711, 250]);
+    App\Ai\Agents\KeyframeFixLocator::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '- Security guard, at [555, 139, 711, 250]')
+        && str_contains($prompt->prompt, '- The lettering disappeared from the front of his hard hat.'));
+    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
+        && count($request['input']['images']) === 2
+        && str_contains($request['input']['prompt'], '"id":"security_guard_fix","from":"ref_image_0","src_bbox":[555,150,600,240],"tgt_bbox":[555,150,600,240]')
+        && str_contains($request['input']['prompt'], 'exactly from <ref_image_1>, the picture of Security guard')
+        && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.')
+        && ! str_contains($request['input']['prompt'], '"id":"security_guard","from"')
+        && ! str_contains($request['input']['prompt'], 'Nothing to find'));
+});
 
-    expect($keyframe->fresh()->render_id)->toBe($second->id)
-        ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_READY);
+it('fixes a pose without the picture of whoever it is about, which would undo it', function () {
+    Queue::fake([DrawKeyframe::class]);
+    Http::fake([
+        'api.replicate.com/v1/models/black-forest-labs/flux-3-image/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/out.png']),
+        'replicate.delivery/*' => Http::response(movePng()),
+    ]);
+    App\Ai\Agents\KeyframeFixLocator::fake([['fixes' => [
+        ['problem' => 'Both arms are already through the vest.', 'box' => ['top' => 555, 'left' => 139, 'bottom' => 711, 'right' => 250], 'member' => 'Security guard', 'looks' => false, 'shows' => 'One arm through the vest, the other still outside it.'],
+    ]]]);
+    $this->guard->addMediaFromString(movePng())->usingFileName('guard.png')->toMediaCollection(Element::REFERENCE);
+    $this->first->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 1])->save();
+
+    (new App\Jobs\FixKeyframe($this->first->fresh(), 1, ['Both arms are already through the vest.']))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
+
+    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
+        && count($request['input']['images']) === 1
+        && str_contains($request['input']['prompt'], 'Security guard looks as they do now; only their pose')
+        && ! str_contains($request['input']['prompt'], 'the picture of Security guard'));
+    App\Ai\Agents\KeyframeFixLocator::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'looks: true when the problem is how they look compared with their picture'));
 });

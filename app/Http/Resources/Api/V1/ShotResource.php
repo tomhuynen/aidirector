@@ -25,7 +25,8 @@ class ShotResource extends JsonResource
             'id' => $this->sqid,
             'position' => $this->position,
             'title' => $this->title,
-            'takeaway' => $this->takeaway,
+            /** @var string|null */
+            'idea' => $this->idea,
             /** @var 'scene'|'montage'|'presenter'|null */
             'kind' => $this->kind?->value,
             'status' => $this->status->value,

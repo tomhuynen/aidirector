@@ -22,12 +22,14 @@ class PlanDirectorRequest extends FormRequest
             /** The ids of the cast and sets the director just made from the chat; they stay shown with the message. */
             'made' => ['sometimes', 'array', 'max:8'],
             'made.*' => ['string'],
-            /** Once the images are drawn: what is selected, a keyframe, an option for keyframe 1, or a place to choose. */
-            'target' => ['nullable', 'string', 'in:keyframe,option,place'],
+            /** Once the images are drawn: what is selected, a keyframe or an option for keyframe 1. */
+            'target' => ['nullable', 'string', 'in:keyframe,option'],
             /** The keyframe's id, when a keyframe is selected. */
             'keyframe' => ['nullable', 'string'],
-            /** The id of the selected option or place. */
+            /** The id of the selected option for keyframe 1. */
             'option' => ['nullable', 'integer'],
+            /** The one of the cast selected in the keyframe; a change to them is proposed, and made once the director confirms it. */
+            'member' => ['nullable', 'string', 'max:120'],
         ];
     }
 }

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
 use App\Jobs\ReviewShot;
 use App\Models\Director;
@@ -71,7 +72,7 @@ describe('reorder', function () {
 
     it('waits while a keyframe is being drawn', function () {
         [$shot, [$arrive, $notice, $leave]] = arrangedShot($this->project);
-        $notice->forceFill(['rendering' => true])->save();
+        $notice->forceFill(['status' => KeyframeStatus::DRAWING])->save();
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.keyframes.reorder', [$this->project, $shot]), ['keyframes' => [$leave->sqid, $notice->sqid, $arrive->sqid]])

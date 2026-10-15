@@ -18,7 +18,7 @@ use Throwable;
 class ReplicateClient
 {
     /** How long to keep polling a prediction, in seconds. */
-    private const int WAIT_SECONDS = 120;
+    private const int WAIT_SECONDS = 240;
 
     public static function configured(): bool
     {
@@ -32,12 +32,20 @@ class ReplicateClient
      */
     public function run(string $version, array $input): mixed
     {
-        $prediction = $this->request()
+        return $this->finish($this->request()
             ->withHeaders(['Prefer' => 'wait=60'])
             ->post('predictions', ['version' => $version, 'input' => $input])
             ->throw()
-            ->json();
+            ->json());
+    }
 
+    /**
+     * Polls a prediction until it is done and returns its output.
+     *
+     * @param  array<string, mixed>  $prediction
+     */
+    private function finish(array $prediction): mixed
+    {
         $deadline = time() + self::WAIT_SECONDS;
 
         while (in_array($prediction['status'] ?? null, ['starting', 'processing'], true) && time() < $deadline) {
@@ -50,6 +58,21 @@ class ReplicateClient
         }
 
         return $prediction['output'];
+    }
+
+    /**
+     * Run one prediction of an official model, named by its owner and name
+     * such as `black-forest-labs/flux-3-image`, and return its output.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    public function runModel(string $model, array $input): mixed
+    {
+        return $this->finish($this->request()
+            ->withHeaders(['Prefer' => 'wait=60'])
+            ->post("models/{$model}/predictions", ['input' => $input])
+            ->throw()
+            ->json());
     }
 
     /**

@@ -12,8 +12,10 @@ use App\Models\Policies\Public\ProjectPolicy;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media as BaseMedia;
 
 /**
  * The page of one cast or set element: its picture beside a form to name,
@@ -36,6 +38,12 @@ class ViewController
             'saveUrl' => fn() => route('public.projects.elements.store', $project),
             /** @var array<int, array{value: string, label: string, plural: string}> */
             'elementTypes' => fn() => ElementType::catalogue(),
+            /**
+             * Logos are put on an element once it is drawn.
+             *
+             * @var array<int, array{id: int, name: string, imageUrl: string}>
+             */
+            'logos' => fn() => [],
             /** The cast and sets that can be drawn into the new element. */
             'elements' => fn() => ElementResource::collection(
                 $project->elements()->with('media')->get()->each->setRelation('project', $project)
@@ -58,6 +66,16 @@ class ViewController
             'saveUrl' => fn() => route('public.projects.elements.update', [$project, $element]),
             /** @var array<int, array{value: string, label: string, plural: string}> */
             'elementTypes' => fn() => ElementType::catalogue(),
+            /**
+             * The logos of the branding that can be put on it.
+             *
+             * @var array<int, array{id: int, name: string, imageUrl: string}>
+             */
+            'logos' => fn() => $project->getMedia(Project::LOGOS)->map(fn(BaseMedia $logo) => [
+                'id' => $logo->id,
+                'name' => $logo->name,
+                'imageUrl' => URL::temporarySignedRoute('public.media.view', now()->startOfHour()->addHours(3), ['media' => $logo]),
+            ])->values()->all(),
             /** The other cast and sets that can be drawn into it. */
             'elements' => fn() => ElementResource::collection(
                 $project->elements()->whereKeyNot($element->getKey())->with('media')->get()->each->setRelation('project', $project)

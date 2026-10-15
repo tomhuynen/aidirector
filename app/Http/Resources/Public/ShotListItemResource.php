@@ -46,7 +46,7 @@ class ShotListItemResource extends JsonResource
              * @var bool
              */
             'busy' => $this->status->isWorking()
-                || ($this->relationLoaded('keyframes') && $this->keyframes->contains(fn(Keyframe $keyframe) => (bool) $keyframe->rendering)),
+                || ($this->relationLoaded('keyframes') && $this->keyframes->contains(fn(Keyframe $keyframe) => $keyframe->isBusy())),
             /** @var string|null */
             'thumbnailUrl' => $this->thumbnailUrl(),
             /**
@@ -81,6 +81,12 @@ class ShotListItemResource extends JsonResource
              */
             'waitingFor' => $this->resource->waitsToDraw() ? $this->resource->waitsFor() : null,
             'url' => route('public.shots.view', [$this->project, $this->resource]),
+            /**
+             * Splits a merged shot back into its parts; null for an ordinary shot.
+             *
+             * @var string|null
+             */
+            'unmergeUrl' => $this->resource->isMerged() ? route('public.shots.unmerge', [$this->project, $this->resource]) : null,
         ];
     }
 

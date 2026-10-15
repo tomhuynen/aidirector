@@ -39,7 +39,7 @@ class CorrectionClassifier implements Agent, HasReasoningEffort, HasStructuredOu
         return <<<INSTRUCTIONS
             You sort changes made to an AI-made animated film, so recurring mistakes of the AI can become project rules.
 
-            - correction: the change fixes something the AI got wrong compared with its own plan, the takeaway or a general rule, such as text appearing on an object, a person standing too far from the hazard, the wrong light, a missing logo or keyframes that look alike.
+            - correction: the change fixes something the AI got wrong compared with its own plan or a general rule, such as text appearing on an object, a person standing too far from the hazard, the wrong light, a missing logo or keyframes that look alike.
             - instruction: the change adds a new creative choice for this shot only, such as an extra prop, a different mood or a new idea that the plan did not contain.
 
             Category: a short lowercase label of two to four words for the kind of problem, such as "distance to hazard" or "text on objects". Reuse one of these when it fits: {$categories}

@@ -22,9 +22,9 @@ final class KeyframeReferences
      * @param  list<array{element: Element, image: StoredImage}>  $elementImages  the ones attached as images
      * @param  bool  $firstShowsCast  false when people in this keyframe are not in keyframe 1, such as someone who walks in later
      * @param  list<string>  $castNames  the people keyframe 1 does not show, who are added to it
-     * @param  bool  $firstIsPlate  `$first` is the place without people, made from keyframe 1
-     * @param  StoredImage|null  $setting  a keyframe or the place of another shot this one plays in, for keyframe 1 and the places
+     * @param  StoredImage|null  $setting  a keyframe or the place of another shot this one plays in, for keyframe 1
      * @param  string  $settingLabel  what that image is, such as "the last keyframe of SH100, the shot before"
+     * @param  StoredImage|null  $place  the picture of the shot's place, for how it looks; keyframe 1 is drawn in it with its own camera
      */
     public function __construct(
         public readonly ?StoredImage $style = null,
@@ -34,9 +34,9 @@ final class KeyframeReferences
         public readonly ?StoredImage $previous = null,
         public readonly bool $firstShowsCast = true,
         public readonly array $castNames = [],
-        public readonly bool $firstIsPlate = false,
         public readonly ?StoredImage $setting = null,
         public readonly string $settingLabel = '',
+        public readonly ?StoredImage $place = null,
     ) {}
 
     /**
@@ -47,8 +47,9 @@ final class KeyframeReferences
     public function labels(): array
     {
         return array_values(array_filter([
-            $this->first !== null ? ($this->firstIsPlate ? 'The place without people, the image that is edited' : 'Keyframe 1, the image that is edited') : null,
+            $this->first !== null ? 'Keyframe 1, the image that is edited' : null,
             $this->style !== null ? 'Style sheet' : null,
+            $this->place !== null ? 'The place' : null,
             $this->setting !== null ? 'The setting: ' . $this->settingLabel : null,
             ...array_map(fn(array $entry) => "Picture of {$entry['element']->name}", $this->elementImages),
             $this->previous !== null ? 'The keyframe before' : null,
@@ -63,6 +64,7 @@ final class KeyframeReferences
         return array_values(array_filter([
             $this->first,
             $this->style,
+            $this->place,
             $this->setting,
             ...array_column($this->elementImages, 'image'),
             $this->previous,

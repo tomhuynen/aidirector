@@ -35,7 +35,7 @@ class DestroyController
         $shot->arrangeKeyframes($remaining);
         $keyframe->delete();
 
-        RecordCorrection::record($project, CorrectionSource::DELETE, "Deleted the planned keyframe \"{$keyframe->title}\": {$keyframe->description}", $shot, context: "Takeaway of the shot: {$shot->takeaway}.");
+        RecordCorrection::record($project, CorrectionSource::DELETE, "Deleted the planned keyframe \"{$keyframe->title}\": {$keyframe->description}", $shot, context: 'Storyline of the shot: ' . ($shot->chosenStoryline()['storyline'] ?? ''));
 
         return redirect()->route('public.shots.view', [$project, $shot]);
     }

@@ -45,7 +45,6 @@ function sequence(Project $project, int $count, array $withoutVideo = []): array
         $shot = Shot::factory()->for($project)->create([
             'position' => $position,
             'title' => "Shot {$position}",
-            'takeaway' => "Takeaway {$position}",
             'status' => in_array($position, $withoutVideo, true) ? ShotStatus::KEYFRAMES_READY : ShotStatus::VIDEO_READY,
         ]);
 
@@ -98,7 +97,6 @@ describe('merging', function () {
             ->and($merged->merge_transition)->toBe(ShotTransition::FADE_BLACK)
             ->and($merged->status)->toBe(ShotStatus::VIDEO_PENDING)
             ->and($merged->duration)->toBe(15)
-            ->and($merged->takeaway)->toBe('Takeaway 2')
             ->and($merged->parts()->pluck('title')->all())->toBe(['Shot 2', 'Shot 3', 'Shot 4']);
 
         Queue::assertPushed(MergeShotVideos::class, fn(MergeShotVideos $job) => $job->shot->is($merged));
@@ -169,6 +167,8 @@ describe('merged shot', function () {
                 ->has('shotTransitions', 3)
                 ->has('siblings', 3)
                 ->where('siblings.1.partsCount', 2)
+                ->where('siblings.1.unmergeUrl', route('public.shots.unmerge', [$this->project, $this->merged]))
+                ->where('siblings.0.unmergeUrl', null)
                 ->where('mergedInto', null));
 
         actingAs($this->director, 'director')

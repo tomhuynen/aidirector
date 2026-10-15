@@ -55,7 +55,6 @@ class MergeShots
             $merged = $project->allShots()->create([
                 'position' => $first->position,
                 'title' => $title,
-                'takeaway' => $first->takeaway,
                 'status' => ShotStatus::VIDEO_PENDING,
                 'purpose_override' => $first->purpose_override,
                 'aspect_ratio_override' => $first->aspect_ratio_override,

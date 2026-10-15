@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Public\Shots\Keyframes;
 
+use App\Enums\KeyframeStatus;
 use App\Http\Controllers\Public\Shots\Concerns\GuardsBusyShots;
 use App\Models\Keyframe;
 use App\Models\Policies\Public\ShotPolicy;
@@ -43,7 +44,7 @@ class CopyController
 
         // It takes the original's position for now, so it gets the same plan when the keyframes are numbered again.
         $copy = $keyframe->replicate(['render_id', 'prompt']);
-        $copy->forceFill(['rendering' => false, 'render_error' => null, 'render_stage' => null])->save();
+        $copy->forceFill(['status' => KeyframeStatus::READY, 'render_error' => null])->save();
         $copy->elements()->sync($keyframe->elements->modelKeys());
 
         $image = $keyframe->render();

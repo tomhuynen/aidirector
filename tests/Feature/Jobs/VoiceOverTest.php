@@ -21,8 +21,7 @@ function narratedShot(Project $project, array $attributes = []): Shot
 {
     return Shot::factory()->for($project)->create([
         'status' => ShotStatus::FIRST_KEYFRAME_PENDING,
-        'takeaway' => 'Never walk under a suspended load.',
-        'chosen_storyline' => ['title' => 'Step back', 'storyline' => 'She steps back behind the line.'],
+        'chosen_storyline' => ['storyline' => 'She steps back behind the line.'],
         ...$attributes,
     ]);
 }
@@ -39,7 +38,7 @@ it('writes a voice-over that fits', function () {
     (new GenerateVoiceOver($shot))->handle();
 
     expect($shot->fresh()->voice_over)->toBe('Wait behind the line until the load has passed.');
-    VoiceOverWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Takeaway: Never walk under a suspended load.')
+    VoiceOverWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Storyline: She steps back behind the line.')
         && str_contains((string) $prompt->agent->instructions(), 'At most 11 words'));
 });
 

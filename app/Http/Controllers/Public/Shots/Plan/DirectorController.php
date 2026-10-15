@@ -6,11 +6,12 @@ namespace App\Http\Controllers\Public\Shots\Plan;
 
 use App\Ai\Agents\PlanDirector;
 use App\Ai\KeyframePainter;
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\PlanDirectorRequest;
-use App\Jobs\AdjustPlateOption;
 use App\Jobs\GenerateStoryline;
+use App\Jobs\GenerateVoiceOver;
 use App\Jobs\TweakKeyframeImage;
 use App\Jobs\UpdateElementImage;
 use App\Models\Element;
@@ -18,6 +19,8 @@ use App\Models\Keyframe;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Shots\KeyframeLayout;
+use App\Support\Shots\KeyframeStaging;
 use App\Support\Shots\ShotPlan;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -50,7 +53,7 @@ class DirectorController
         $conversation = array_values((array) ($shot->plan_chat ?? []));
         // Once the images are drawn, the conversation is about the one the director selected.
         [$selected, $image] = $keyframes->isEmpty() ? ['', null] : $this->selected($shot, $keyframes, $request);
-        $director = new PlanDirector($shot, array_map(fn(array $turn) => ['role' => (string) $turn['role'], 'text' => (string) $turn['text']], $conversation), $selected);
+        $director = new PlanDirector($shot, array_map(fn(array $turn) => ['role' => (string) $turn['role'], 'text' => $this->said($turn)], $conversation), $selected . $this->fieldsNow($keyframes, $request));
         $prompt = $director->promptFor($message);
         $model = (string) Config::get('pipeline.models.text');
 
@@ -93,14 +96,27 @@ class DirectorController
             $keyframes = collect();
         }
 
+        $idea = trim((string) ($data['idea'] ?? ''));
+
+        if ($idea !== '') {
+            $shot->forceFill(['idea' => $idea])->save();
+        }
+
         $plan = ShotPlan::apply($shot, $data['proposal'] ?? null);
         $reply = trim((string) ($data['reply'] ?? ''));
-        $changes = $plan === null && $keyframes->isNotEmpty() ? $this->change($shot, $keyframes, $request, $data['changes'] ?? null) : ['made' => [], 'waiting' => null];
+        $proposed = $plan === null ? $this->propose($keyframes, $request, $data['changes'] ?? null) : null;
+        $changes = $plan === null && $proposed === null && $keyframes->isNotEmpty() ? $this->change($shot, $keyframes, $request, $data['changes'] ?? null) : ['made' => [], 'waiting' => null];
+
+        $voiceOver = $this->voiceOver($shot, $data['voice_over'] ?? null);
+        $storylines = $this->storylines($data['storylines'] ?? null);
+        $pickPlace = (bool) ($data['pick_place'] ?? false);
+        // A message with buttons of its own is answered with those, never with a plain yes.
+        $confirm = (bool) ($data['confirm'] ?? false) && $voiceOver === null && $proposed === null && $storylines === [] && ! $pickPlace && $cast === [];
 
         $turns = [
             ...$conversation,
             array_filter(['role' => 'director', 'text' => $message, 'made' => $made, 'about' => $selected]),
-            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made']]),
+            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'proposed' => $proposed, 'storylines' => $storylines, 'confirm' => $confirm, 'pickPlace' => $pickPlace, 'voiceOver' => $voiceOver]),
         ];
 
         $shot->forceFill(['plan_chat' => $turns])->save();
@@ -128,11 +144,145 @@ class DirectorController
         $keyframe = $keyframes->firstWhere('sqid', (string) $request->validated('keyframe'));
 
         return match (true) {
-            $request->validated('target') === 'place' => [__('a place to choose from, for the whole shot'), $shot->getMedia(Shot::PLATE_OPTIONS)->firstWhere('id', $request->integer('option'))],
             $request->validated('target') === 'option' => [__('an option for keyframe 1, :title', ['title' => (string) $first?->title]), $first?->renders()->firstWhere('id', $request->integer('option'))],
+            $keyframe !== null && $this->member($keyframe, $request) !== null => [__(':name in keyframe :n, :title, outlined in the image', ['name' => $this->member($keyframe, $request), 'n' => $keyframe->position, 'title' => $keyframe->title]), $keyframe->render()],
             $keyframe !== null => [__('keyframe :n, :title', ['n' => $keyframe->position, 'title' => $keyframe->title]), $keyframe->render()],
             default => [__('nothing: the images are still being drawn'), null],
         };
+    }
+
+    /**
+     * What a turn said, with the storylines it suggested, so a pick by its
+     * title is understood in the next message.
+     *
+     * @param  array<string, mixed>  $turn
+     */
+    private function said(array $turn): string
+    {
+        $options = collect((array) ($turn['storylines'] ?? []))
+            ->map(fn(array $option, int $index) => ($index + 1) . ". \"{$option['title']}\" ({$option['kind']}): {$option['storyline']}" . (isset($option['needs']) ? " Needs: {$option['needs']}." : ''))
+            ->join("\n");
+
+        return (string) $turn['text'] . ($options === '' ? '' : "\nThe storylines suggested:\n{$options}");
+    }
+
+    /**
+     * A new voice-over suggested in the chat, as written, with the length the
+     * shot needs to speak it when that is longer than it is now; it is used
+     * once the director accepts it.
+     *
+     * @return array{text: string, seconds?: int}|null
+     */
+    private function voiceOver(Shot $shot, mixed $text): ?array
+    {
+        $text = trim((string) $text);
+
+        if ($text === '') {
+            return null;
+        }
+
+        $seconds = Shot::clampSeconds((int) ceil(GenerateVoiceOver::words($text) / GenerateVoiceOver::WORDS_PER_SECOND));
+
+        return $seconds > $shot->durationInSeconds() ? ['text' => $text, 'seconds' => $seconds] : ['text' => $text];
+    }
+
+    /**
+     * The storylines suggested for the idea, to pick one from.
+     *
+     * @return list<array{title: string, kind: string, storyline: string, needs?: string}>
+     */
+    private function storylines(mixed $storylines): array
+    {
+        return collect(is_array($storylines) ? $storylines : [])
+            ->filter(fn(mixed $option) => is_array($option) && trim((string) ($option['storyline'] ?? '')) !== '')
+            ->map(function (array $option) {
+                $needs = trim((string) ($option['needs'] ?? ''));
+
+                return [
+                    'title' => trim((string) ($option['title'] ?? '')),
+                    'kind' => (ShotKind::tryFrom((string) ($option['kind'] ?? '')) ?? ShotKind::SCENE)->value,
+                    'storyline' => trim((string) $option['storyline']),
+                    ...($needs !== '' ? ['needs' => $needs] : []),
+                ];
+            })
+            ->take(3)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The staging fields of the one of the cast selected as they are now, so a change starts from them; empty when none is.
+     *
+     * @param  Collection<int, Keyframe>  $keyframes
+     */
+    private function fieldsNow(Collection $keyframes, PlanDirectorRequest $request): string
+    {
+        $keyframe = $keyframes->firstWhere('sqid', (string) $request->validated('keyframe'));
+        $name = $keyframe === null ? null : $this->member($keyframe, $request);
+
+        if ($name === null) {
+            return '';
+        }
+
+        $member = collect($keyframe->staged()->cast)->first(fn(array $member) => mb_strtolower($member['name']) === mb_strtolower($name));
+
+        return $member === null ? '' : '; their fields now: ' . json_encode($member, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * The one of the cast selected in a keyframe, by their name in its layout; null when none is.
+     */
+    private function member(Keyframe $keyframe, PlanDirectorRequest $request): ?string
+    {
+        $name = trim((string) $request->validated('member'));
+
+        return $name === '' ? null : KeyframeLayout::fromArray($keyframe->layout)->member($name)['name'] ?? null;
+    }
+
+    /**
+     * With one of the cast selected, the change to them is not made straight
+     * away: it is proposed, and made once the director confirms it.
+     *
+     * @param  Collection<int, Keyframe>  $keyframes
+     * @return array{keyframe: string, name: string, change: string, member: array<string, mixed>, fields: list<array{field: string, from: string, to: string}>}|null
+     */
+    private function propose(Collection $keyframes, PlanDirectorRequest $request, mixed $changes): ?array
+    {
+        $keyframe = $keyframes->firstWhere('sqid', (string) $request->validated('keyframe'));
+        $name = $keyframe === null ? null : $this->member($keyframe, $request);
+        $change = collect(is_array($changes) ? $changes : [])
+            ->first(fn(mixed $change) => is_array($change) && in_array((int) ($change['keyframe'] ?? 0), [0, $keyframe?->position], true) && trim((string) ($change['change'] ?? '')) !== '');
+
+        if ($name === null || $change === null) {
+            return null;
+        }
+
+        $member = trim((string) ($change['member']['name'] ?? '')) === '' ? [] : [...(array) $change['member'], 'name' => $name];
+
+        return ['keyframe' => $keyframe->sqid, 'name' => $name, 'change' => trim((string) $change['change']), 'member' => $member, 'fields' => $this->changedFields($keyframe, $name, $member)];
+    }
+
+    /**
+     * The staging fields a proposed change sets to another value, so the director sees what will change.
+     *
+     * @param  array<string, mixed>  $member
+     * @return list<array{field: string, from: string, to: string}>
+     */
+    private function changedFields(Keyframe $keyframe, string $name, array $member): array
+    {
+        $after = KeyframeStaging::member($member);
+
+        if ($after === null) {
+            return [];
+        }
+
+        $before = collect($keyframe->staged()->cast)->first(fn(array $other) => mb_strtolower($other['name']) === mb_strtolower($name)) ?? [];
+
+        return collect(['stands', 'faces', 'looks_at', 'holds', 'hand', 'doing'])
+            ->filter(fn(string $field) => ($before[$field] ?? '') !== $after[$field])
+            ->map(fn(string $field) => ['field' => $field, 'from' => (string) ($before[$field] ?? ''), 'to' => $after[$field]])
+            ->values()
+            ->all();
     }
 
     /**
@@ -158,21 +308,18 @@ class DirectorController
         $first = $keyframes->firstWhere('position', 1);
         $target = $request->validated('target');
 
-        // While choosing: the selected place or option for keyframe 1 is adjusted.
-        if (in_array($target, ['place', 'option'], true) && $changes->every(fn(array $change) => $change['keyframe'] === 0)) {
+        // While choosing: the selected option for keyframe 1 is adjusted.
+        if ($target === 'option' && $changes->every(fn(array $change) => $change['keyframe'] === 0)) {
             $change = $changes->first()['change'];
-            $ready = $first !== null && ! $first->rendering && $shot->status === ShotStatus::FIRST_KEYFRAME_READY;
-            $place = $target === 'place' ? $shot->getMedia(Shot::PLATE_OPTIONS)->firstWhere('id', $request->integer('option')) : null;
-            $option = $target === 'option' ? $first?->renders()->firstWhere('id', $request->integer('option')) : null;
+            $ready = $first !== null && ! $first->isBusy() && $shot->status === ShotStatus::FIRST_KEYFRAME_READY;
+            $option = $first?->renders()->firstWhere('id', $request->integer('option'));
 
-            if (! $ready || ($place === null && $option === null) || ($place !== null && $shot->hasChosenPlate())) {
+            if (! $ready || $option === null) {
                 return ['made' => [], 'waiting' => __('(I can change it once the images are ready.)')];
             }
 
-            $first->forceFill(['rendering' => true, 'render_error' => null])->save();
-            $place !== null
-                ? AdjustPlateOption::dispatch($shot, $place->id, $change)
-                : TweakKeyframeImage::dispatch($first, $change, $option->id, rewrite: true);
+            $first->forceFill(['status' => KeyframeStatus::DRAWING, 'render_error' => null])->save();
+            TweakKeyframeImage::dispatch($first, $change, $option->id, rewrite: true);
 
             return ['made' => [$change], 'waiting' => null];
         }
@@ -185,11 +332,11 @@ class DirectorController
             ->unique(fn(array $change) => $change['target']->id)
             ->values();
 
-        if ($jobs->isEmpty() || $shot->status->isWorking() || $jobs->contains(fn(array $change) => $change['target']->rendering)) {
+        if ($jobs->isEmpty() || $shot->status->isWorking() || $jobs->contains(fn(array $change) => $change['target']->isBusy())) {
             return ['made' => [], 'waiting' => __('(I can change it once it is drawn and nothing else is being drawn.)')];
         }
 
-        $jobs->each(fn(array $change) => $change['target']->forceFill(['rendering' => true, 'render_error' => null])->save());
+        $jobs->each(fn(array $change) => $change['target']->forceFill(['status' => KeyframeStatus::DRAWING, 'render_error' => null])->save());
         Bus::chain($jobs->map(fn(array $change) => new TweakKeyframeImage($change['target'], $change['change'], rewrite: true))->all())
             ->onQueue(Config::get('pipeline.queue'))
             ->dispatch();
@@ -242,9 +389,9 @@ class DirectorController
     private function splitInto(Project $project, Shot $shot, mixed $shots): int
     {
         $parts = collect(is_array($shots) ? $shots : [])
-            ->filter(fn(mixed $part) => is_array($part) && trim((string) ($part['takeaway'] ?? '')) !== '')
+            ->filter(fn(mixed $part) => is_array($part) && trim((string) ($part['idea'] ?? '')) !== '')
             ->map(fn(array $part) => [
-                'takeaway' => trim((string) $part['takeaway']),
+                'title' => Str::limit(trim((string) ($part['title'] ?? '')), 80),
                 'kind' => ShotKind::tryFrom((string) ($part['kind'] ?? '')) ?? ShotKind::SCENE,
                 'idea' => trim((string) ($part['idea'] ?? '')),
                 'setting' => (string) ($part['setting'] ?? 'new_place'),
@@ -264,12 +411,11 @@ class DirectorController
             $group = $shot->group_key ?? (string) Str::ulid();
             $first = $parts->first();
 
-            // The idea of each shot is kept as its notes, so every shot of the sequence sticks to its own part.
+            // Every shot of the sequence keeps its own idea, so it sticks to its own part.
             $shot->forceFill([
                 'group_key' => $group,
-                'notes' => $first['idea'],
-                'takeaway' => $first['takeaway'],
-                'title' => Str::limit($first['takeaway'], 80),
+                'idea' => $first['idea'],
+                'title' => $first['title'],
                 'kind' => $first['kind'],
             ])->save();
 
@@ -287,9 +433,8 @@ class DirectorController
                     // A shot that is drawn or talked about already keeps what it is.
                     if ($existing->isUntouchedInSequence()) {
                         $existing->forceFill([
-                            'title' => Str::limit($part['takeaway'], 80),
-                            'takeaway' => $part['takeaway'],
-                            'notes' => $part['idea'],
+                            'title' => $part['title'],
+                            'idea' => $part['idea'],
                             'kind' => $part['kind'],
                             'plan_chat' => $opening,
                         ])->save();
@@ -306,14 +451,13 @@ class DirectorController
                 $sequence[] = $project->allShots()->create([
                     'position' => $after + 1,
                     'group_key' => $group,
-                    'title' => Str::limit($part['takeaway'], 80),
-                    'takeaway' => $part['takeaway'],
-                    'notes' => $part['idea'],
+                    'title' => $part['title'],
+                    'idea' => $part['idea'],
                     'kind' => $part['kind'],
                     'purpose_override' => $shot->purpose_override,
                     'aspect_ratio_override' => $shot->aspect_ratio_override,
                     'status' => ShotStatus::STORYLINE_READY,
-                    'chosen_storyline' => ['title' => Str::limit($part['takeaway'], 80), 'storyline' => ''],
+                    'chosen_storyline' => ['storyline' => ''],
                     'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => []],
                     'plan_chat' => $opening,
                 ]);

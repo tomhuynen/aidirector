@@ -74,6 +74,7 @@ class ProjectResource extends JsonResource
                 'shotsCreate' => route('public.shots.create', $this->resource),
                 'shotsReorder' => route('public.shots.reorder', $this->resource),
                 'shotsMerge' => route('public.shots.merge', $this->resource),
+                'shotsDestroy' => route('public.shots.destroy.many', $this->resource),
             ]),
             /** @var array<string, bool> */
             'can' => $this->when(! is_null($request->user()), fn() => $this->authorizations($request, ProjectPolicy::abilities()), []),

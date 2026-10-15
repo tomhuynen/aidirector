@@ -8,16 +8,17 @@ use App\Ai\Agents\StorylineWriter;
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Models\Shot;
+use App\Support\Shots\KeyframeStaging;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Str;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use Throwable;
 
 /**
- * Drafts the plan of a shot from its takeaway, such as for the shots the
+ * Drafts the plan of a shot from its idea, such as for the shots the
  * project setup makes: the storyline and the keyframes. The director goes on
  * from the draft in the plan chat; nothing is drawn yet.
  */
@@ -70,18 +71,15 @@ class GenerateStoryline implements ShouldQueue
         $title = trim((string) ($response['title'] ?? ''));
 
         $shot->forceFill([
-            // A shot still named after its takeaway gets the planner's title; a title someone gave it stays.
-            'title' => $title !== '' && (blank($shot->title) || $shot->title === Str::limit((string) $shot->takeaway, 80)) ? $title : $shot->title,
-            'chosen_storyline' => [
-                'title' => $title !== '' ? $title : (string) $shot->title,
-                'storyline' => trim((string) ($response['storyline'] ?? '')),
-            ],
+            // A shot without a title gets the planner's; a title someone gave it stays.
+            'title' => $title !== '' && blank($shot->title) ? $title : $shot->title,
+            'chosen_storyline' => ['storyline' => trim((string) ($response['storyline'] ?? ''))],
             'kind' => $shot->kind ?? ShotKind::tryFrom((string) ($response['kind'] ?? '')) ?? ShotKind::SCENE,
             'storyline' => [
                 // Places and objects the plan needs that the cast and sets do not have yet, for the director to add.
                 ...(($new = self::newElementsFrom($shot, $response['new_elements'] ?? null)) !== [] ? ['new_elements' => $new] : []),
                 'framing' => $response['framing'],
-                'keyframes' => array_values($response['keyframes']),
+                'keyframes' => array_map(fn(array $keyframe) => [...Arr::except($keyframe, ['summary', 'place', 'cast']), ...KeyframeStaging::fromArray($keyframe)->fields()], array_values($response['keyframes'])),
             ],
             'storyline_error' => null,
             // The plan chat starts from the draft.
@@ -97,7 +95,7 @@ class GenerateStoryline implements ShouldQueue
             'status' => ShotStatus::STORYLINE_READY,
         ])->save();
 
-        GenerateVoiceOver::dispatch($shot);
+        GenerateVoiceOver::automatically($shot);
     }
 
     /**

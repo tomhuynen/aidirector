@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Disk;
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
 use App\Jobs\TweakKeyframeImage;
 use App\Models\Director;
@@ -29,7 +30,7 @@ function busyShot(Project $project, ShotStatus $status): Shot
 {
     $shot = Shot::factory()->for($project)->create([
         'status' => $status,
-        'chosen_storyline' => ['title' => 'Straightforward', 'storyline' => 'He posts the letter.'],
+        'chosen_storyline' => ['storyline' => 'He posts the letter.'],
         'storyline' => ['keyframes' => [
             ['title' => 'At the mailbox', 'description' => 'He stands at the mailbox.'],
             ['title' => 'Posting', 'description' => 'The envelope slides into the slot.'],
@@ -83,7 +84,7 @@ describe('starting the shot over', function () {
 
     it('waits while one keyframe is being drawn', function (string $method, string $route, array $data) {
         $shot = busyShot($this->project, ShotStatus::KEYFRAMES_READY);
-        $shot->keyframes()->where('position', 2)->update(['rendering' => true]);
+        $shot->keyframes()->where('position', 2)->update(['status' => KeyframeStatus::DRAWING]);
 
         actingAs($this->director, 'director')
             ->{$method}(route($route, [$this->project, $shot]), $data)
@@ -108,7 +109,7 @@ describe('acting on one keyframe', function () {
     it('waits while that keyframe is being drawn', function (string $route, Closure $data) {
         $shot = busyShot($this->project, ShotStatus::KEYFRAMES_READY);
         $keyframe = $shot->keyframes()->where('position', 2)->firstOrFail();
-        $keyframe->update(['rendering' => true]);
+        $keyframe->update(['status' => KeyframeStatus::DRAWING]);
 
         actingAs($this->director, 'director')
             ->post(route($route, [$this->project, $shot, $keyframe]), $data($keyframe))
@@ -127,14 +128,14 @@ describe('acting on one keyframe', function () {
             ->post(route($route, [$this->project, $shot, $keyframe]), $data($keyframe))
             ->assertSessionHasErrors();
 
-        expect($keyframe->fresh()->rendering)->toBeFalse()
+        expect($keyframe->fresh()->isBusy())->toBeFalse()
             ->and($shot->keyframes()->count())->toBe(2);
         Queue::assertNothingPushed();
     })->with($actions);
 
     it('adjusts one keyframe while another is being adjusted', function () {
         $shot = busyShot($this->project, ShotStatus::KEYFRAMES_READY);
-        $shot->keyframes()->where('position', 1)->update(['rendering' => true]);
+        $shot->keyframes()->where('position', 1)->update(['status' => KeyframeStatus::DRAWING]);
         $second = $shot->keyframes()->where('position', 2)->firstOrFail();
 
         actingAs($this->director, 'director')

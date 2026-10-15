@@ -8,16 +8,19 @@ use App\Ai\Agents\TweakInterpreter;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Ai\KeyframePainter;
 use App\Enums\CorrectionSource;
+use App\Enums\KeyframeStatus;
 use App\Jobs\Concerns\FollowsPlan;
-use App\Jobs\Concerns\MarksRenderFailures;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Notifications\Public\GenerationFinished;
 use App\Support\Corrections\RecordCorrection;
+use App\Support\Shots\KeyframeChain;
+use App\Support\Shots\KeyframeStaging;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Str;
 use Laravel\Ai\Files\StoredImage;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use RuntimeException;
@@ -37,7 +40,6 @@ use Throwable;
 class TweakKeyframeImage implements ShouldQueue
 {
     use FollowsPlan;
-    use MarksRenderFailures;
     use Queueable;
 
     public int $tries = 1;
@@ -52,12 +54,12 @@ class TweakKeyframeImage implements ShouldQueue
         public readonly Keyframe $keyframe,
         public readonly string $instruction,
         public readonly ?int $option = null,
-        /** The request came from the automatic check, through Fix, not from the director. */
-        public readonly bool $fromCheck = false,
         /** Have the text model make the request precise first; off, the request goes to the image model as typed and only the description is updated. */
         public readonly bool $rewrite = false,
-        /** The director wrote the new description and the request comes from it: it is kept as written. */
+        /** The director staged the keyframe anew and the request comes from it: it is kept as staged. */
         public readonly bool $describedByDirector = false,
+        /** The keyframes drawn from this one are drawn again after it, so they follow the change. */
+        public readonly bool $following = false,
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
         $this->followPlan($this->keyframe);
@@ -76,53 +78,46 @@ class TweakKeyframeImage implements ShouldQueue
             : null;
         $references = $previous ? [$painter->referenceFor($current), $painter->referenceFor($previous)] : [$painter->referenceFor($current)];
 
-        ['instruction' => $instruction, 'approach' => $approach, 'description' => $description, 'absent' => $absent] = $this->interpret($keyframe, $references);
+        ['instruction' => $instruction, 'approach' => $approach, 'staging' => $staging, 'absent' => $absent] = $this->interpret($keyframe, $references);
 
-        // Without the rewrite the request goes to the image model as typed; the text model only keeps the description true.
+        // Without the rewrite the request goes to the image model as typed; the text model only keeps the staging true.
         if (! $this->rewrite) {
             [$instruction, $approach] = [$this->instruction, 'edit'];
         }
 
         // Before drawing: a redraw is checked against the description, which must already describe the change.
         if ($this->option === null) {
-            $this->describeChange($keyframe, $this->describedByDirector ? '' : $description, $absent);
+            $this->describeChange($keyframe, $this->describedByDirector ? null : $staging, $absent);
         }
 
         $base = $painter->baseFor($keyframe, $keyframe->shot->keyframes()->with('media')->get()->each->setRelation('shot', $keyframe->shot));
+        // A logo the change asks for is drawn from its picture in the branding, never from its name.
+        $logos = $keyframe->shot->project->logosFor("{$this->instruction} {$instruction}");
+        $labels = [...($previous !== null ? ['This version, the image that is edited', 'The keyframe before'] : ['This version, the image that is edited']), ...$logos->map(fn($logo) => "The {$logo->name} logo")->all()];
 
         $render = match (true) {
             $approach === 'redraw' => $this->redraw($painter, $keyframe, $instruction),
-            // On a place the edit starts from the place again, so the background cannot creep with every adjustment.
-            $base !== null && $painter->isPlace($base) => $painter->paintOn(
-                $base,
-                $keyframe,
-                KeyframeImageBrief::tweakOnPlate($instruction, withPreviousKeyframe: $previous !== null),
-                [$painter->referenceFor($base), ...$references],
-                choose: $this->option === null,
-                model: (string) Config::get('pipeline.models.keyframe_edit'),
-                labels: ['The place without people, the image that is edited', 'This version, for the people and what changed', ...($previous !== null ? ['The keyframe before'] : [])],
-            ),
             default => $painter->paintOn(
                 $base,
                 $keyframe,
-                KeyframeImageBrief::tweak($instruction, withPreviousKeyframe: $previous !== null),
-                $references,
+                KeyframeImageBrief::tweak($keyframe->shot->project, $instruction, withPreviousKeyframe: $previous !== null, logos: $logos->map(fn($logo) => (string) $logo->name)->all()),
+                [...$references, ...$logos->map(fn($logo) => $painter->referenceFor($logo))->all()],
                 choose: $this->option === null,
                 model: (string) Config::get('pipeline.models.keyframe_edit'),
-                labels: $previous !== null ? ['This version, the image that is edited', 'The keyframe before'] : ['This version, the image that is edited'],
+                labels: $labels,
             ),
         };
 
+        // An option of keyframe 1 still waits for the director's choice; a keyframe that changed has what is drawn from it drawn again.
         if ($this->option !== null) {
-            $keyframe->forceFill(['rendering' => false, 'render_error' => null])->save();
+            $keyframe->forceFill(['status' => KeyframeStatus::PLANNED, 'render_error' => null])->save();
         } else {
-            ReviewShot::after($keyframe->shot);
+            app(KeyframeChain::class)->changed($keyframe, $this->following);
         }
 
         // Kept on the version, so the director can see what was asked and what the image model was told.
         $render->setCustomProperty(Keyframe::TWEAK_REQUEST, $this->instruction)
             ->setCustomProperty(Keyframe::TWEAK_INSTRUCTION, $instruction)
-            ->setCustomProperty(Keyframe::TWEAK_FROM_CHECK, $this->fromCheck)
             ->save();
 
         // A changed description is recorded as such when it is saved.
@@ -146,7 +141,7 @@ class TweakKeyframeImage implements ShouldQueue
      * rewrite fails, the request is used as typed, as an edit.
      *
      * @param  list<StoredImage>  $references
-     * @return array{instruction: string, approach: 'edit'|'redraw', description: string, absent: list<string>}
+     * @return array{instruction: string, approach: 'edit'|'redraw', staging: KeyframeStaging|null, absent: list<string>}
      */
     private function interpret(Keyframe $keyframe, array $references): array
     {
@@ -170,7 +165,7 @@ class TweakKeyframeImage implements ShouldQueue
 
             report($exception);
 
-            return ['instruction' => $this->instruction, 'approach' => 'edit', 'description' => '', 'absent' => []];
+            return ['instruction' => $this->instruction, 'approach' => 'edit', 'staging' => null, 'absent' => []];
         }
 
         $keyframe->generations()->create([
@@ -189,20 +184,20 @@ class TweakKeyframeImage implements ShouldQueue
         return [
             'instruction' => $instruction !== '' ? $instruction : $this->instruction,
             'approach' => ($result['approach'] ?? 'edit') === 'redraw' ? 'redraw' : 'edit',
-            'description' => trim((string) ($result['description'] ?? '')),
+            'staging' => ($result['restage'] ?? false) === true ? KeyframeStaging::fromArray((array) ($result['staging'] ?? [])) : null,
             'absent' => array_values(array_filter(array_map('strval', (array) ($result['absent'] ?? [])))),
         ];
     }
 
     /**
-     * Keeps the keyframe's text true to the adjusted image: a new description
-     * replaces the old one and its must show, and cast or sets that left the
+     * Keeps the keyframe's text true to the adjusted image: a new staging
+     * replaces the old one and its description, and cast or sets that left the
      * picture are taken off the keyframe, so the check, the review and later
      * redraws no longer expect them.
      *
      * @param  list<string>  $absent
      */
-    private function describeChange(Keyframe $keyframe, string $description, array $absent): void
+    private function describeChange(Keyframe $keyframe, ?KeyframeStaging $staging, array $absent): void
     {
         $shot = $keyframe->shot;
         $gone = $keyframe->elements->filter(fn(Element $element) => in_array(mb_strtolower($element->name), array_map('mb_strtolower', $absent), true));
@@ -213,10 +208,10 @@ class TweakKeyframeImage implements ShouldQueue
             $shot->updatePlannedKeyframe($keyframe->position, ['elements' => $keyframe->elements->pluck('name')->values()->all()]);
         }
 
-        if ($description !== '') {
+        if ($staging !== null && $staging->summary !== '') {
             $before = $keyframe->fullDescription();
-            $keyframe->forceFill(['description' => $description])->save();
-            $shot->updatePlannedKeyframe($keyframe->position, ['description' => $description], ['copied', 'prompt']);
+            $keyframe->restage($staging)->save();
+            $shot->updatePlannedKeyframe($keyframe->position, $staging->fields(), ['copied', 'prompt']);
             // The storyline follows before the image is drawn and reviewed.
             FollowStoryline::follow($keyframe, $before);
         }
@@ -242,7 +237,10 @@ class TweakKeyframeImage implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
-        $this->markRenderFailed($this->keyframe, __('The image could not be adjusted. Please try again.'), $exception);
+        $this->keyframe->newQuery()->whereKey($this->keyframe->id)->busy()->update([
+            'status' => KeyframeStatus::FAILED,
+            'render_error' => trim(__('The image could not be adjusted. Please try again.') . ' ' . Str::limit((string) $exception?->getMessage(), 300)),
+        ]);
 
         $shot = $this->keyframe->shot()->with('project')->first();
 

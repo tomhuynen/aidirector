@@ -79,6 +79,6 @@ class RetimeShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'framing' => [...(array) ($storyline['framing'] ?? []), 'seconds' => $seconds]]);
         $shot->forceFill(['voice_over' => null])->save();
 
-        GenerateVoiceOver::dispatch($shot);
+        GenerateVoiceOver::automatically($shot);
     }
 }

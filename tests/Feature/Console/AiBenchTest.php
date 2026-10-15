@@ -62,7 +62,7 @@ it('lists the benchmarks with the cases this tenant has for them', function () {
             ['photo-analysis', 'Caption an uploaded photo and list the people, places and objects in it.', 0],
             ['style-options', 'Propose a round of styles, the first one or "more like this" from a style sheet.', 1],
             ['cast-suggestions', 'Suggest recurring people, places or objects from the brief confirmed in the chat.', 0],
-            ['keyframe-plan', 'Plan a shot from its takeaway: storyline and keyframe descriptions.', 0],
+            ['keyframe-plan', 'Plan a shot from its idea: storyline and keyframe descriptions.', 0],
         ])
         ->assertSuccessful();
 });
@@ -148,9 +148,9 @@ it('flags a model OpenRouter does not list in a dry run', function () {
         ->assertSuccessful();
 });
 
-it('plans every shot from its takeaway', function () {
-    Shot::factory()->for($this->project)->create(['takeaway' => 'Stop at the gate']);
-    Shot::factory()->for($this->project)->create(['takeaway' => 'Keep to the quay path']);
+it('plans every shot from its idea', function () {
+    Shot::factory()->for($this->project)->create(['idea' => 'A driver stops at the gate.']);
+    Shot::factory()->for($this->project)->create(['idea' => 'A visitor keeps to the quay path.']);
 
     StorylineWriter::fake(fn() => ['keyframes' => []]);
 
@@ -158,8 +158,8 @@ it('plans every shot from its takeaway', function () {
         ->expectsOutputToContain('2 cases × 1 variants × 1 runs = 2 calls.')
         ->assertSuccessful();
 
-    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Takeaway: Stop at the gate'));
-    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Takeaway: Keep to the quay path'));
+    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Idea: A driver stops at the gate.'));
+    StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Idea: A visitor keeps to the quay path.'));
 });
 
 it('skips a benchmark this tenant has no data for', function () {

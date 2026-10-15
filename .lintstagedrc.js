@@ -23,11 +23,20 @@ const buildPhpLintCommand = () =>
 const buildPintCommand = () => prefixWithHerd('./vendor/bin/pint')
 const buildPhpStanCommand = () => prefixWithHerd('./vendor/bin/phpstan analyse --memory-limit=2G')
 const buildComposerDepAnalyserCommand = () => prefixWithHerd('./vendor/bin/composer-dependency-analyser')
+const buildHistoryCheckCommand = (filenames) =>
+  `.claude/hooks/no-history-comments.sh ${filenames.map((f) => path.relative(process.cwd(), f)).join(' ')}`
+
 const buildComposerCommand = () => 'composer validate --no-check-publish --strict'
 
 export default {
-  '*.{js,ts,vue}': [buildTscCommand, buildEslintCommand],
+  '*.{js,ts,vue}': [buildTscCommand, buildEslintCommand, buildHistoryCheckCommand],
   '*.{css,yaml}': [buildPrettierCommand],
-  '*.php': [buildPhpLintCommand, buildPintCommand, buildPhpStanCommand, buildComposerDepAnalyserCommand],
+  '*.php': [
+    buildHistoryCheckCommand,
+    buildPhpLintCommand,
+    buildPintCommand,
+    buildPhpStanCommand,
+    buildComposerDepAnalyserCommand,
+  ],
   'composer.json': [buildComposerCommand],
 }
