@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Http;
  *
  * @phpstan-type VideoStatus array{id: string, status: string, error?: string|null, usage?: array<string, mixed>|null, unsigned_urls?: list<string>}
  */
-class OpenRouterVideoClient
+class OpenRouterVideoClient implements VideoJobs
 {
     /**
      * Submit a generation and return the provider's job id.

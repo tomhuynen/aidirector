@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
-use App\Jobs\MergeShotAudio;
 use App\Jobs\MergeShotVideos;
 use App\Models\Director;
 use App\Models\Keyframe;
@@ -155,29 +154,25 @@ describe('merged shot', function () {
         $this->merged = $this->project->shots()->where('title', 'Merged')->sole();
     });
 
-    it('shows its parts and transitions, and keeps the parts reachable', function () {
+    it('shows its parts and transitions, and opens itself for a part', function () {
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $this->merged]))
             ->assertSuccessful()
             ->assertInertia(fn($page) => $page
                 ->where('merge.transition', 'crossfade')
                 ->where('merge.parts.0.title', 'Shot 2')
-                ->where('merge.parts.1.url', route('public.shots.view', [$this->project, $this->three]))
+                ->where('merge.parts.1.title', 'Shot 3')
+                ->missing('merge.parts.1.url')
                 ->where('merge.links.unmerge', route('public.shots.unmerge', [$this->project, $this->merged]))
                 ->has('shotTransitions', 3)
                 ->has('siblings', 3)
                 ->where('siblings.1.partsCount', 2)
                 ->where('siblings.1.unmergeUrl', route('public.shots.unmerge', [$this->project, $this->merged]))
-                ->where('siblings.0.unmergeUrl', null)
-                ->where('mergedInto', null));
+                ->where('siblings.0.unmergeUrl', null));
 
         actingAs($this->director, 'director')
             ->get(route('public.shots.view', [$this->project, $this->three]))
-            ->assertSuccessful()
-            ->assertInertia(fn($page) => $page
-                ->where('merge', null)
-                ->where('mergedInto.title', 'Merged')
-                ->where('mergedInto.url', route('public.shots.view', [$this->project, $this->merged])));
+            ->assertRedirect(route('public.shots.view', [$this->project, $this->merged]));
     });
 
     it('joins the clips again with another transition', function () {
@@ -220,7 +215,6 @@ describe('merged shot', function () {
         expect($this->merged->fresh())
             ->status->toBe(ShotStatus::KEYFRAMES_READY)
             ->video_error->toBe('The clips could not be joined. Please try again.');
-        expect($this->director->notifications()->sole()->data['failed'])->toBeTrue();
     });
 });
 
@@ -247,8 +241,7 @@ describe('joining', function () {
         $merged->refresh();
 
         expect($merged->status)->toBe(ShotStatus::VIDEO_READY)
-            ->and($merged->video())->not->toBeNull()
-            ->and($this->director->notifications()->sole()->data['title'])->toContain('merged video');
+            ->and($merged->video())->not->toBeNull();
     })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
 
     it('merges the parts\' audio tracks, each where its part starts', function () {
@@ -284,21 +277,4 @@ describe('joining', function () {
             ->and($track->getCustomProperty('locale'))->toBe('nl-NL')
             ->and(app(AudioLength::class)->seconds((string) file_get_contents($track->getPath())))->toEqualWithDelta(4.0, 0.1);
     })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
-});
-
-it('merges a part\'s audio again when its track is spoken again', function () {
-    Queue::fake([MergeShotAudio::class]);
-    Storage::fake(Disk::TENANT->value);
-    $this->project->settings = new ProjectSettings(voiceOver: true, voiceOverLocales: ['nl-NL', 'en-GB']);
-    $this->project->save();
-
-    $merged = Shot::factory()->for($this->project)->create(['merge_transition' => ShotTransition::CUT, 'status' => ShotStatus::VIDEO_READY]);
-    $merged->addMediaFromString("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" . str_repeat("\x00", 64))->usingFileName('merged.mp4')->toMediaCollection(Shot::VIDEO);
-    $part = Shot::factory()->for($this->project)->create(['merged_into_id' => $merged->id]);
-    $part->addMediaFromString("ID3\x03\x00\x00\x00\x00\x00\x00\xFF\xFB\x90\x64" . str_repeat("\x00", 400))->usingFileName('nl.mp3')->withCustomProperties(['locale' => 'nl-NL'])->toMediaCollection(Shot::VOICE_OVERS);
-
-    MergeShotAudio::start($merged->fresh(), ['nl-NL']);
-
-    Queue::assertPushed(MergeShotAudio::class, fn(MergeShotAudio $job) => $job->locales === ['nl-NL']);
-    expect($merged->fresh()->voice_over_tracks)->toBe(['nl-NL' => ['status' => 'pending']]);
 });

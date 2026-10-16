@@ -6,7 +6,7 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Models\Shot;
-use App\Support\Video\OpenRouterVideoClient;
+use App\Support\Video\VideoJobs;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Collection;
@@ -54,7 +54,7 @@ class PollVideos implements ShouldBeUniqueUntilProcessing, ShouldQueue
         return 'poll-videos-' . (Tenant::current()?->getKey() ?? 'landlord');
     }
 
-    public function handle(OpenRouterVideoClient $videos): void
+    public function handle(VideoJobs $videos): void
     {
         $due = self::pending()->filter(fn(Shot $shot) => self::dueAt($shot) <= now()->getTimestamp());
         $statuses = $videos->statuses($due->pluck('video_job_id')->all());

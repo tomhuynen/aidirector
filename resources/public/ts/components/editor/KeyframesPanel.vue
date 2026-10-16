@@ -36,17 +36,6 @@
       >
         <option v-for="option in languages" :key="option.locale" :value="option.locale">{{ option.name }}</option>
       </NativeSelect>
-      <!-- In the top right corner of the video area. -->
-      <VideoActions
-        v-if="!choosing.active && showVideo && currentVideo.url && !video.pending"
-        :download-url="currentVideo.downloadUrl"
-        class="absolute top-4 right-4 z-10"
-      >
-        <DropdownMenuItem :disabled="!canRenderVideo" @select="renderVideo">
-          <RefreshCw class="size-4" />
-          {{ $t('Render again') }}
-        </DropdownMenuItem>
-      </VideoActions>
       <FirstKeyframeChooser
         v-if="choosing.active && keyframes[0]"
         v-model:selected="selectedOption"
@@ -60,6 +49,64 @@
       />
       <div v-else class="flex min-h-0 flex-1">
         <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
+          <!-- What can be done with the video, centred above it like the tools of a keyframe; while trimming, Cancel and Save. -->
+          <div
+            v-if="showVideo && currentVideo.url && !video.pending"
+            class="flex shrink-0 items-center justify-center gap-3"
+          >
+            <div
+              v-if="!editing"
+              class="flex items-center gap-1 rounded-xl border border-border bg-card p-1"
+              role="group"
+            >
+              <button
+                type="button"
+                :disabled="!canRenderVideo"
+                class="flex h-8 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                @click="renderVideo"
+              >
+                <RefreshCw class="size-4" />
+                {{ $t('Render again') }}
+              </button>
+              <a
+                v-if="currentVideo.downloadUrl"
+                :href="currentVideo.downloadUrl"
+                download
+                class="flex h-8 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Download class="size-4" />
+                {{ $t('Download') }}
+              </a>
+              <button
+                v-if="video.trim"
+                type="button"
+                :disabled="!canRenderVideo"
+                class="flex h-8 items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                @click="startEditing"
+              >
+                <Scissors class="size-4" />
+                {{ $t('Edit') }}
+              </button>
+            </div>
+            <template v-else>
+              <Button type="button" variant="outline" size="sm" :disabled="trimForm.processing" @click="stopEditing">
+                <X class="size-4" />
+                {{ $t('Cancel') }}
+              </Button>
+              <Button
+                v-if="trimDirty"
+                type="button"
+                variant="outline"
+                size="sm"
+                :disabled="trimForm.processing"
+                @click="saveTrim"
+              >
+                <LoaderCircle v-if="trimForm.processing" class="size-4 animate-spin" />
+                <Check v-else class="size-4" />
+                {{ $t('Save') }}
+              </Button>
+            </template>
+          </div>
           <!-- Select and Move of the keyframe shown are put here, centred above it. -->
           <div
             v-if="!showVideo && !adding && selected?.imageUrl && selected.moveUrl"
@@ -95,8 +142,29 @@
                 />
               </div>
             </div>
+            <!-- What the video shows, in the same place, with what the video model got behind the triangle. -->
+            <div
+              v-else-if="showVideo && video.sent && isPortrait"
+              class="absolute inset-y-0 left-0 flex items-center justify-center px-6"
+              :style="{ width: sideWidth }"
+            >
+              <div class="max-h-full w-full max-w-64 overflow-y-auto py-6">
+                <VideoSummary :sent="video.sent" :seconds="duration" />
+              </div>
+            </div>
+            <!-- While trimming, the rendered video, played and shown by the timeline below. -->
             <video
-              v-if="showVideo && currentVideo.url"
+              v-if="showVideo && editing && video.trim"
+              ref="player"
+              :key="`trim:${video.trim.url}`"
+              :src="video.trim.url"
+              preload="auto"
+              playsinline
+              class="max-h-full max-w-full rounded-xl border border-signal bg-black object-cover"
+              :style="frameSize"
+            />
+            <video
+              v-else-if="showVideo && currentVideo.url"
               :key="currentVideo.url"
               data-shot-video
               :src="currentVideo.url"
@@ -135,7 +203,9 @@
                 v-if="selected.status === 'waiting' || selected.status === 'checking'"
                 class="absolute bottom-4 mx-4 flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
               >
-                <LoaderCircle class="size-4 shrink-0 animate-spin" />
+                <!-- Waiting is not work yet: a still clock; only the check runs. -->
+                <Clock v-if="selected.status === 'waiting'" class="size-4 shrink-0" />
+                <LoaderCircle v-else class="size-4 shrink-0 animate-spin" />
                 {{ renderLabel(selected) }}
               </p>
               <KeyframeTools
@@ -265,7 +335,23 @@
       />
     </div>
 
+    <!-- While trimming, the timeline takes the place of the keyframes and the video. -->
     <section
+      v-if="editing && video.trim"
+      class="col-span-2 col-start-1 row-start-2 space-y-3 border-t border-border p-6"
+    >
+      <VideoTimeline
+        v-model:start="trimStart"
+        v-model:end="trimEnd"
+        :url="video.trim.url"
+        :length="video.trim.seconds"
+        :player="player"
+      />
+      <InputError :message="trimForm.errors.trim ?? trimForm.errors.start ?? trimForm.errors.end" />
+    </section>
+
+    <section
+      v-if="!editing"
       :class="
         cn(
           'col-start-1 row-start-2 min-w-0 space-y-4 border-t border-border p-6',
@@ -306,7 +392,8 @@
         <p v-for="(issue, i) in shotIssues" :key="i" class="pl-7 text-muted-foreground">{{ issue }}</p>
       </div>
 
-      <ul class="flex items-start gap-4 overflow-x-auto pb-1">
+      <!-- Scrolls sideways only; the room below takes the larger click area of the length buttons. -->
+      <ul class="flex items-start gap-4 overflow-x-auto overflow-y-hidden pb-3">
         <li
           v-for="(keyframe, i) in strip"
           :key="keyframe.id"
@@ -349,11 +436,13 @@
               :image-url="keyframe.thumbnailUrl"
               compact
             />
+            <!-- Waiting for the keyframe before: a still clock, so the only moving loader is the drawing's progress. -->
             <span
               v-if="keyframe.status === 'waiting'"
-              class="absolute inset-0 flex items-center justify-center bg-background/40 text-signal"
+              class="absolute inset-0 flex items-center justify-center bg-background/40 text-muted-foreground"
+              :title="$t('Waits for the keyframe before')"
             >
-              <LoaderCircle class="size-5 animate-spin" />
+              <Clock class="size-5" />
             </span>
             <!-- A light shade over the image, so the warning stands out. -->
             <span
@@ -368,10 +457,17 @@
               </span>
             </span>
           </button>
-          <p class="px-1 text-sm text-muted-foreground tabular-nums">{{ timeAt(i) }}</p>
+          <KeyframeSeconds
+            v-if="keyframeSeconds"
+            :seconds="secondsOf(i)"
+            :url="keyframe.secondsUrl"
+            :disabled="video.pending || choosing.active"
+          />
+          <!-- Without times, a label keeps the row in line with the one under Add keyframe. -->
+          <p v-else class="mt-2 px-1 text-sm text-muted-foreground">{{ $t('Keyframe :n', { n: String(i + 1) }) }}</p>
         </li>
-        <!-- A presenter speaks from one still. -->
-        <li v-if="!presenter" class="w-44 shrink-0">
+        <!-- A presenter speaks from one still; an insert shows one. -->
+        <li v-if="!oneKeyframe" class="w-44 shrink-0">
           <button
             type="button"
             :disabled="!canAdd"
@@ -395,7 +491,7 @@
 
     <!-- Shown once there is a video, or once one can be rendered; until then the keyframes take the width. -->
     <section
-      v-if="showVideoColumn"
+      v-if="showVideoColumn && !editing"
       class="col-start-2 row-start-2 flex flex-col gap-4 border-t border-l border-border p-6"
       :style="{ width: `${columnWidth}px` }"
     >
@@ -472,14 +568,27 @@ import { $t } from '@public/ts/shared/i18n'
 import InputError from '@public:components/Form/InputError.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
-import { DropdownMenuItem } from '@shared:ui/dropdown-menu'
 import { NativeSelect } from '@shared:ui/native-select'
-import { Clapperboard, LoaderCircle, Play, Plus, RefreshCw, TriangleAlert, Wand } from 'lucide-vue-next'
+import {
+  Check,
+  Clapperboard,
+  Clock,
+  Download,
+  LoaderCircle,
+  Play,
+  Plus,
+  RefreshCw,
+  Scissors,
+  TriangleAlert,
+  Wand,
+  X,
+} from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
 import FirstKeyframeChooser from './FirstKeyframeChooser.vue'
 import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
 import KeyframeInspector from './KeyframeInspector.vue'
+import KeyframeSeconds from './KeyframeSeconds.vue'
 import KeyframeStagingForm from './KeyframeStagingForm.vue'
 import { isBusy, type KeyframeStatus } from './keyframeStatus'
 import KeyframeTools, { type LayoutMember } from './KeyframeTools.vue'
@@ -487,7 +596,8 @@ import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import PlanChat, { type ChatTarget, type PlanChatTurn } from './PlanChat.vue'
 import RenderProgress from './RenderProgress.vue'
-import VideoActions from './VideoActions.vue'
+import VideoSummary from './VideoSummary.vue'
+import VideoTimeline from './VideoTimeline.vue'
 
 export type PanelIssueGroup = {
   key: string
@@ -553,6 +663,8 @@ export type PanelKeyframe = {
   chooseRenderUrl: string | null
   destroyUrl: string | null
   copyUrl?: string | null
+  /** Setting how long it lasts; none for a presenter, who is as long as what they say. */
+  secondsUrl?: string | null
 }
 
 export type PanelChoosing = {
@@ -580,6 +692,12 @@ export type PanelVideo = {
   submittedAt?: string | null
   /** A presenter's video per language, each with its own sound. */
   languages?: { locale: string; name: string; url: string | null; downloadUrl: string | null }[]
+  /** What the video can be trimmed from: the rendered video, its length and where the cut starts and ends in it. */
+  trim?: { url: string; seconds: number; start: number; end: number } | null
+  /** Saves the trimmed part. */
+  trimUrl?: string
+  /** What the video was made from: the model, the prompt it got and a summary for the director. */
+  sent?: { model: string; prompt: string; summary: string | null } | null
 }
 
 const props = defineProps<{
@@ -599,6 +717,8 @@ const props = defineProps<{
   keyframes: PanelKeyframe[]
   aspectRatio: string
   duration: number
+  /** How long each keyframe lasts, in order; none for a scene, which the video model paces, or a presenter. */
+  keyframeSeconds?: number[] | null
   generating: boolean
   error?: string | null
   /** Tries again what failed: the options for keyframe 1, or only the keyframes that could not be drawn. */
@@ -609,6 +729,8 @@ const props = defineProps<{
   renderSeconds: { keyframe: number; video: number }
   /** One person speaks the voice-over to the camera, with a video per language. */
   presenter?: boolean
+  /** The shot keeps its one keyframe: no keyframe is added. */
+  oneKeyframe?: boolean
   /** What the presenter says. */
   voiceOver?: string | null
   newKeyframe: PanelNewKeyframe
@@ -685,6 +807,9 @@ const followingCount = computed<Record<string, number>>(() =>
 
 const showVideo = ref(Boolean(props.video.url || props.video.pending))
 
+/** The video is being trimmed: the timeline takes the place of the keyframes. */
+const editing = ref(false)
+
 const languages = computed(() => props.video.languages ?? [])
 const language = ref<string | null>(languages.value[0]?.locale ?? null)
 
@@ -703,6 +828,7 @@ const selectKeyframe = (index: number) => {
   selectedIndex.value = index
   showVideo.value = false
   adding.value = false
+  editing.value = false
 }
 
 /**
@@ -810,11 +936,9 @@ const frameSize = computed(() => ({
   width: isPortrait.value ? undefined : '100%',
 }))
 
-const timeAt = (index: number) => {
-  const count = Math.max(props.keyframes.length - 1, 1)
-
-  return `${((props.duration * index) / count).toFixed(1)} s`
-}
+/** How long a keyframe lasts: its own seconds, or an even share of the shot while it is only planned. */
+const secondsOf = (index: number) =>
+  props.keyframeSeconds?.[index] ?? props.duration / Math.max(props.keyframes.length, 1)
 
 const selectVideo = () => {
   showVideo.value = true
@@ -975,6 +1099,42 @@ const canRenderVideo = computed(
 )
 
 const renderVideo = () => videoForm.post(props.video.generateUrl, { preserveScroll: true })
+
+/** Trimming the video: the part kept, from where it starts to where it ends in the rendered video. */
+const player = ref<HTMLVideoElement | null>(null)
+const trimStart = ref(0)
+const trimEnd = ref(0)
+const trimForm = useForm<{ start: number; end: number; trim?: string }>({ start: 0, end: 0 })
+
+/** Changed from what is saved, by more than a frame. */
+const trimDirty = computed(
+  () =>
+    Math.abs(trimStart.value - (props.video.trim?.start ?? 0)) > 0.02 ||
+    Math.abs(trimEnd.value - (props.video.trim?.end ?? 0)) > 0.02,
+)
+
+const startEditing = () => {
+  if (!props.video.trim) return
+
+  trimStart.value = props.video.trim.start
+  trimEnd.value = props.video.trim.end
+  trimForm.clearErrors()
+  editing.value = true
+}
+
+const stopEditing = () => {
+  player.value?.pause()
+  editing.value = false
+}
+
+const saveTrim = () => {
+  if (!props.video.trimUrl) return
+
+  player.value?.pause()
+  trimForm
+    .transform(() => ({ start: trimStart.value, end: trimEnd.value }))
+    .post(props.video.trimUrl, { preserveScroll: true, onSuccess: () => (editing.value = false) })
+}
 
 /** The width of the column with the chat and the video, dragged by the director and remembered in this browser. */
 const WIDTH_KEY = 'editor-column-width'

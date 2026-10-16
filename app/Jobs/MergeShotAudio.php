@@ -20,8 +20,7 @@ use Throwable;
 /**
  * Makes a merged shot's audio track of each language from its parts' tracks,
  * each laid where its part starts in the merged video, with silence where a
- * part has none. Runs after the clips are joined and whenever a part's track
- * is spoken again.
+ * part has none. Runs after the clips are joined.
  */
 #[DeleteWhenMissingModels]
 class MergeShotAudio implements ShouldQueue
@@ -43,16 +42,12 @@ class MergeShotAudio implements ShouldQueue
     }
 
     /**
-     * Merge the tracks of the given languages, or of every voice-over
-     * language of the project, when a part has a track to merge.
-     *
-     * @param  list<string>|null  $locales
+     * Merge the tracks of every voice-over language of the project that a part has a track in.
      */
-    public static function start(Shot $shot, ?array $locales = null): void
+    public static function start(Shot $shot): void
     {
         $shot->loadMissing(['project', 'parts.media']);
-        $enabled = $shot->project->settings->enabledLocales();
-        $locales = array_values(array_intersect($locales ?? $enabled, $enabled));
+        $locales = $shot->project->settings->enabledLocales();
 
         $withTracks = array_values(array_filter($locales, fn(string $locale) => $shot->parts->contains(fn(Shot $part) => self::track($part, $locale) !== null)));
 

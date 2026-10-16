@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Public\Shots\Keyframes;
 
 use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Http\Requests\Public\FirstKeyframeAdjustRequest;
 use App\Http\Requests\Public\KeyframeRenderRequest;
 use App\Jobs\GenerateKeyframes;
@@ -24,8 +23,6 @@ use Illuminate\Validation\ValidationException;
  */
 class FirstController
 {
-    use ReturnsToDecisions;
-
     /**
      * Choose an option for keyframe 1 and render the other keyframes from it.
      */
@@ -47,7 +44,7 @@ class FirstController
 
         GenerateRemainingKeyframes::startFor($shot);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -72,7 +69,7 @@ class FirstController
 
         GenerateKeyframes::dispatch($shot, more: true);
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -97,7 +94,7 @@ class FirstController
 
         TweakKeyframeImage::dispatch($first, $request->validated('instruction'), $render->id, rewrite: $request->boolean('rewrite'));
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     private function ensureChoosing(Shot $shot, string $field): void

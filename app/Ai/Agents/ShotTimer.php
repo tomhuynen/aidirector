@@ -31,9 +31,10 @@ class ShotTimer implements Agent, HasReasoningEffort, HasStructuredOutput
         $rules = StorylineWriter::timingRules();
 
         return <<<INSTRUCTIONS
-            You time one shot of an animated e-learning film from its keyframes: how long the animation takes to go from the first keyframe to the last.
+            You time one shot of an animated e-learning film from its keyframes: how long the animation takes from each keyframe to the next.
             {$rules}
-            - seconds: the length of the shot.
+            - keyframes: per keyframe, in order, how long it takes from it to the next one, in halves of a second; for the last one, how long it is held at the end, 0 when the shot ends as it reaches it. A shot of one keyframe holds it for the whole shot.
+            - seconds: the length of the shot, the keyframes together.
             INSTRUCTIONS;
     }
 
@@ -43,6 +44,7 @@ class ShotTimer implements Agent, HasReasoningEffort, HasStructuredOutput
     public function schema(JsonSchema $schema): array
     {
         return [
+            'keyframes' => $schema->array()->items($schema->number()->min(0))->required(),
             'seconds' => $schema->integer()->required(),
         ];
     }

@@ -27,6 +27,7 @@ use App\Support\Projects\ProjectSettings;
 use App\Support\Shots\KeyframeChain;
 use App\Support\Video\ClipJoiner;
 use App\Support\Video\OpenRouterVideoClient;
+use App\Support\Video\StillVideo;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\File;
@@ -139,7 +140,7 @@ it('renders a lip-synced clip per language with the voice of that language', fun
     $still->addMediaFromString(presenterPng())->usingFileName('still.png')->toMediaCollection(Keyframe::RENDERS);
     $still->elements()->attach($host);
 
-    (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(KeyframePainter::class));
+    (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(KeyframePainter::class), app(StillVideo::class));
 
     // The person's own voice, kept per language so they sound the same in every shot.
     expect($host->fresh()->settings->voices)->toEqual(['nl' => Config::get('pipeline.presenter.voices.female.*'), 'en' => Config::get('pipeline.presenter.voices.female.en')]);

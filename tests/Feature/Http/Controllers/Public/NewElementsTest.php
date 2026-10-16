@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\PlanDirector;
 use App\Ai\Agents\StorylineWriter;
 use App\Enums\Disk;
 use App\Enums\ElementType;
@@ -103,6 +104,28 @@ it('puts what it made into the cast offered last in the chat, to use with the re
 
     expect($shot->fresh()->plan_chat[1]['cast'])->toBe([$guard->sqid, $office->sqid])
         ->and($shot->fresh()->plan_chat)->toHaveCount(3);
+});
+
+it('keeps what was made while the chat answered, so the reply does not take it out of the cast offered', function () {
+    Queue::fake();
+    $shot = shotNeedingElements($this->project);
+    $guard = Element::factory()->for($this->project)->create(['name' => 'Security officer', 'type' => ElementType::PERSON]);
+    $shot->forceFill(['plan_chat' => [['role' => 'assistant', 'text' => 'Which of these?', 'stage' => 'cast', 'cast' => [$guard->sqid]]]])->save();
+    PlanDirector::fake([function () use ($shot) {
+        actingAs($this->director, 'director')->post(route('public.shots.plan.elements', [$this->project, $shot]));
+
+        return ['reply' => 'Shall I go on?', 'stage' => 'cast', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [], 'remove_shots' => [], 'changes' => [], 'proposal' => null];
+    }]);
+
+    $response = actingAs($this->director, 'director')
+        ->postJson(route('public.shots.plan.chat', [$this->project, $shot]), ['message' => 'Use these: Security officer.'])
+        ->assertOk();
+
+    $office = $this->project->elements()->where('name', 'Design office')->firstOrFail();
+
+    expect($shot->fresh()->plan_chat)->toHaveCount(3)
+        ->and($shot->fresh()->plan_chat[0]['cast'])->toBe([$guard->sqid, $office->sqid])
+        ->and($response->json('messages.0.cast'))->toBe([$guard->sqid, $office->sqid]);
 });
 
 it('leaves them out when the director says so', function () {

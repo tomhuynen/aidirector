@@ -9,7 +9,6 @@ use App\Ai\Agents\ShotReviewer;
 use App\Ai\Briefs\KeyframeImageBrief;
 use App\Enums\ElementType;
 use App\Enums\KeyframeStatus;
-use App\Jobs\CheckKeyframePlace;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
@@ -22,6 +21,7 @@ use Laravel\Ai\Files\Image as ImageFile;
 use Laravel\Ai\Files\StoredImage;
 use Laravel\Ai\Image;
 use Laravel\Ai\Responses\StructuredAgentResponse;
+use RuntimeException;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
 
@@ -185,15 +185,19 @@ class KeyframePainter
 
         $base = $this->baseFor($keyframe, $siblings);
 
-        // Keyframe 1 of a scene or close-up is drawn whole and put right where it is off; every later keyframe on the keyframe before it,
-        // with only the cast who change drawn anew; a still from its brief.
+        // Keyframe 1 of a scene or close-up is drawn whole and read; every later keyframe whole by the
+        // keyframe model from the one before it, or on it by the layout model when set; a still from its brief.
         if ($keyframe->position === 1 && $this->layouts->reads($keyframe)) {
             $render = $this->paintFirst($keyframe, $plan, $choose, $extra);
-        } elseif ($this->layouts->draws($keyframe, $base)) {
+        } elseif (Config::get('pipeline.keyframes.layout.draws_keyframes') && $this->layouts->draws($keyframe, $base)) {
             $render = $this->paintLayout($keyframe, $base, $siblings, $choose, $extra);
         } else {
             $keyframe->forceFill(['prompt' => $prompt])->save();
             $render = $this->paintOn($base, $keyframe, $extra === '' ? $prompt : $prompt . "\n" . $extra, $references->images(), $choose, labels: $references->labels());
+
+            if ($choose && $base !== null && $this->layouts->reads($keyframe)) {
+                $this->readLayout($keyframe, $render);
+            }
         }
 
         $keyframe->load('media');
@@ -210,11 +214,10 @@ class KeyframePainter
 
         // The check advises and never redraws by itself: what it found becomes notes the director can have fixed or dismiss.
         if ($check !== null && ! $check['passes']) {
-            $render->setCustomProperty(Keyframe::CHECK_ISSUES, $check['problems'])->save();
+            $render->setCustomProperty(Keyframe::CHECK_ISSUES, [...(array) $render->getCustomProperty(Keyframe::CHECK_ISSUES, []), ...$check['problems']])->save();
         }
 
         $keyframe->load('media');
-        CheckKeyframePlace::start($keyframe, $render);
 
         return $render;
     }
@@ -247,7 +250,7 @@ class KeyframePainter
      */
     public function move(Keyframe $keyframe, Collection $siblings, string $name, array $box): Media
     {
-        $render = $keyframe->render() ?? throw new \RuntimeException('There is no image to move anything in.');
+        $render = $keyframe->render() ?? throw new RuntimeException('There is no image to move anything in.');
         $result = $this->logged($keyframe, fn() => $this->layouts->move($keyframe, $render, $siblings->firstWhere('position', 1)?->render(), $name, $box));
         $moved = $this->keep($keyframe, $result, true);
         $keyframe->forceFill(['layout' => $result['layout']->toArray()])->save();
@@ -261,9 +264,9 @@ class KeyframePainter
      */
     public function change(Keyframe $keyframe, string $name, string $change): Media
     {
-        $render = $keyframe->render() ?? throw new \RuntimeException('There is no image to change anything in.');
+        $render = $keyframe->render() ?? throw new RuntimeException('There is no image to change anything in.');
 
-        $changed = $this->keep($keyframe, $this->logged($keyframe, fn() => $this->layouts->change($keyframe, $render, $name, $change)), true);
+        $changed = $this->keep($keyframe, $this->logged($keyframe, fn() => $this->layouts->change($keyframe, $render, [$name => $change])), true);
         $changed->setCustomProperty(Keyframe::TWEAK_REQUEST, $change)->save();
 
         return $changed;
@@ -271,25 +274,76 @@ class KeyframePainter
 
     /**
      * Fixes what a check found in a keyframe, changing only where each
-     * problem is and keeping everything else of the image.
+     * problem is and keeping everything else of the image. A changed camera
+     * or framing cannot be fixed in a part of the image: it stays a note, to
+     * draw the keyframe again for.
      *
      * @param  list<string>  $problems
      */
     public function repair(Keyframe $keyframe, array $problems): Media
     {
-        $render = $keyframe->render() ?? throw new \RuntimeException('There is no image to fix.');
-        $repaired = $this->keep($keyframe, $this->logged($keyframe, fn() => $this->layouts->repair($keyframe, $render, $problems)), true);
-        $repaired->setCustomProperty(Keyframe::TWEAK_REQUEST, implode(' ', $problems))->setCustomProperty(Keyframe::TWEAK_FROM_CHECK, true)->save();
+        $render = $keyframe->render() ?? throw new RuntimeException('There is no image to fix.');
+        $fixes = $this->layouts->locate($keyframe, $render, $problems);
+        $boxed = array_values(array_filter($fixes, fn(array $fix) => ! $fix['camera']));
+        $camera = array_values(array_map(fn(array $fix) => $fix['problem'], array_filter($fixes, fn(array $fix) => $fix['camera'])));
+
+        if ($boxed === []) {
+            if ($camera === []) {
+                throw new RuntimeException('Where to fix the keyframe could not be found.');
+            }
+
+            $render->setCustomProperty(Keyframe::CHECK_ISSUES, $camera)->save();
+
+            return $render;
+        }
+
+        $repaired = $this->keep($keyframe, $this->logged($keyframe, fn() => $this->layouts->repair($keyframe, $render, $boxed)), true);
+        $repaired->setCustomProperty(Keyframe::TWEAK_REQUEST, implode(' ', array_column($boxed, 'problem')))->setCustomProperty(Keyframe::TWEAK_FROM_CHECK, true);
+
+        if ($camera !== []) {
+            $repaired->setCustomProperty(Keyframe::CHECK_ISSUES, $camera);
+        }
+
+        $repaired->save();
+        $this->checkRepair($keyframe, $repaired);
 
         return $repaired;
+    }
+
+    /**
+     * Checks a fixed keyframe again, so a fix that brings a new problem, such
+     * as an unnatural pose, becomes a note too. A failed check never fails the fix.
+     */
+    private function checkRepair(Keyframe $keyframe, Media $repaired): void
+    {
+        if (! Config::get('pipeline.keyframe_check')) {
+            return;
+        }
+
+        try {
+            if ($keyframe->position === 1 && $this->layouts->reads($keyframe)) {
+                $this->readFirst($keyframe, $repaired);
+
+                return;
+            }
+
+            $siblings = $keyframe->shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $keyframe->shot);
+            $check = $this->check($keyframe, $repaired, $this->referencesFor($keyframe, $siblings));
+
+            if ($check !== null && ! $check['passes']) {
+                $repaired->setCustomProperty(Keyframe::CHECK_ISSUES, [...(array) $repaired->getCustomProperty(Keyframe::CHECK_ISSUES, []), ...$check['problems']])->save();
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /**
      * Draws keyframe 1 whole with the keyframe model, so the image model
      * composes it: the place from its picture, for how it looks, with the
      * camera chosen for the action, and the cast from theirs. Drawn to be
-     * used straight away, it is put right where it is off at once; an
-     * option is put right once the director chooses it.
+     * used straight away, it is read at once; an option is read once the
+     * director chooses it.
      *
      * @param  array{title: string, description: string, spatial?: string|null}  $plan
      */
@@ -316,11 +370,15 @@ class KeyframePainter
 
         $render = $this->paint($keyframe, $extra === '' ? $prompt : $prompt . "\n" . $extra, $references->images(), $choose, labels: $references->labels());
 
-        return $choose ? $this->settleFirst($keyframe, $render) : $render;
+        if ($choose) {
+            $this->readFirst($keyframe, $render);
+        }
+
+        return $render;
     }
 
     /**
-     * Whether keyframe 1 is read and put right, so the keyframes after it are drawn from where everyone stands.
+     * Whether keyframe 1 is read, so the keyframes after it are drawn from where everyone stands.
      */
     public function reads(Keyframe $keyframe): bool
     {
@@ -328,23 +386,33 @@ class KeyframePainter
     }
 
     /**
-     * Reads keyframe 1 and puts it right where it is off: whoever stands in
-     * the wrong spot is moved and whoever does not look like their picture is
-     * drawn from it, by the layout model. Where everyone stands is kept as
-     * the layout the next keyframe is drawn from.
+     * Reads keyframe 1: where everyone stands is kept as the layout the next
+     * keyframe is drawn from. Whoever stands in the wrong spot or does not
+     * look like their picture becomes a note the director can have fixed or
+     * dismiss; the image itself stays as it is.
      */
-    public function settleFirst(Keyframe $keyframe, Media $render): Media
+    public function readFirst(Keyframe $keyframe, Media $render): void
     {
         $reading = $this->layouts->read($keyframe, $render);
-
-        if ($reading->needsFixing()) {
-            $render = $this->keep($keyframe, $this->logged($keyframe, fn() => $this->layouts->fix($keyframe, $render, $reading)), true);
-            $reading = $this->layouts->read($keyframe, $render);
-        }
-
         $keyframe->forceFill(['layout' => $reading->layout()->toArray()])->save();
 
-        return $render;
+        if ($reading->problems() !== []) {
+            $render->setCustomProperty(Keyframe::CHECK_ISSUES, [...(array) $render->getCustomProperty(Keyframe::CHECK_ISSUES, []), ...$reading->problems()])->save();
+        }
+    }
+
+    /**
+     * Reads where everyone stands in a keyframe drawn whole, so Select, Move
+     * and Fix work on it and the keyframe after it knows where they were. A
+     * failed reading leaves it to the first Select, which reads it then.
+     */
+    private function readLayout(Keyframe $keyframe, Media $render): void
+    {
+        try {
+            $keyframe->forceFill(['layout' => $this->layouts->read($keyframe, $render)->layout()->toArray()])->save();
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /**
@@ -527,6 +595,24 @@ class KeyframePainter
     }
 
     /**
+     * The images the check of a render gets, each with what it is the
+     * reference for, the render last; null when there is nothing to check
+     * it against.
+     *
+     * @return array{0: list<StoredImage>, 1: list<string>}|null
+     */
+    public function checkInput(Keyframe $keyframe, Media $render, KeyframeReferences $references): ?array
+    {
+        if ($references->first === null && ! $keyframe->shot->drawsStandalone()) {
+            return null;
+        }
+
+        [$images, $roles] = $references->first === null ? $this->stillCheckImages($references) : $this->checkImages($references->first, $references);
+
+        return [[...$images, $this->referenceFor($render)], [...$roles, 'the keyframe to check']];
+    }
+
+    /**
      * Has the checker compare a render with its references, each for its own
      * part: keyframe 1 for the place, the keyframe the people first appear in
      * (or their picture) for how they look, and the keyframe before for the
@@ -537,14 +623,13 @@ class KeyframePainter
      */
     private function check(Keyframe $keyframe, Media $render, KeyframeReferences $references): ?array
     {
-        if ($references->first === null && ! $keyframe->shot->drawsStandalone()) {
+        $input = $this->checkInput($keyframe, $render, $references);
+
+        if ($input === null) {
             return null;
         }
 
-        [$images, $roles] = $references->first === null ? $this->stillCheckImages($references) : $this->checkImages($references->first, $references);
-        $images[] = $this->referenceFor($render);
-        $roles[] = 'the keyframe to check';
-
+        [$images, $roles] = $input;
         $checker = new KeyframeChecker($keyframe, $roles);
         $result = $this->runChecker($keyframe, $checker, $images, (string) Config::get('pipeline.models.keyframe_check'));
 
@@ -560,38 +645,6 @@ class KeyframePainter
             'problems' => $problems,
             'fix' => $problems === [] ? '' : 'Keep everything else as it is and correct this: ' . implode(' ', $problems),
         ];
-    }
-
-    /**
-     * Has the place checker compare a render with keyframe 1, for shifts in
-     * the place that the full check tends to miss. Returns the changes a
-     * viewer would see, or null when the check fails.
-     *
-     * @return list<string>|null
-     */
-    public function checkPlace(Keyframe $keyframe, Media $render, KeyframeReferences $references): ?array
-    {
-        if ($references->first === null) {
-            return null;
-        }
-
-        // The keyframe before shows whether a change jumps between the two, or was already there.
-        $before = $keyframe->position > 2 ? $references->previous : null;
-        $checker = new KeyframeChecker($keyframe, array_values(array_filter([
-            'keyframe 1 of the shot, the reference for the place',
-            $before !== null ? 'the keyframe directly before the one to check' : null,
-            'the keyframe to check',
-        ])), scope: KeyframeChecker::PLACE);
-        $result = $this->runChecker($keyframe, $checker, array_values(array_filter([$references->first, $before, $this->referenceFor($render)])), (string) Config::get('pipeline.models.place_check'));
-
-        if ($result === null) {
-            return null;
-        }
-
-        return array_values(array_map(
-            fn(array $issue) => $issue['change'],
-            array_filter($result['issues'], fn(array $issue) => $issue['severity'] === 'high'),
-        ));
     }
 
     /**

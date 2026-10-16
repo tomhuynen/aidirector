@@ -45,6 +45,7 @@ class KeyframeFixLocator implements Agent, HasReasoningEffort, HasStructuredOutp
             - member: the name of the one of the cast the problem is about, exactly as listed, such as a person whose helmet lost its logo; empty when it is about something else, such as a sign, the floor or a part of the place.
             - looks: true when the problem is how they look compared with their picture, such as their clothing, colours, headwear or a logo that went missing; false when it is their pose, what they hold or wear at this moment, or where they are, such as one arm in a vest.
             - shows: what that part shows once it is right, in one plain sentence, such as "the blue hard hat with the logo on the front, as in his picture".
+            - camera: true when the problem is that the camera or the framing changed, such as the place, a ship or a person shifting in size or position compared with another keyframe; changing a part of this image cannot fix that. Otherwise false.
             TEXT;
     }
 
@@ -65,6 +66,7 @@ class KeyframeFixLocator implements Agent, HasReasoningEffort, HasStructuredOutp
                 'member' => $schema->string()->required(),
                 'looks' => $schema->boolean()->required(),
                 'shows' => $schema->string()->required(),
+                'camera' => $schema->boolean()->required(),
             ]))->required(),
         ];
     }
@@ -95,7 +97,7 @@ class KeyframeFixLocator implements Agent, HasReasoningEffort, HasStructuredOutp
      * how they look, and what it shows.
      *
      * @param  array<string, mixed>  $answer
-     * @return list<array{problem: string, box: array{0: int, 1: int, 2: int, 3: int}, member: string|null, looks: bool, shows: string}>
+     * @return list<array{problem: string, box: array{0: int, 1: int, 2: int, 3: int}, member: string|null, looks: bool, shows: string, camera: bool}>
      */
     public function fixesFrom(array $answer): array
     {
@@ -111,7 +113,7 @@ class KeyframeFixLocator implements Agent, HasReasoningEffort, HasStructuredOutp
 
             $named = trim((string) ($fix['member'] ?? ''));
             $member = collect($this->cast)->first(fn(string $name) => $named !== '' && mb_strtolower($name) === mb_strtolower($named));
-            $fixes[] = ['problem' => trim((string) ($fix['problem'] ?? '')), 'box' => $box, 'member' => $member, 'looks' => $member !== null && (bool) ($fix['looks'] ?? false), 'shows' => $shows];
+            $fixes[] = ['problem' => trim((string) ($fix['problem'] ?? '')), 'box' => $box, 'member' => $member, 'looks' => $member !== null && (bool) ($fix['looks'] ?? false), 'shows' => $shows, 'camera' => (bool) ($fix['camera'] ?? false)];
         }
 
         return $fixes;

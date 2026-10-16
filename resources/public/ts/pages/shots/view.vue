@@ -1,10 +1,7 @@
 <template>
   <Head :title="`${code} · ${project.title}`" />
 
-  <TopBar
-    :crumbs="crumbs"
-    :decisions="project.links?.decisions ? { url: project.links.decisions, count: decisionsCount } : undefined"
-  />
+  <TopBar :crumbs="crumbs" />
 
   <div class="flex min-h-0 flex-1">
     <ShotList
@@ -18,18 +15,6 @@
     />
 
     <main class="flex min-w-0 flex-1 flex-col">
-      <p
-        v-if="mergedInto"
-        class="flex shrink-0 items-center gap-2 border-b border-border bg-signal-soft/40 px-6 py-2.5 text-sm"
-      >
-        <Combine class="size-4 text-signal" />
-        {{
-          $t('This shot is part of “:title”. A new video here updates the merged video.', { title: mergedInto.title })
-        }}
-        <Link :href="mergedInto.url" class="ml-auto font-medium text-signal hover:underline">{{
-          $t('Open merged shot')
-        }}</Link>
-      </p>
       <div class="flex min-h-0 min-w-0 flex-1">
         <MergedShot
           v-if="merge"
@@ -73,6 +58,7 @@
             :keyframes="panelKeyframes"
             :aspect-ratio="aspectRatio"
             :duration="duration"
+            :keyframe-seconds="shot.keyframeSeconds"
             :generating="shot.status === 'keyframes-pending'"
             :issue-groups="shot.issueGroups"
             :reviewing="shot.reviewing"
@@ -93,6 +79,7 @@
               adjusting: shot.status === 'first-keyframe-ready' && isBusy(keyframes[0]?.status),
             }"
             :presenter="shot.kind === 'presenter'"
+            :one-keyframe="shot.oneKeyframe"
             :render-seconds="shot.renderSeconds"
             :voice-over="shot.voiceOver"
             :reorder-url="shot.links?.keyframesReorder ?? '#'"
@@ -108,6 +95,9 @@
               submittedAt: shot.videoSubmittedAt,
               generateUrl: shot.links?.videoGenerate ?? '#',
               languages: shot.languageVideos,
+              trim: shot.videoTrim,
+              sent: shot.videoSent,
+              trimUrl: shot.links?.videoTrim,
             }"
           />
         </template>
@@ -116,7 +106,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { Head, Link, usePoll } from '@inertiajs/vue3'
+import { Head, usePoll } from '@inertiajs/vue3'
 import EditorLayout from '@public/ts/layouts/Editor.vue'
 import { $t } from '@public/ts/shared/i18n'
 import type { Inertia } from '@public/ts/types/utils'
@@ -129,7 +119,6 @@ import { shotCode } from '@public:components/editor/shotCode'
 import ShotList from '@public:components/editor/ShotList.vue'
 import TopBar from '@public:components/editor/TopBar.vue'
 import { index as projectsIndex } from '@routes/public/projects'
-import { Combine } from 'lucide-vue-next'
 import { computed, watch } from 'vue'
 
 defineOptions({
@@ -173,6 +162,7 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         chooseRenderUrl: keyframe.links.chooseRender,
         destroyUrl: keyframe.links.destroy,
         copyUrl: keyframe.links.copy,
+        secondsUrl: keyframe.links.seconds,
       }))
     : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
         id: String(i),

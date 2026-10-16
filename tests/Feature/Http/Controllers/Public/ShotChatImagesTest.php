@@ -162,6 +162,28 @@ describe('with one of the cast selected', function () {
         $this->second->forceFill(['status' => KeyframeStatus::READY, 'layout' => ['cast' => [['name' => 'Visitor', 'box' => [300, 400, 900, 600], 'facing' => 'facing the gate', 'pose' => 'standing', 'changed' => true]]]])->save();
     });
 
+    it('proposes a change that restages one of the cast as their fields, also when no one is selected', function () {
+        $this->second->restage(App\Support\Shots\KeyframeStaging::fromArray(['cast' => [['name' => 'Visitor', 'stands' => 'left', 'faces' => 'right', 'looks_at' => 'the guard', 'holds' => 'the phone', 'hand' => 'right', 'doing' => 'holds it at the hip']]]))->save();
+        $member = ['name' => 'Visitor', 'stands' => 'left', 'faces' => 'away', 'looks_at' => 'the vessel', 'holds' => 'the phone', 'hand' => 'right', 'doing' => 'aims it at the vessel'];
+        PlanDirector::fake([imagesReply(['reply' => 'I will turn her toward the vessel. Shall I?', 'changes' => [['keyframe' => 2, 'change' => 'The visitor turns away from the camera and aims the phone at the vessel.', 'member' => $member]]])]);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.chat', [$this->project, $this->shot]), ['message' => 'make her look at the vessel and point the phone at it', 'target' => 'keyframe', 'keyframe' => $this->second->sqid])
+            ->assertOk()
+            ->assertJsonPath('messages.3.proposed.name', 'Visitor')
+            ->assertJsonPath('messages.3.proposed.keyframe', $this->second->sqid)
+            ->assertJsonPath('messages.3.proposed.fields', [
+                ['field' => 'faces', 'from' => 'right', 'to' => 'away'],
+                ['field' => 'looks_at', 'from' => 'the guard', 'to' => 'the vessel'],
+                ['field' => 'doing', 'from' => 'holds it at the hip', 'to' => 'aims it at the vessel'],
+            ])
+            ->assertJsonPath('messages.3.changes', null);
+
+        Bus::assertNothingDispatched();
+        expect((string) (new PlanDirector($this->shot, []))->instructions())->toContain('when the change cannot be made while a field stays as it is')
+            ->toContain('give no change yet; say in one sentence what conflicts and ask whether to change that field too');
+    });
+
     it('proposes the change to them, and makes it only once the director confirms it', function () {
         $this->second->restage(App\Support\Shots\KeyframeStaging::fromArray(['cast' => [['name' => 'Visitor', 'stands' => 'centre', 'faces' => 'right', 'looks_at' => 'the badge', 'holds' => 'the badge', 'hand' => 'right', 'doing' => 'holds it up']]]))->save();
         $member = ['name' => 'Visitor', 'stands' => 'centre', 'faces' => 'away', 'looks_at' => 'the gate', 'holds' => 'the badge', 'hand' => 'right', 'doing' => 'holds it up'];

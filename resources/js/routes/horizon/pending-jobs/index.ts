@@ -1,0 +1,50 @@
+import { queryParams, type RouteDefinition, type RouteQueryOptions } from './../../../wayfinder'
+/**
+ * @see \Laravel\Horizon\Http\Controllers\PendingJobsController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/PendingJobsController.php:36
+ * @route '/admin/system/horizon/api/jobs/pending'
+ */
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+  url: index.url(options),
+  method: 'get',
+})
+
+index.definition = {
+  methods: ['get', 'head'],
+  url: '/admin/system/horizon/api/jobs/pending',
+} satisfies RouteDefinition<['get', 'head']>
+
+/**
+ * @see \Laravel\Horizon\Http\Controllers\PendingJobsController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/PendingJobsController.php:36
+ * @route '/admin/system/horizon/api/jobs/pending'
+ */
+index.url = (options?: RouteQueryOptions) => {
+  return index.definition.url + queryParams(options)
+}
+
+/**
+ * @see \Laravel\Horizon\Http\Controllers\PendingJobsController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/PendingJobsController.php:36
+ * @route '/admin/system/horizon/api/jobs/pending'
+ */
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+  url: index.url(options),
+  method: 'get',
+})
+
+/**
+ * @see \Laravel\Horizon\Http\Controllers\PendingJobsController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/PendingJobsController.php:36
+ * @route '/admin/system/horizon/api/jobs/pending'
+ */
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+  url: index.url(options),
+  method: 'head',
+})
+
+const pendingJobs = {
+  index: Object.assign(index, index),
+}
+
+export default pendingJobs

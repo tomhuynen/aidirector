@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Bench;
 
 use App\Ai\Bench\Benchmarks\CastSuggestionsBenchmark;
+use App\Ai\Bench\Benchmarks\KeyframeCheckBenchmark;
 use App\Ai\Bench\Benchmarks\KeyframePlanBenchmark;
 use App\Ai\Bench\Benchmarks\PhotoAnalysisBenchmark;
 use App\Ai\Bench\Benchmarks\StyleOptionsBenchmark;
@@ -24,6 +25,7 @@ class Benchmarks
         StyleOptionsBenchmark::class,
         CastSuggestionsBenchmark::class,
         KeyframePlanBenchmark::class,
+        KeyframeCheckBenchmark::class,
     ];
 
     /**

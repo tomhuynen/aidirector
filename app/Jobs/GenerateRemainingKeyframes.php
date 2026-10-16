@@ -12,7 +12,6 @@ use App\Jobs\Concerns\RetriesHiccups;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
-use App\Notifications\Public\GenerationFinished;
 use App\Support\Shots\KeyframeChain;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -25,8 +24,7 @@ use Throwable;
 
 /**
  * Starts drawing a shot's keyframes once keyframe 1 is chosen: keyframe 1
- * is read and put right first, so the others are drawn from where everyone
- * stands in it. Cast and sets without a picture get one first, side by side in a
+ * is read first, so the others are drawn from where everyone stands in it. Cast and sets without a picture get one first, side by side in a
  * batch of {@see GenerateElementReference} jobs; then the keyframes are
  * drawn one after another by the {@see KeyframeChain}.
  */
@@ -66,10 +64,10 @@ class GenerateRemainingKeyframes implements ShouldQueue
             return;
         }
 
-        // The chosen version of keyframe 1 is read and put right once, before the keyframes after it are drawn from it.
+        // The chosen version of keyframe 1 is read once, before the keyframes after it are drawn from it.
         if (! $shot->drawsStandalone() && $first->layout === null && $painter->reads($first)) {
             $first->forceFill(['status' => KeyframeStatus::CHECKING])->save();
-            $painter->settleFirst($first, $first->render());
+            $painter->readFirst($first, $first->render());
             $first->forceFill(['status' => KeyframeStatus::READY])->save();
 
             if ($this->planReplaced()) {
@@ -173,8 +171,5 @@ class GenerateRemainingKeyframes implements ShouldQueue
             'storyline_error' => __('The other keyframes could not be rendered. Please try again.'),
             'status' => ShotStatus::FIRST_KEYFRAME_READY,
         ])->save();
-
-        GenerationFinished::failed(__('The keyframes of “:shot” could not be rendered', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
-            ->sendTo($this->shot->project);
     }
 }

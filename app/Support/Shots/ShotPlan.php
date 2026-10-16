@@ -35,7 +35,13 @@ class ShotPlan
             'spatial' => trim((string) ($keyframe['spatial'] ?? '')),
         ]) + [
             'elements' => collect((array) ($keyframe['elements'] ?? []))->map(fn(mixed $name) => $names[mb_strtolower(trim((string) $name))] ?? null)->filter()->unique()->values()->all(),
+            ...(is_numeric($keyframe['seconds'] ?? null) ? ['seconds' => max(0.0, (float) $keyframe['seconds'])] : []),
         ])->all();
+
+        // Keyframe 1 of a shot that opens with a copy is that image: its plan stays as it was copied.
+        if ($shot->opensWithCopy() && isset($shot->storylineKeyframes()[0])) {
+            $keyframes[0] = $shot->storylineKeyframes()[0];
+        }
 
         $storyline = trim((string) ($proposal['storyline'] ?? ''));
         $title = trim((string) ($proposal['title'] ?? ''));

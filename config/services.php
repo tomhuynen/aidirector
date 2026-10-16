@@ -30,6 +30,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'luma' => [
+        'key' => env('LUMA_AGENTS_API_KEY'),
+        'url' => env('LUMA_AGENTS_URL', 'https://agents.lumalabs.ai/v1'),
+    ],
+
     'replicate' => [
         'token' => env('REPLICATE_API_TOKEN'),
         'url' => env('REPLICATE_URL', 'https://api.replicate.com/v1'),

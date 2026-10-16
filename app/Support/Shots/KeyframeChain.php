@@ -10,7 +10,6 @@ use App\Jobs\DrawKeyframe;
 use App\Jobs\ReviewShot;
 use App\Models\Keyframe;
 use App\Models\Shot;
-use App\Notifications\Public\GenerationFinished;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -32,7 +31,8 @@ class KeyframeChain
     public function link(Shot $shot): void
     {
         $keyframes = $shot->keyframes()->orderBy('position')->get();
-        $before = $this->continuesFrom($shot);
+        // A copied keyframe 1 is never drawn again, so it depends on nothing.
+        $before = $shot->opensWithCopy() ? null : $this->continuesFrom($shot);
 
         foreach ($keyframes as $keyframe) {
             // A still of a montage or a presenter shot is drawn on its own.
@@ -94,7 +94,7 @@ class KeyframeChain
         $dependents->each(fn(Keyframe $dependent) => $this->queue($dependent, KeyframeStatus::WAITING));
         $dependents->pluck('shot_id')->unique()->each(fn(int $shotId) => $this->advance($shotId));
 
-        $this->finishShot($keyframe->shot()->with('project')->firstOrFail(), $keyframe);
+        $this->finishShot($keyframe->shot()->with('project')->firstOrFail());
     }
 
     /**
@@ -151,7 +151,7 @@ class KeyframeChain
 
         $keyframe->dependents()->pluck('shot_id')->push($keyframe->shot_id)->unique()->each(fn(int $shotId) => $this->advance($shotId));
 
-        $this->finishShot($keyframe->shot()->with('project')->firstOrFail(), $keyframe);
+        $this->finishShot($keyframe->shot()->with('project')->firstOrFail());
     }
 
     /**
@@ -183,15 +183,10 @@ class KeyframeChain
             }
         }
 
-        $shot = $keyframe->shot()->with('project')->first();
+        $shot = $keyframe->shot()->first();
 
-        if ($shot !== null) {
-            if ($shot->status === ShotStatus::KEYFRAMES_PENDING && ! $shot->keyframes()->busy()->exists()) {
-                $shot->forceFill(['status' => ShotStatus::KEYFRAMES_READY, 'storyline_error' => __('Not every keyframe could be drawn. Draw the missing ones again.')])->save();
-            }
-
-            GenerationFinished::failed(__('Keyframe :number of “:shot” could not be drawn', ['number' => $keyframe->position, 'shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
-                ->sendTo($shot->project);
+        if ($shot !== null && $shot->status === ShotStatus::KEYFRAMES_PENDING && ! $shot->keyframes()->busy()->exists()) {
+            $shot->forceFill(['status' => ShotStatus::KEYFRAMES_READY, 'storyline_error' => __('Not every keyframe could be drawn. Draw the missing ones again.')])->save();
         }
     }
 
@@ -251,10 +246,9 @@ class KeyframeChain
 
     /**
      * Once every keyframe of a shot is ready again, the shot is reviewed. When
-     * its keyframes were being drawn, shots that wait for it can start; the
-     * director hears of the whole shot, or of the one keyframe drawn again.
+     * its keyframes were being drawn, shots that wait for it can start.
      */
-    private function finishShot(Shot $shot, Keyframe $keyframe): void
+    private function finishShot(Shot $shot): void
     {
         if ($shot->keyframes()->where('status', '!=', KeyframeStatus::READY)->exists()) {
             return;
@@ -263,9 +257,6 @@ class KeyframeChain
         if ($shot->status !== ShotStatus::KEYFRAMES_PENDING) {
             ReviewShot::after($shot);
 
-            GenerationFinished::ready(__('Keyframe :number of “:shot” is ready', ['number' => $keyframe->position, 'shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $keyframe->refresh()->render(), Keyframe::THUMBNAIL)
-                ->sendTo($shot->project);
-
             return;
         }
 
@@ -273,8 +264,5 @@ class KeyframeChain
 
         ReviewShot::after($shot);
         Shot::drawWaitingShots($shot->project_id);
-
-        GenerationFinished::ready(__('All keyframes of “:shot” are ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]), $shot->keyframes()->with('media')->reorder('position', 'desc')->first()?->render(), Keyframe::THUMBNAIL)
-            ->sendTo($shot->project);
     }
 }

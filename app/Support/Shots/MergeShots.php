@@ -101,12 +101,12 @@ class MergeShots
     }
 
     /**
-     * Joins the clips again, after a part got a new video or with another transition.
+     * Joins the clips again with another transition.
      */
-    public function rejoin(Shot $merged, ?ShotTransition $transition = null): void
+    public function rejoin(Shot $merged, ShotTransition $transition): void
     {
         $merged->forceFill([
-            'merge_transition' => $transition ?? $merged->merge_transition,
+            'merge_transition' => $transition,
             'status' => ShotStatus::VIDEO_PENDING,
             'video_error' => null,
         ])->save();

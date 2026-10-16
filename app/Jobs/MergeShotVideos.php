@@ -6,7 +6,6 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Models\Shot;
-use App\Notifications\Public\GenerationFinished;
 use App\Support\Video\ClipJoiner;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -77,9 +76,6 @@ class MergeShotVideos implements ShouldQueue
         ])->save();
 
         MergeShotAudio::start($shot);
-
-        GenerationFinished::ready(__('The merged video of “:shot” is ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
-            ->sendTo($shot->project);
     }
 
     public function failed(?Throwable $exception): void
@@ -90,8 +86,5 @@ class MergeShotVideos implements ShouldQueue
         ])->save();
 
         report($exception);
-
-        GenerationFinished::failed(__('The clips of “:shot” could not be joined', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
-            ->sendTo($this->shot->project);
     }
 }

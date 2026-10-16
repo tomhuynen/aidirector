@@ -12,23 +12,26 @@ namespace App\Ai\Prompts;
 class VideoPrompt
 {
     /**
+     * Without a timeline the model paces the steps itself within the length;
+     * with one, from a director who timed the keyframes, each is reached when it says.
+     *
      * @param  array{style: string, action: string, details: string}  $parts
      * @param  list<array{position: int, title: string, seconds: float}>  $timeline
      */
-    public static function compose(array $parts, array $timeline, int $duration): string
+    public static function compose(array $parts, int $count, int $duration, array $timeline = []): string
     {
-        $count = count($timeline);
-
-        $anchors = collect($timeline)
-            ->map(fn(array $frame) => sprintf('Keyframe %d (%s) at about %.1F s.', $frame['position'], $frame['title'], $frame['seconds']))
-            ->join(' ');
+        $timing = $timeline === []
+            ? "Pace it naturally within the {$duration} seconds: every step takes as long as it would in life, a glance short and a walk longer."
+            : 'Timing: ' . collect($timeline)
+                ->map(fn(array $frame) => sprintf('Keyframe %d (%s) at about %.1F s.', $frame['position'], $frame['title'], $frame['seconds']))
+                ->join(' ');
 
         return implode("\n\n", [
             "Create one continuous, natural {$duration}-second animation following the supplied keyframes in chronological order.",
 
             "Most important requirement: the very first frame of the video must match keyframe 1 exactly, and the very last frame of the video must match keyframe {$count} exactly. Same pose, same position, same framing, same objects and object states, same expression and same gaze. The video starts on keyframe 1 as it is shown, not before it and not after it, and it ends on keyframe {$count} as it is shown and holds that pose until the last frame. Do not start or end on any other moment.",
 
-            "The {$count} reference images are the keyframes of this shot, supplied in chronological order: reference image 1 is keyframe 1 and reference image {$count} is keyframe {$count}. Each image is one moment of the same continuous shot, with the same framing; the video passes through them in this order. Timing: {$anchors}",
+            "The {$count} reference images are the keyframes of this shot, supplied in chronological order: reference image 1 is keyframe 1 and reference image {$count} is keyframe {$count}. Each image is one moment of the same continuous shot, with the same framing; the video passes through them in this order. {$timing}",
 
             "Visual style: {$parts['style']}",
 

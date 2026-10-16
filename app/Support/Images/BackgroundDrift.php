@@ -33,6 +33,9 @@ class BackgroundDrift
     /** Lined up this much better after a shift or zoom, the whole picture moved. */
     private const float MIN_GAIN = 0.1;
 
+    /** With less than this of the background in place the picture moved, however it lines up: a jump too large to search back. */
+    private const float MIN_KEPT = 0.5;
+
     /** @var list<float> */
     private const array ZOOMS = [0.94, 0.96, 0.98, 1.0, 1.02, 1.04, 1.06];
 
@@ -44,7 +47,9 @@ class BackgroundDrift
      * background tiles with structure that stayed in place, from 0 to 1;
      * `aligned` the best share after shifting or zooming the render back;
      * `moved` whether that lines up clearly better, so the whole picture
-     * moved. With at least `$still` of it in place, nothing is searched.
+     * moved, or so little stayed in place that the camera jumped further
+     * than the search reaches. With at least `$still` of it in place,
+     * nothing is searched.
      *
      * @return array{stillness: float, aligned: float, moved: bool}
      */
@@ -69,7 +74,7 @@ class BackgroundDrift
             }
         }
 
-        return ['stillness' => $stillness, 'aligned' => $aligned, 'moved' => $aligned - $stillness >= self::MIN_GAIN];
+        return ['stillness' => $stillness, 'aligned' => $aligned, 'moved' => $stillness < self::MIN_KEPT || $aligned - $stillness >= self::MIN_GAIN];
     }
 
     /**

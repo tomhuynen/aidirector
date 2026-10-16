@@ -15,6 +15,7 @@ use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -70,6 +71,7 @@ function videoPromptParts(): array
         'style' => 'Preserve the soft 3D illustration style of the keyframes.',
         'action' => 'The man lights the cigarette (keyframe 1) and notices the sign (keyframe 2).',
         'details' => 'The no-smoking sign stays on the yellow barrier.',
+        'summary' => 'The man lights a cigarette, notices the sign and puts it out.',
     ];
 }
 
@@ -127,7 +129,7 @@ describe('job', function () {
         $this->project->save();
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'voice_over' => 'Wait behind the line.']);
 
-        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class));
+        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class), app(App\Support\Video\StillVideo::class));
 
         Queue::assertPushed(App\Jobs\GenerateVoiceOverAudio::class, fn($job) => $job->locale === 'nl-NL');
         Queue::assertPushed(App\Jobs\GenerateVoiceOverAudio::class, fn($job) => $job->locale === 'de-DE');
@@ -141,11 +143,12 @@ describe('job', function () {
         $this->project->forceFill(['video_resolution' => '1080p'])->save();
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'duration' => 30]);
 
-        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class));
+        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class), app(App\Support\Video\StillVideo::class));
 
         $shot->refresh();
 
         expect($shot->video_job_id)->toBe('vid_123')
+            ->and($shot->video_summary)->toBe('The man lights a cigarette, notices the sign and puts it out.')
             ->and($shot->video_submitted_at)->not->toBeNull()
             ->and($shot->video_prompt)
             ->toContain('Create one continuous, natural 15-second animation')
@@ -153,7 +156,8 @@ describe('job', function () {
             ->toContain('the first frame is keyframe 1 exactly and the last frame is keyframe 4 exactly')
             ->toContain('The 4 reference images are the keyframes of this shot, supplied in chronological order')
             ->not->toContain('collage')
-            ->toContain('Keyframe 1 (Moment 1) at about 0.0 s. Keyframe 2 (Moment 2) at about 5.0 s.')
+            ->toContain('Pace it naturally within the 15 seconds')
+            ->not->toContain('Timing:')
             ->toContain('Visual style: Preserve the soft 3D illustration style')
             ->toContain('Action sequence: The man lights the cigarette (keyframe 1)')
             ->toContain('The no-smoking sign stays on the yellow barrier.')
@@ -167,6 +171,7 @@ describe('job', function () {
             && str_contains($prompt->prompt, 'Where a description and its image differ, the image is right')
             && ! str_contains($prompt->prompt, 'Storyline')
             && str_contains((string) $prompt->agent->instructions(), 'describe every person exactly as drawn in the keyframes')
+            && str_contains((string) $prompt->agent->instructions(), 'Describe a thing that must not move as a fixed part of the place')
             && str_contains((string) $prompt->agent->instructions(), 'how the people feel and react in each moment')
             && str_contains((string) $prompt->agent->instructions(), 'presses the handle down once, the door is locked and does not move, he lets go'));
 
@@ -309,6 +314,86 @@ describe('poll', function () {
 
         Http::assertNothingSent();
     });
+});
+
+describe('luma', function () {
+    beforeEach(function () {
+        Illuminate\Support\Facades\Config::set(['pipeline.video.provider' => 'luma', 'services.luma.key' => 'luma-key']);
+    });
+
+    it('pins every keyframe to the frame it is reached on and holds the last one until the shot ends', function () {
+        Queue::fake([PollVideos::class]);
+        VideoPromptWriter::fake([videoPromptParts()]);
+        Http::fake(['agents.lumalabs.ai/v1/generations' => Http::response(['id' => 'gen-1', 'state' => 'queued'], 201)]);
+        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING]);
+
+        (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class), app(App\Support\Video\StillVideo::class));
+
+        // Six seconds over four keyframes: one every 1.5 s at 24 fps, in the shortest clip Ray renders that holds them.
+        Http::assertSent(fn(Request $request) => $request->url() === 'https://agents.lumalabs.ai/v1/generations'
+            && $request->hasHeader('Authorization', 'Bearer luma-key')
+            && $request['model'] === 'ray-3.2'
+            && $request['aspect_ratio'] === '9:16'
+            && $request['video']['duration'] === '10s'
+            && $request['video']['keyframe_indexes'] === [0, 36, 72, 108, 144]
+            && count($request['video']['keyframes']) === 5
+            && $request['video']['keyframes'][4] === $request['video']['keyframes'][3]
+            && $request['video']['keyframes'][0]['media_type'] === 'image/png');
+        expect($shot->fresh()->video_job_id)->toBe('gen-1');
+    });
+
+    it('reads the state of Luma renders and hands the finished one to the download', function () {
+        Http::fake([
+            'agents.lumalabs.ai/v1/generations/gen-done' => Http::response(['id' => 'gen-done', 'state' => 'completed', 'output' => [['type' => 'video', 'url' => 'https://cdn.luma.test/out.mp4']]]),
+            'agents.lumalabs.ai/v1/generations/gen-bad' => Http::response(['id' => 'gen-bad', 'state' => 'failed', 'failure_reason' => 'Content moderated']),
+            'agents.lumalabs.ai/v1/generations/gen-busy' => Http::response(['id' => 'gen-busy', 'state' => 'processing']),
+        ]);
+        $done = renderingShot($this->project, 'gen-done');
+        $bad = renderingShot($this->project, 'gen-bad');
+        $busy = renderingShot($this->project, 'gen-busy');
+
+        (new PollVideos())->handle(app(App\Support\Video\VideoJobs::class));
+
+        Queue::assertPushed(DownloadVideo::class, fn(DownloadVideo $job) => $job->shot->is($done));
+        expect($bad->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
+            ->and($bad->generations()->where('error', 'Content moderated')->where('provider', 'luma')->where('model', 'ray-3.2')->count())->toBe(1)
+            ->and($busy->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING);
+    });
+
+    it('downloads the finished clip from the link the render has now', function () {
+        Http::fake([
+            'agents.lumalabs.ai/v1/generations/gen-1' => Http::response(['id' => 'gen-1', 'state' => 'completed', 'output' => [['type' => 'video', 'url' => 'https://cdn.luma.test/out.mp4']]]),
+            'cdn.luma.test/*' => Http::response(fakeMp4(), 200, ['Content-Type' => 'video/mp4']),
+        ]);
+        $shot = renderingShot($this->project, 'gen-1');
+        $shot->update(['duration' => 10]);
+
+        (new DownloadVideo($shot, 'gen-1'))->handle(app(App\Support\Video\VideoJobs::class));
+
+        expect(Storage::disk(Disk::TENANT->value)->get($shot->fresh()->video()->getPathRelativeToRoot()))->toBe(fakeMp4())
+            ->and($shot->generations()->where('kind', 'video')->firstOrFail())->provider->toBe('luma')->cost->toEqual(0.45);
+    });
+
+    it('cuts the held end off a clip that is longer than the shot', function () {
+        $clip = storage_path('framework/testing/luma-10s.mp4');
+        @mkdir(dirname($clip), 0777, true);
+        Illuminate\Support\Facades\Process::run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:d=10:r=24', '-pix_fmt', 'yuv420p', $clip])->throw();
+        Http::fake([
+            'agents.lumalabs.ai/v1/generations/gen-1' => Http::response(['id' => 'gen-1', 'state' => 'completed', 'output' => [['type' => 'video', 'url' => 'https://cdn.luma.test/out.mp4']]]),
+            'cdn.luma.test/*' => Http::response((string) file_get_contents($clip), 200, ['Content-Type' => 'video/mp4']),
+        ]);
+        $shot = renderingShot($this->project, 'gen-1');
+
+        (new DownloadVideo($shot, 'gen-1'))->handle(app(App\Support\Video\VideoJobs::class));
+
+        $stored = $shot->fresh()->video();
+        File::put($clip, Storage::disk(Disk::TENANT->value)->get($stored->getPathRelativeToRoot()));
+        $seconds = (float) Illuminate\Support\Facades\Process::run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', $clip])->output();
+
+        expect($seconds)->toEqualWithDelta(6.0, 0.1)
+            ->and($stored->getCustomProperty(Shot::VIDEO_SECONDS))->toBe(6);
+        @unlink($clip);
+    })->skip(fn() => ! Illuminate\Support\Facades\Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
 });
 
 describe('page', function () {

@@ -54,11 +54,11 @@
             </li>
           </ul>
           <div class="flex gap-2">
-            <Button type="button" size="sm" :disabled="adding.processing" @click="addElements">
+            <Button type="button" size="sm" :disabled="adding.processing || busy" @click="addElements">
               <LoaderCircle v-if="adding.processing" class="size-3.5 animate-spin" />
               {{ $t('Make them') }}
             </Button>
-            <Button type="button" size="sm" variant="ghost" :disabled="adding.processing" @click="leaveOut">
+            <Button type="button" size="sm" variant="ghost" :disabled="adding.processing || busy" @click="leaveOut">
               {{ $t('Leave out') }}
             </Button>
           </div>
@@ -124,7 +124,7 @@
             </li>
           </ul>
 
-          <!-- The cast and sets made or redrawn here: drawn while the conversation goes on, then shown with their picture. -->
+          <!-- The cast and sets made or redrawn here and not offered below: drawn while the conversation goes on, then shown with their picture. -->
           <ul v-if="drawnHere(message).length" class="grid grid-cols-3 gap-2">
             <li
               v-for="id in drawnHere(message)"
@@ -184,9 +184,9 @@
             </li>
           </ul>
 
-          <!-- Every place of the cast and sets: the director chooses one. -->
+          <!-- The places that fit, or every place of the cast and sets: the director chooses one. -->
           <ul v-if="turnOf(message)?.pickPlace" class="grid grid-cols-3 gap-2">
-            <li v-for="place in places" :key="place.id">
+            <li v-for="place in placesFor(message)" :key="place.id">
               <button
                 type="button"
                 :disabled="busy || !isLast(message)"
@@ -242,16 +242,22 @@
                     :value="id"
                     :disabled="!isLast(message)"
                   />
-                  <img
-                    v-if="elementOf(id)?.imageUrl"
-                    :src="elementOf(id)?.imageUrl ?? undefined"
-                    :alt="elementOf(id)?.name"
-                    class="aspect-square w-full rounded-md object-cover"
-                  />
-                  <span v-else class="flex aspect-square w-full items-center justify-center rounded-md bg-muted">
-                    <LoaderCircle v-if="elementOf(id)?.rendering" class="size-5 animate-spin text-muted-foreground" />
+                  <!-- While it is drawn, the old picture fades behind a loader; the new one replaces it when ready. -->
+                  <span class="relative block aspect-square w-full overflow-hidden rounded-md bg-muted">
+                    <img
+                      v-if="elementOf(id)?.imageUrl"
+                      :src="elementOf(id)?.imageUrl ?? undefined"
+                      :alt="elementOf(id)?.name"
+                      :class="cn('size-full object-cover transition-opacity', elementOf(id)?.rendering && 'opacity-30')"
+                    />
+                    <span v-if="elementOf(id)?.rendering" class="absolute inset-0 flex items-center justify-center">
+                      <LoaderCircle class="size-5 animate-spin text-signal" />
+                    </span>
                   </span>
-                  <span class="truncate text-xs font-medium">{{ elementOf(id)?.name }}</span>
+                  <span class="truncate text-xs font-medium">
+                    {{ elementOf(id)?.name }}
+                    <span v-if="elementOf(id)?.rendering" class="text-muted-foreground"> · {{ $t('drawing') }}</span>
+                  </span>
                 </label>
               </li>
             </ul>
@@ -413,6 +419,8 @@ export type PlanChatTurn = {
   confirm?: boolean
   /** The director chooses the place from every place of the cast and sets. */
   pickPlace?: boolean
+  /** The places to choose from, such as every corridor; every place when empty. */
+  places?: string[]
   /** A new voice-over, used once the director accepts it, or declined. */
   voiceOver?: { text: string; seconds?: number; state?: string }
 }
@@ -678,7 +686,11 @@ const answer = async (turn: number, apply: boolean, following = false) => {
   }
 }
 
-const drawnHere = (message: ChatMessage) => [...(turnOf(message)?.made ?? []), ...(turnOf(message)?.adjusted ?? [])]
+/** Made or redrawn from this message; what it also offers to tick shows only there. */
+const drawnHere = (message: ChatMessage) =>
+  [...(turnOf(message)?.made ?? []), ...(turnOf(message)?.adjusted ?? [])].filter(
+    (id) => !(turnOf(message)?.cast ?? []).includes(id),
+  )
 
 const send = async (text: string, extra: { made?: string[] } = {}) => {
   const message = text.trim()
@@ -734,6 +746,13 @@ const isLast = (message: ChatMessage) => message.id.startsWith('turn-') && turnI
 
 /** Every place of the cast and sets, to choose the shot's place from. */
 const places = computed(() => props.elements.filter((element) => element.type === 'place'))
+
+/** The places a message offers: the ones it names, or every place. */
+const placesFor = (message: ChatMessage) => {
+  const named = turnOf(message)?.places ?? []
+
+  return named.length > 0 ? places.value.filter((place) => named.includes(place.id)) : places.value
+}
 
 const placePick = (name: string) => $t('Use the place “:name”.', { name })
 

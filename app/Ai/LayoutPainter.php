@@ -11,6 +11,8 @@ use App\Ai\Briefs\KeyframeLayoutBrief;
 use App\Enums\ElementType;
 use App\Models\Element;
 use App\Models\Keyframe;
+use App\Models\Shot;
+use App\Support\Images\BackgroundDrift;
 use App\Support\Images\DepthSizing;
 use App\Support\Images\PlaceDepth;
 use App\Support\Images\ReplicateClient;
@@ -27,9 +29,11 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
 
 /**
- * Draws a keyframe on the image before it: the stager blocks where each of
- * the cast stands, the depth of the place sets how big they are there, and
- * the layout model keeps the image and draws only the boxes that change.
+ * Draws a later keyframe on the plate of the shot: the stager blocks where
+ * each of the cast stands on the keyframe before, the depth of the place sets
+ * how big they are there, and the layout model keeps the plate and draws the
+ * boxes of the cast and of what changed. Without a plate it draws on the
+ * keyframe before.
  *
  * @phpstan-import-type Box from KeyframeLayout
  */
@@ -41,10 +45,11 @@ class LayoutPainter
     public function __construct(
         private readonly ReplicateClient $replicate,
         private readonly PlaceDepth $depth,
+        private readonly BackgroundDrift $drift,
     ) {}
 
     /**
-     * Whether keyframe 1 is read and put right this way: a scene or close-up, with the layout model available.
+     * Whether keyframe 1 is read this way: a scene or close-up, with the layout model available.
      */
     public function reads(Keyframe $keyframe): bool
     {
@@ -83,8 +88,14 @@ class LayoutPainter
             }
         }
 
-        $images = [$this->bytes($base)];
-        $labels = [$keyframe->position > 1 ? 'The keyframe before, the image that is kept' : 'The chosen place, the image that is kept'];
+        // A later keyframe is drawn on the plate, so the place is the same in every keyframe; without one, on the keyframe before.
+        $plate = $keyframe->position > 1 ? $this->plate($keyframe) : null;
+        $images = $plate === null ? [$this->bytes($base)] : [$plate, $this->bytes($base)];
+        $labels = match (true) {
+            $plate !== null => ['The place without people, from this camera, the image that is kept', 'The keyframe before, where the people and changed things come from'],
+            $keyframe->position > 1 => ['The keyframe before, the image that is kept'],
+            default => ['The chosen place, the image that is kept'],
+        };
         $pictures = [];
 
         foreach ($layout->cast as $member) {
@@ -107,9 +118,11 @@ class LayoutPainter
             $labels[] = "The picture of {$prop->name}";
         }
 
-        $prompt = KeyframeLayoutBrief::for($keyframe, $layout, $before, $pictures, $props->all(), $extra);
+        $prompt = $plate === null
+            ? KeyframeLayoutBrief::for($keyframe, $layout, $before, $pictures, $props->all(), $extra)
+            : KeyframeLayoutBrief::onPlate($keyframe, $layout, $before, $this->onPlate($siblings), $this->carried($siblings, $keyframe, $layout), $pictures, $props->all(), $extra);
 
-        return [...$this->generate($prompt, $images), 'prompt' => $prompt, 'labels' => $labels, 'layout' => $layout];
+        return [...$this->generate($prompt, $images, $keyframe), 'prompt' => $prompt, 'labels' => $labels, 'layout' => $layout];
     }
 
     /**
@@ -137,34 +150,6 @@ class LayoutPainter
     }
 
     /**
-     * Puts keyframe 1 right where the reading found it wrong: who stands in
-     * the wrong spot is moved, who does not look like their picture is drawn
-     * from it where they stand.
-     *
-     * @return array{content: string, mime: string, model: string, prompt: string, labels: list<string>}
-     */
-    public function fix(Keyframe $keyframe, Media $render, KeyframeReading $reading): array
-    {
-        $images = [$this->bytes($render)];
-        $labels = ['Keyframe 1 as drawn, the image that is put right'];
-        $pictures = [];
-
-        foreach ($reading->cast as $read) {
-            $element = $keyframe->elements->first(fn(Element $element) => mb_strtolower($element->name) === mb_strtolower($read['name']));
-
-            if (! $read['looks_right'] && $element?->reference() !== null && count($images) < self::MAX_IMAGES) {
-                $pictures[$read['name']] = count($images);
-                $images[] = $this->bytes($element->reference());
-                $labels[] = "The picture of {$element->name}";
-            }
-        }
-
-        $prompt = KeyframeLayoutBrief::fix($keyframe, $reading, $pictures);
-
-        return [...$this->generate($prompt, $images), 'prompt' => $prompt, 'labels' => $labels];
-    }
-
-    /**
      * Moves one of the cast in a keyframe to the box the director dragged
      * them to, sized by the depth of the place where they now stand, keeping
      * everything else of the image. A box partly past the edge of the frame
@@ -187,11 +172,22 @@ class LayoutPainter
         $visible = KeyframeLayout::box($box);
         $images = [$this->bytes($render)];
         $labels = ['This keyframe, the image that is kept'];
+        // Where they stood, the plate shows what is there; it comes after their picture.
+        $withPlate = function () use ($keyframe, &$images, &$labels): ?int {
+            if (($bytes = $this->plate($keyframe)) === null) {
+                return null;
+            }
+
+            $images[] = $bytes;
+            $labels[] = 'The place without people, from this camera';
+
+            return count($images) - 1;
+        };
 
         if ($visible === null) {
-            $prompt = KeyframeLayoutBrief::moved($keyframe, $layout, $member['name'], null);
+            $prompt = KeyframeLayoutBrief::moved($keyframe, $layout, $member['name'], null, plate: $withPlate());
 
-            return [...$this->generate($prompt, $images), 'prompt' => $prompt, 'labels' => $labels, 'layout' => $layout->without($member['name'])];
+            return [...$this->generate($prompt, $images, $keyframe), 'prompt' => $prompt, 'labels' => $labels, 'layout' => $layout->without($member['name'])];
         }
 
         $element = $keyframe->elements->first(fn(Element $element) => mb_strtolower($element->name) === mb_strtolower($member['name']));
@@ -203,49 +199,68 @@ class LayoutPainter
             $labels[] = "The picture of {$element->name}";
         }
 
-        $prompt = KeyframeLayoutBrief::moved($keyframe, $layout, $member['name'], $visible, $picture, cutOff: $visible !== $box);
+        $prompt = KeyframeLayoutBrief::moved($keyframe, $layout, $member['name'], $visible, $picture, cutOff: $visible !== $box, plate: $withPlate());
 
-        return [...$this->generate($prompt, $images), 'prompt' => $prompt, 'labels' => $labels, 'layout' => $layout->withBox($member['name'], $visible)];
+        return [...$this->generate($prompt, $images, $keyframe), 'prompt' => $prompt, 'labels' => $labels, 'layout' => $layout->withBox($member['name'], $visible)];
     }
 
     /**
-     * Changes one of the cast where they stand, as the director asked in the
-     * chat, keeping everything else of the image.
+     * Changes some of the cast where they stand, as the director asked in the
+     * chat or a check found, keeping everything else of the image. Whoever has
+     * a picture is drawn again from it.
      *
+     * @param  array<string, string>  $changes  per name of the cast, what changes about them
      * @return array{content: string, mime: string, model: string, prompt: string, labels: list<string>}
      */
-    public function change(Keyframe $keyframe, Media $render, string $name, string $change): array
+    public function change(Keyframe $keyframe, Media $render, array $changes): array
     {
         $layout = KeyframeLayout::fromArray($keyframe->layout);
+        $images = [$this->bytes($render)];
+        $labels = ['This keyframe, the image that is kept'];
+        $pictures = [];
 
-        if ($layout->member($name) === null) {
-            throw new RuntimeException("{$name} is not in this keyframe.");
+        foreach (array_keys($changes) as $name) {
+            if ($layout->member($name) === null) {
+                throw new RuntimeException("{$name} is not in this keyframe.");
+            }
+
+            $element = $keyframe->elements->first(fn(Element $element) => mb_strtolower($element->name) === mb_strtolower($name));
+
+            if ($element?->reference() !== null && count($images) < self::MAX_IMAGES) {
+                $pictures[$name] = count($images);
+                $images[] = $this->bytes($element->reference());
+                $labels[] = "The picture of {$element->name}";
+            }
         }
 
-        $prompt = KeyframeLayoutBrief::changed($keyframe, $layout, $name, $change);
+        $prompt = KeyframeLayoutBrief::changed($keyframe, $layout, $changes, $pictures);
 
-        return [...$this->generate($prompt, [$this->bytes($render)]), 'prompt' => $prompt, 'labels' => ['This keyframe, the image that is kept']];
+        return [...$this->generate($prompt, $images, $keyframe), 'prompt' => $prompt, 'labels' => $labels];
     }
 
     /**
-     * Fixes what a check found in a keyframe: a vision model finds the box
-     * each problem is in and who it is about, and the layout model changes
-     * only those boxes; when someone looks wrong, from their picture.
-     *
      * @param  list<string>  $problems
-     * @return array{content: string, mime: string, model: string, prompt: string, labels: list<string>}
+     * @return list<array{problem: string, box: array{0: int, 1: int, 2: int, 3: int}, member: string|null, looks: bool, shows: string, camera: bool}>
      */
-    public function repair(Keyframe $keyframe, Media $render, array $problems): array
+    public function locate(Keyframe $keyframe, Media $render, array $problems): array
     {
         $cast = $keyframe->elements->filter(fn(Element $element) => $element->type !== ElementType::PLACE)->values();
         $locator = new KeyframeFixLocator($keyframe, $problems, $cast->map(fn(Element $element) => $element->name)->all());
         $answer = $this->ask($keyframe, $locator, $locator->promptFor(), [ImageFile::fromStorage($render->getPathRelativeToRoot(), $render->disk)], (string) Config::get('pipeline.models.keyframe_stager'));
-        $fixes = $locator->fixesFrom($answer);
 
-        if ($fixes === []) {
-            throw new RuntimeException('Where to fix the keyframe could not be found.');
-        }
+        return $locator->fixesFrom($answer);
+    }
 
+    /**
+     * Fixes what a check found in a keyframe, each problem in the box the
+     * locator found for it; when someone looks wrong, from their picture.
+     *
+     * @param  list<array{problem: string, box: array{0: int, 1: int, 2: int, 3: int}, member: string|null, looks: bool, shows: string, camera: bool}>  $fixes
+     * @return array{content: string, mime: string, model: string, prompt: string, labels: list<string>}
+     */
+    public function repair(Keyframe $keyframe, Media $render, array $fixes): array
+    {
+        $cast = $keyframe->elements->filter(fn(Element $element) => $element->type !== ElementType::PLACE)->values();
         $images = [$this->bytes($render)];
         $labels = ['This keyframe, the image that is fixed'];
         $pictures = [];
@@ -262,7 +277,7 @@ class LayoutPainter
 
         $prompt = KeyframeLayoutBrief::repaired($keyframe, KeyframeLayout::fromArray($keyframe->layout), $fixes, $pictures);
 
-        return [...$this->generate($prompt, $images), 'prompt' => $prompt, 'labels' => $labels];
+        return [...$this->generate($prompt, $images, $keyframe), 'prompt' => $prompt, 'labels' => $labels];
     }
 
     /**
@@ -271,16 +286,22 @@ class LayoutPainter
      * @param  list<string>  $images
      * @return array{content: string, mime: string, model: string}
      */
-    private function generate(string $prompt, array $images): array
+    private function generate(string $prompt, array $images, Keyframe $keyframe): array
     {
         $model = (string) Config::get('pipeline.models.keyframe_layout');
-        // The layout model now and then fails on its side; a second try usually draws it.
-        $output = retry(2, fn() => $this->replicate->runModel($model, [
+        $input = [
             'prompt' => $prompt,
             'images' => array_map(fn(string $image) => ReplicateClient::dataUrl($image), $images),
-            'aspect_ratio' => 'auto',
+            'aspect_ratio' => Config::get('pipeline.keyframes.layout.fixed_ratio') ? $keyframe->shot->aspectRatio()->value : 'auto',
             'output_format' => 'png',
-        ]), 2000, fn(Throwable $exception) => $exception instanceof RuntimeException);
+        ];
+
+        if (! Config::get('pipeline.keyframes.layout.grounding', true)) {
+            $input['grounding'] = false;
+        }
+
+        // The layout model now and then fails on its side; a second try usually draws it.
+        $output = retry(2, fn() => $this->replicate->runModel($model, $input), 2000, fn(Throwable $exception) => $exception instanceof RuntimeException);
         $url = is_array($output) ? ($output[0] ?? null) : $output;
 
         if (! is_string($url)) {
@@ -305,6 +326,115 @@ class LayoutPainter
         $answer = $this->ask($keyframe, $stager, $stager->promptFor(), [ImageFile::fromStorage($base->getPathRelativeToRoot(), $base->disk)], (string) Config::get('pipeline.models.keyframe_stager'));
 
         return $stager->layoutFrom($answer);
+    }
+
+    /**
+     * The objects of the cast that the plate shows, where they stand in it:
+     * everyone of keyframe 1 who is not a person.
+     *
+     * @param  Collection<int, Keyframe>  $siblings
+     * @return array<string, Box>
+     */
+    private function onPlate(Collection $siblings): array
+    {
+        $first = $siblings->firstWhere('position', 1);
+        $objects = $first?->elements->filter(fn(Element $element) => $element->type !== ElementType::PERSON)->map(fn(Element $element) => mb_strtolower($element->name))->all() ?? [];
+        $onPlate = [];
+
+        foreach (KeyframeLayout::fromArray($first?->layout)->cast as $member) {
+            if (in_array(mb_strtolower($member['name']), $objects, true)) {
+                $onPlate[$member['name']] = $member['box'];
+            }
+        }
+
+        return $onPlate;
+    }
+
+    /**
+     * What earlier keyframes of the shot changed in the place and this one
+     * does not change again, as it is now: the plate still shows it as it was.
+     *
+     * @param  Collection<int, Keyframe>  $siblings
+     * @return list<array{thing: string, state: string, box: Box}>
+     */
+    private function carried(Collection $siblings, Keyframe $keyframe, KeyframeLayout $layout): array
+    {
+        $states = [];
+
+        foreach ($siblings->sortBy('position') as $sibling) {
+            if ($sibling->position > 1 && $sibling->position < $keyframe->position) {
+                foreach (KeyframeLayout::fromArray($sibling->layout)->changes as $change) {
+                    $states[mb_strtolower($change['thing'])] = $change;
+                }
+            }
+        }
+
+        foreach ($layout->changes as $change) {
+            unset($states[mb_strtolower($change['thing'])]);
+        }
+
+        return array_values($states);
+    }
+
+    /**
+     * The place of the shot without people, from the camera of keyframe 1:
+     * made once from keyframe 1 by taking every person out, and kept on the
+     * shot until keyframe 1 changes. A keyframe 1 without people is the plate
+     * itself. A plate whose background moved from keyframe 1 is not kept: it
+     * is tried once more, and without a good one there is none. Null when
+     * keyframe 1 has no image or layout yet.
+     */
+    public function plate(Keyframe $keyframe): ?string
+    {
+        $shot = $keyframe->shot;
+        $first = $keyframe->position === 1 ? $keyframe : $shot->keyframes()->with(['media', 'elements.media'])->where('position', 1)->first();
+        $render = $first?->render();
+
+        if ($first === null || $render === null || $first->layout === null) {
+            return null;
+        }
+
+        $stored = $shot->getFirstMedia(Shot::PLATE);
+
+        if ($stored !== null && $stored->getCustomProperty(Shot::PLATE_FROM) === $render->id) {
+            return $this->bytes($stored);
+        }
+
+        $layout = KeyframeLayout::fromArray($first->layout);
+        $people = $first->elements
+            ->filter(fn(Element $element) => $element->type === ElementType::PERSON && $layout->member($element->name) !== null)
+            ->map(fn(Element $element) => $element->name)
+            ->values()
+            ->all();
+
+        if ($people === []) {
+            $this->keepPlate($shot, $render, $content = $this->bytes($render));
+
+            return $content;
+        }
+
+        $prompt = KeyframeLayoutBrief::plate($first, $layout, $people);
+
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $started = hrtime(true);
+            $content = $this->generate($prompt, [$this->bytes($render)], $first)['content'];
+            $first->generations()->create(['director_id' => $shot->project->director_id, 'kind' => 'image', 'provider' => 'replicate', 'model' => (string) Config::get('pipeline.models.keyframe_layout'), 'prompt' => $prompt, 'duration_ms' => intdiv(hrtime(true) - $started, 1_000_000)]);
+
+            $plate = $this->keepPlate($shot, $render, $content);
+
+            if (! $this->drift->measure($render, $plate)['moved']) {
+                return $content;
+            }
+
+            $plate->delete();
+        }
+
+        return null;
+    }
+
+    private function keepPlate(Shot $shot, Media $render, string $content): Media
+    {
+        return $shot->addMediaFromString($content)->usingFileName('plate.png')->withCustomProperties([Shot::PLATE_FROM => $render->id])->toMediaCollection(Shot::PLATE);
     }
 
     /**

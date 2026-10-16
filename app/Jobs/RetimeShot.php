@@ -70,13 +70,23 @@ class RetimeShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
             'usage' => $response->usage->toArray(),
         ]);
 
-        $seconds = Shot::clampSeconds((int) ($response->toArray()['seconds'] ?? $current));
+        $answer = $response->toArray();
+        $seconds = Shot::clampSeconds((int) ($answer['seconds'] ?? $current));
+        $timed = array_values(array_filter((array) ($answer['keyframes'] ?? []), 'is_numeric'));
+
+        $shot->updateStoredJson('storyline', fn(?array $storyline) => [
+            ...($storyline ?? []),
+            'framing' => [...(array) ($storyline['framing'] ?? []), 'seconds' => $seconds],
+            // Each keyframe keeps its own time, when the timer gave one for every keyframe.
+            'keyframes' => count($timed) === count((array) ($storyline['keyframes'] ?? []))
+                ? array_map(fn(array $keyframe, mixed $time) => [...$keyframe, 'seconds' => max(0.0, (float) $time)], array_values((array) $storyline['keyframes']), $timed)
+                : (array) ($storyline['keyframes'] ?? []),
+        ]);
 
         if ($seconds === $current) {
             return;
         }
 
-        $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'framing' => [...(array) ($storyline['framing'] ?? []), 'seconds' => $seconds]]);
         $shot->forceFill(['voice_over' => null])->save();
 
         GenerateVoiceOver::automatically($shot);

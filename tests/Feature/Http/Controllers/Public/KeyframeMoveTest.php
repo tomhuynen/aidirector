@@ -19,6 +19,7 @@ use App\Support\Images\DepthGrid;
 use App\Support\Images\PlaceDepth;
 use App\Support\Shots\KeyframeChain;
 use App\Support\Shots\KeyframeLayout;
+use App\Support\Shots\KeyframeStaging;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
@@ -65,7 +66,7 @@ it('offers the layout and the move for a drawn keyframe of a scene', function ()
 });
 
 it('reads where the cast stands when a keyframe has no layout yet', function () {
-    KeyframeReader::fake([['cast' => [['name' => 'Security guard', 'box' => ['top' => 500, 'left' => 100, 'bottom' => 700, 'right' => 200], 'facing' => 'facing the camera', 'pose' => 'arms down', 'placed_right' => true, 'target' => ['top' => 500, 'left' => 100, 'bottom' => 700, 'right' => 200], 'looks_right' => true, 'problem' => '']]]]);
+    KeyframeReader::fake([['cast' => [['name' => 'Security guard', 'box' => ['top' => 500, 'left' => 100, 'bottom' => 700, 'right' => 200], 'facing' => 'facing the camera', 'pose' => 'arms down', 'placed_right' => true, 'looks_right' => true, 'problem' => '']]]]);
     $this->second->elements()->attach($this->guard);
     $this->guard->addMediaFromString(movePng())->usingFileName('guard.png')->toMediaCollection(Element::REFERENCE);
 
@@ -122,8 +123,13 @@ it('draws the move on the keyframe itself, sized by the depth, and the keyframes
         ->and(KeyframeLayout::fromArray($first->layout)->member('Security guard')['box'])->toBe([588, 234, 900, 456])
         ->and(KeyframeLayout::fromArray($first->layout)->member('Visitor car')['box'])->toBe([650, 330, 920, 800])
         ->and($this->second->fresh()->status)->toBe(KeyframeStatus::DRAWING);
+    // Keyframe 1 has a person, so the plate is made first: the guard taken out.
     Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
-        && count($request['input']['images']) === 1
+        && str_contains($request['input']['prompt'], 'Take every person out of the image')
+        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":null'));
+    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
+        && count($request['input']['images']) === 2
+        && str_contains($request['input']['prompt'], '"id":"security_guard_behind","from":"ref_image_1","src_bbox":[550,122,730,267],"tgt_bbox":[550,122,730,267]')
         && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[579,201,937,489]')
         && ! str_contains($request['input']['prompt'], 'soft shadow')
         && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.'));
@@ -145,7 +151,8 @@ describe('past the edge of the frame', function () {
 
         expect(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Security guard'))->toBeNull()
             ->and(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Visitor car'))->not->toBeNull();
-        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":null')
+        // Where he stood is copied from the plate, keyframe 1 with him taken out.
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"id":"security_guard_behind","from":"ref_image_1","src_bbox":[550,122,730,267],"tgt_bbox":[550,122,730,267]')
             && str_contains($request['input']['prompt'], '<security_guard> leaves the frame'));
     });
 
@@ -163,7 +170,7 @@ describe('past the edge of the frame', function () {
 
         (new MoveCastMember($this->first->fresh(), 1, 'Security guard', [555, 139, 711, 250]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
 
-        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && count($request['input']['images']) === 2
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && count($request['input']['images']) === 3
             && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_1","src_bbox":[0,0,1000,1000],"tgt_bbox":[555,139,711,250]')
             && str_contains($request['input']['prompt'], 'looks exactly like <ref_image_1>, the whole of them'));
     });
@@ -187,6 +194,35 @@ it('changes one of the cast where they stand, keeping everyone else', function (
     Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions')
         && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[550,122,730,267],"desc":"Security guard, He raises his left hand","kind":"move"')
         && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.'));
+});
+
+describe('a change with staging', function () {
+    beforeEach(function () {
+        Queue::fake([DrawKeyframe::class]);
+        Http::fake([
+            'api.replicate.com/v1/models/black-forest-labs/flux-3-image/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/out.png']),
+            'replicate.delivery/*' => Http::response(movePng()),
+        ]);
+        $this->guard->addMediaFromString(movePng())->usingFileName('guard.png')->toMediaCollection(Element::REFERENCE);
+        $this->first->restage(new KeyframeStaging('The guard watches the car', '', [
+            KeyframeStaging::member(['name' => 'Security guard', 'stands' => 'left', 'faces' => 'away-right', 'looks_at' => 'the Visitor car', 'holds' => 'the permit', 'hand' => 'left']),
+        ]))->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 1])->save();
+        $this->change = fn() => (new ChangeCastMember($this->first->fresh(), 1, 'Security guard', 'He turns toward the car.'))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
+        $this->prompts = fn() => collect(Http::recorded())->map(fn(array $pair) => $pair[0])->filter(fn(Request $request) => str_ends_with($request->url(), 'predictions'))->map(fn(Request $request) => $request['input'])->values();
+    });
+
+    it('draws the changed one again from their picture in their own box, so their old pose does not hold them back', function () {
+        ($this->change)();
+
+        $sent = ($this->prompts)();
+        expect($sent)->toHaveCount(1)
+            ->and($sent[0]['images'])->toHaveCount(2)
+            ->and($sent[0]['prompt'])->toContain('"id":"security_guard","from":"ref_image_1","src_bbox":[0,0,1000,1000],"tgt_bbox":[555,139,711,250]')
+            ->toContain('<security_guard> stays where they stand and is drawn again in their box, the whole of them, looking exactly like <ref_image_1>, in this pose: He turns toward the car.')
+            ->toContain('<visitor_car> stays exactly as it is.')
+            ->and($this->first->fresh()->render()->getCustomProperty(Keyframe::SENT)['images'])->toBe(['This keyframe, the image that is kept', 'The picture of Security guard'])
+            ->and($this->first->fresh()->status)->toBe(KeyframeStatus::READY);
+    });
 });
 
 it('fixes what the check found only where it is, from the picture of whoever it is about', function () {
@@ -218,6 +254,39 @@ it('fixes what the check found only where it is, from the picture of whoever it 
         && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.')
         && ! str_contains($request['input']['prompt'], '"id":"security_guard","from"')
         && ! str_contains($request['input']['prompt'], 'Nothing to find'));
+});
+
+it('leaves a changed camera as a note to draw again for, and fixes only what a box can fix', function () {
+    Queue::fake([DrawKeyframe::class]);
+    Http::fake([
+        'api.replicate.com/v1/models/black-forest-labs/flux-3-image/predictions' => Http::response(['status' => 'succeeded', 'output' => 'https://replicate.delivery/out.png']),
+        'replicate.delivery/*' => Http::response(movePng()),
+    ]);
+    $camera = 'The framing changes from keyframe 1: the ship and the quay shift in size and position.';
+    $framing = ['problem' => $camera, 'box' => ['top' => 0, 'left' => 0, 'bottom' => 1000, 'right' => 1000], 'member' => '', 'looks' => false, 'shows' => 'The scene framed as in keyframe 1.', 'camera' => true];
+    App\Ai\Agents\KeyframeFixLocator::fake([
+        ['fixes' => [
+            ['problem' => 'He does not turn his head.', 'box' => ['top' => 555, 'left' => 139, 'bottom' => 620, 'right' => 250], 'member' => 'Security guard', 'looks' => false, 'shows' => 'His head turned to the left.', 'camera' => false],
+            $framing,
+        ]],
+        ['fixes' => [$framing]],
+    ]);
+    $this->first->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 1])->save();
+
+    (new App\Jobs\FixKeyframe($this->first->fresh(), 1, ['He does not turn his head.', $camera]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
+
+    $render = $this->first->fresh()->render();
+    expect($this->first->fresh()->renders())->toHaveCount(2)
+        ->and($render->getCustomProperty(Keyframe::TWEAK_REQUEST))->toBe('He does not turn his head.')
+        ->and($render->getCustomProperty(Keyframe::CHECK_ISSUES))->toBe([$camera]);
+    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && ! str_contains($request['input']['prompt'], 'framing changes'));
+
+    $this->first->forceFill(['status' => KeyframeStatus::DRAWING, 'draw_version' => 2])->save();
+    (new App\Jobs\FixKeyframe($this->first->fresh(), 2, [$camera]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
+
+    expect($this->first->fresh()->renders())->toHaveCount(2)
+        ->and($this->first->fresh()->status)->toBe(KeyframeStatus::READY);
+    Http::assertSentCount(2);
 });
 
 it('fixes a pose without the picture of whoever it is about, which would undo it', function () {

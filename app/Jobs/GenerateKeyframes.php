@@ -10,7 +10,6 @@ use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Shot;
-use App\Notifications\Public\GenerationFinished;
 use App\Support\Shots\KeyframeChain;
 use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -27,6 +26,8 @@ use Throwable;
  * to the cast and sets the plan names; with
  * `$more` it adds another batch of options to the existing keyframe 1. The
  * other keyframes render after the choice, in {@see GenerateRemainingKeyframes}.
+ * A shot that opens with a copy keeps its keyframe 1 and goes on from it
+ * straight away.
  */
 #[DeleteWhenMissingModels]
 class GenerateKeyframes implements ShouldQueue
@@ -60,6 +61,13 @@ class GenerateKeyframes implements ShouldQueue
         // A montage or a presenter has no shared place: every keyframe is drawn on its own, straight away.
         if ($shot->drawsStandalone()) {
             GenerateRemainingKeyframes::startStandalone($shot);
+
+            return;
+        }
+
+        if ($shot->opensWithCopy()) {
+            $shot->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_READY, 'storyline_error' => null])->save();
+            GenerateRemainingKeyframes::dispatch($shot);
 
             return;
         }
@@ -105,13 +113,6 @@ class GenerateKeyframes implements ShouldQueue
             },
             'status' => $hasOptions ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
-
-        $url = route('public.shots.view', [$shot->project, $shot]);
-
-        ($hasOptions
-            ? GenerationFinished::ready(self::optionCount() === 1 ? __('The first keyframe of “:shot” is ready to confirm', ['shot' => $shot->title]) : __('Options for the first keyframe of “:shot” are ready', ['shot' => $shot->title]), $url, $first->renders()->last(), Keyframe::THUMBNAIL)
-            : GenerationFinished::failed(__('The first keyframe of “:shot” could not be drawn', ['shot' => $shot->title]), $url))
-            ->sendTo($shot->project);
     }
 
     public function failed(?Throwable $exception): void
@@ -133,9 +134,6 @@ class GenerateKeyframes implements ShouldQueue
                 : __('The keyframe images could not be generated. Please try again.'),
             'status' => $hasOptions ? ShotStatus::FIRST_KEYFRAME_READY : ShotStatus::STORYLINE_READY,
         ])->save();
-
-        GenerationFinished::failed(__('The first keyframe of “:shot” could not be drawn', ['shot' => $this->shot->title]), route('public.shots.view', [$this->shot->project, $this->shot]))
-            ->sendTo($this->shot->project);
     }
 
     public static function optionCount(): int
@@ -150,10 +148,15 @@ class GenerateKeyframes implements ShouldQueue
     private function replaceKeyframes(Shot $shot): void
     {
         $shot->forgetKeyframes();
+        $kept = $shot->keyframes()->pluck('position')->all();
 
         $elements = $shot->project->elements()->get()->keyBy(fn(Element $element) => mb_strtolower(trim($element->name)));
 
         foreach ($shot->storylineKeyframes() as $index => $plan) {
+            if (in_array($index + 1, $kept, true)) {
+                continue;
+            }
+
             $keyframe = $shot->keyframes()->create([
                 'position' => $index + 1,
                 'title' => $plan['title'],

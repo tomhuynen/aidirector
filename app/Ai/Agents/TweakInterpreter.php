@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
-use App\Ai\Briefs\BodyRules;
 use App\Ai\Briefs\StagingRules;
 use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Keyframe;
@@ -47,7 +46,6 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
 
         $cast = $this->keyframe->elements->pluck('name')->join(', ') ?: 'none';
         $staging = StagingRules::rules();
-        $turning = BodyRules::TURNING;
 
         return <<<INSTRUCTIONS
             You prepare edit instructions for an image model that adjusts keyframes of an animated shot. Image models follow precise, spatial instructions well and vague ones badly, so your job is to make the director's request precise.
@@ -62,7 +60,7 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Say where things are and where they move from the camera's point of view: left or right in the frame, nearer to or further from the camera, into or out of the place. Never write "forward", "backward", "in front of him" or "behind her": they depend on which way a person faces and get turned around.
             - Use the character's own point of view only for their body: which shoulder, which hand, which way the head or body turns, and how far.
             - Say what the viewer should see afterwards, for example the back of the head, an empty hand, a closed door.
-            - {$turning} Say how far the shoulders, hips and feet turn when the change makes someone look or aim elsewhere.
+            - When the change makes someone look or aim elsewhere, say which way the head and which way the body face afterwards.
             - Name what must stay exactly the same: where they stand, the other hand unless the turn moves it, the props, the camera, the framing, the background, the lighting and the style.
             - Never ask for text: no letters, words, numbers, labels or ID details on anything, also not to make an object recognisable. An object is recognisable by its shape, colour, size and where it is; say that instead. Lettering that is already in the picture stays as it is.
             - Change only what the director asked for. Do not add new ideas, such as where in the frame someone stands or a pose, unless the request needs it.

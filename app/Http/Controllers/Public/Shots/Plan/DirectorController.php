@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Public\Shots\Plan;
 
 use App\Ai\Agents\PlanDirector;
 use App\Ai\KeyframePainter;
+use App\Enums\ElementType;
 use App\Enums\KeyframeStatus;
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
@@ -76,6 +77,11 @@ class DirectorController
         ]);
 
         $data = $response->toArray();
+
+        // A new shot is added next to this one and never replaces this shot's plan.
+        if (trim((string) ($data['add_shot']['idea'] ?? '')) !== '') {
+            $data['proposal'] = null;
+        }
         $stage = in_array($data['stage'] ?? null, PlanDirector::STAGES, true) ? $data['stage'] : null;
         $sqids = fn(array $names) => $elements->filter(fn(Element $element) => in_array(mb_strtolower($element->name), array_map(fn(mixed $name) => mb_strtolower((string) $name), $names), true))->pluck('sqid')->values()->all();
 
@@ -107,19 +113,23 @@ class DirectorController
         $proposed = $plan === null ? $this->propose($keyframes, $request, $data['changes'] ?? null) : null;
         $changes = $plan === null && $proposed === null && $keyframes->isNotEmpty() ? $this->change($shot, $keyframes, $request, $data['changes'] ?? null) : ['made' => [], 'waiting' => null];
 
+        $addedShot = $this->addShot($project, $shot, $data['add_shot'] ?? null);
+        $reply = $addedShot === null ? $reply : trim("{$reply} {$addedShot}");
         $voiceOver = $this->voiceOver($shot, $data['voice_over'] ?? null);
         $storylines = $this->storylines($data['storylines'] ?? null);
         $pickPlace = (bool) ($data['pick_place'] ?? false);
+        // The places to choose from, such as every corridor; without names, every place.
+        $places = $pickPlace ? array_values(array_intersect($sqids((array) ($data['places'] ?? [])), $elements->filter(fn(Element $element) => $element->type === ElementType::PLACE)->pluck('sqid')->all())) : [];
         // A message with buttons of its own is answered with those, never with a plain yes.
         $confirm = (bool) ($data['confirm'] ?? false) && $voiceOver === null && $proposed === null && $storylines === [] && ! $pickPlace && $cast === [];
 
-        $turns = [
-            ...$conversation,
+        // Added to the conversation as stored now: what changed in it while the director waited, such as cast made meanwhile, stays.
+        $shot->updateStoredJson('plan_chat', fn(?array $stored) => [
+            ...array_values((array) $stored),
             array_filter(['role' => 'director', 'text' => $message, 'made' => $made, 'about' => $selected]),
-            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'proposed' => $proposed, 'storylines' => $storylines, 'confirm' => $confirm, 'pickPlace' => $pickPlace, 'voiceOver' => $voiceOver]),
-        ];
-
-        $shot->forceFill(['plan_chat' => $turns])->save();
+            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'proposed' => $proposed, 'storylines' => $storylines, 'confirm' => $confirm, 'pickPlace' => $pickPlace, 'places' => $places, 'voiceOver' => $voiceOver]),
+        ]);
+        $turns = $shot->plan_chat;
 
         $added = $this->splitInto($project, $shot, $data['shots'] ?? null);
         $removed = $this->removeShots($project, $shot, $data['remove_shots'] ?? null);
@@ -129,7 +139,7 @@ class DirectorController
             $shot->drawKeyframes();
         }
 
-        return response()->json(['messages' => $turns, 'reload' => $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $removed !== [] || $offered]);
+        return response()->json(['messages' => $turns, 'reload' => $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $added > 0 || $addedShot !== null || $removed !== [] || $offered]);
     }
 
     /**
@@ -248,12 +258,27 @@ class DirectorController
      */
     private function propose(Collection $keyframes, PlanDirectorRequest $request, mixed $changes): ?array
     {
-        $keyframe = $keyframes->firstWhere('sqid', (string) $request->validated('keyframe'));
-        $name = $keyframe === null ? null : $this->member($keyframe, $request);
-        $change = collect(is_array($changes) ? $changes : [])
-            ->first(fn(mixed $change) => is_array($change) && in_array((int) ($change['keyframe'] ?? 0), [0, $keyframe?->position], true) && trim((string) ($change['change'] ?? '')) !== '');
+        $selected = $keyframes->firstWhere('sqid', (string) $request->validated('keyframe'));
+        $changes = collect(is_array($changes) ? $changes : [])->filter(fn(mixed $change) => is_array($change) && trim((string) ($change['change'] ?? '')) !== '');
+        $selectedMember = $selected === null ? null : $this->member($selected, $request);
 
-        if ($name === null || $change === null) {
+        // Someone selected: the change to their keyframe is about them.
+        if ($selectedMember !== null) {
+            [$keyframe, $name] = [$selected, $selectedMember];
+            $change = $changes->first(fn(array $change) => in_array((int) ($change['keyframe'] ?? 0), [0, $selected->position], true));
+        } else {
+            // Otherwise a change that restages one of the cast is proposed the same way, so their fields follow it.
+            $keyframe = $name = null;
+            $change = $changes->first(function (array $change) use ($keyframes, $selected, &$keyframe, &$name) {
+                $target = (int) ($change['keyframe'] ?? 0) > 0 ? $keyframes->firstWhere('position', (int) $change['keyframe']) : $selected;
+                $found = $target?->render() === null ? null : (KeyframeLayout::fromArray($target->layout)->member(trim((string) ($change['member']['name'] ?? '')))['name'] ?? null);
+                [$keyframe, $name] = $found === null ? [null, null] : [$target, $found];
+
+                return $found !== null;
+            });
+        }
+
+        if ($keyframe === null || $name === null || $change === null) {
             return null;
         }
 
@@ -445,20 +470,11 @@ class DirectorController
                     continue;
                 }
 
-                $after = end($sequence)->position;
-                $project->shots()->where('position', '>', $after)->increment('position');
-
-                $sequence[] = $project->allShots()->create([
-                    'position' => $after + 1,
-                    'group_key' => $group,
+                $last = end($sequence);
+                $sequence[] = $this->insertAt($project, $last->position + 1, $group, $last, [
                     'title' => $part['title'],
                     'idea' => $part['idea'],
                     'kind' => $part['kind'],
-                    'purpose_override' => $shot->purpose_override,
-                    'aspect_ratio_override' => $shot->aspect_ratio_override,
-                    'status' => ShotStatus::STORYLINE_READY,
-                    'chosen_storyline' => ['storyline' => ''],
-                    'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => []],
                     'plan_chat' => $opening,
                 ]);
             }
@@ -478,6 +494,113 @@ class DirectorController
         });
 
         return $parts->count() - 1;
+    }
+
+    /**
+     * Adds one shot right after or right before a shot of the film, after this
+     * one unless another is named, in that shot's group, to plan in its own
+     * chat. When the director asked for it, its keyframe 1 is an exact copy of
+     * a keyframe of a shot, the last keyframe of the shot it follows unless
+     * another is named. Returns what was done, for the reply, or null when
+     * nothing was added.
+     */
+    private function addShot(Project $project, Shot $shot, mixed $proposed): ?string
+    {
+        $idea = is_array($proposed) ? trim((string) ($proposed['idea'] ?? '')) : '';
+
+        if ($idea === '') {
+            return null;
+        }
+
+        $shots = $project->shots()->get();
+        $byCode = fn(mixed $code) => $shots->first(fn(Shot $other) => strcasecmp($other->code(), str_replace(' ', '', (string) $code)) === 0);
+        $before = $byCode($proposed['before'] ?? '');
+        $after = $before === null ? ($byCode($proposed['after'] ?? '') ?? $shot) : $shots->firstWhere('position', $before->position - 1);
+        // The shot it joins: the one it goes before, or the one it follows.
+        $neighbour = $before ?? $after;
+        $startsFrom = is_array($proposed['starts_from'] ?? null) ? $proposed['starts_from'] : null;
+        $source = $byCode($startsFrom['shot'] ?? '') ?? $after;
+        $wanted = (int) ($startsFrom['keyframe'] ?? 0);
+        $keyframe = match (true) {
+            $startsFrom === null, $source === null => null,
+            $wanted > 0 => $source->keyframes()->with(['media', 'elements'])->where('position', $wanted)->first(),
+            default => $source->keyframes()->with(['media', 'elements'])->reorder('position', 'desc')->first(),
+        };
+        $image = $keyframe?->render();
+        $kind = ShotKind::tryFrom((string) ($proposed['kind'] ?? '')) ?? ShotKind::SCENE;
+        // A shot that draws every still on its own, such as a montage, cannot go on from a copy.
+        $copies = $image !== null && ! (new Shot())->forceFill(['kind' => $kind])->drawsStandalone();
+
+        $added = DB::connection($shot->getConnectionName())->transaction(function () use ($project, $neighbour, $before, $source, $keyframe, $image, $kind, $copies, $idea, $proposed) {
+            $group = $neighbour->group_key ?? (string) Str::ulid();
+            $neighbour->forceFill(['group_key' => $group])->save();
+
+            $plan = $copies ? [[...($source->storylineKeyframes()[$keyframe->position - 1] ?? [
+                'title' => $keyframe->title,
+                'description' => $keyframe->description,
+                'staging' => $keyframe->staging,
+                'spatial' => $keyframe->spatial,
+                'elements' => $keyframe->elements->pluck('name')->all(),
+            ]), 'copied' => true]] : [];
+
+            $added = $this->insertAt($project, $before === null ? $neighbour->position + 1 : $before->position, $group, $neighbour, [
+                'title' => Str::limit(trim((string) ($proposed['title'] ?? '')), 80),
+                'idea' => $idea,
+                'kind' => $kind,
+                'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => $plan, ...($copies ? ['opening_copy' => true] : [])],
+            ]);
+
+            if ($copies) {
+                // The image and the staging carry over; how long it lasts belongs to the shot it came from.
+                $copy = $keyframe->replicate(['render_id', 'prompt', 'depends_on_id', 'render_error', 'seconds']);
+                $copy->forceFill(['shot_id' => $added->id, 'position' => 1, 'status' => KeyframeStatus::READY, 'draw_version' => 0])->save();
+                $copy->elements()->sync($keyframe->elements->modelKeys());
+                $copy->forceFill(['render_id' => $image->copy($copy, Keyframe::RENDERS)->id])->save();
+            }
+
+            return $added;
+        });
+
+        // Codes as they are now: a shot added before another moves it and the shots after it one place on.
+        $where = $before === null ? __('after :shot', ['shot' => $neighbour->refresh()->code()]) : __('before :shot', ['shot' => $neighbour->refresh()->code()]);
+        $from = $copies ? __('keyframe :n of :shot', ['n' => $keyframe->position, 'shot' => $source->refresh()->code()]) : '';
+
+        $added->forceFill(['plan_chat' => [[
+            'role' => 'assistant',
+            'stage' => 'idea',
+            'text' => $copies
+                ? __('This shot comes :where and starts from :from as it is: :idea Shall we go on from there?', ['where' => $where, 'from' => $from, 'idea' => $idea])
+                : __('This shot comes :where: :idea Shall we go on from there?', ['where' => $where, 'idea' => $idea]),
+        ]]])->save();
+
+        return match (true) {
+            $copies => __(':shot is added :where, in the same group; its keyframe 1 is a copy of :from. Plan it in its own chat.', ['shot' => $added->code(), 'where' => $where, 'from' => $from]),
+            $startsFrom === null => __(':shot is added :where, in the same group. Plan it in its own chat.', ['shot' => $added->code(), 'where' => $where]),
+            $image === null => __(':shot is added :where, in the same group. There is no drawn keyframe to copy yet, so its keyframe 1 is drawn from the plan. Plan it in its own chat.', ['shot' => $added->code(), 'where' => $where]),
+            default => __(':shot is added :where, in the same group. A :kind draws every still on its own, so it does not start from a copy. Plan it in its own chat.', ['shot' => $added->code(), 'where' => $where, 'kind' => $kind->value]),
+        };
+    }
+
+    /**
+     * A new shot at a position of the film, in a group, with an empty plan;
+     * the shot from that position on move one place on.
+     *
+     * @param  array<model-property<Shot>, mixed>  $attributes
+     */
+    private function insertAt(Project $project, int $position, string $group, Shot $like, array $attributes): Shot
+    {
+        $project->shots()->where('position', '>=', $position)->increment('position');
+
+        return $project->allShots()->create([
+            'position' => $position,
+            'group_key' => $group,
+            'purpose_override' => $like->purpose_override,
+            'aspect_ratio_override' => $like->aspect_ratio_override,
+            'status' => ShotStatus::STORYLINE_READY,
+            'chosen_storyline' => ['storyline' => ''],
+            'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => []],
+            ...$attributes,
+        ]);
     }
 
     /**

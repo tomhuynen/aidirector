@@ -4,8 +4,6 @@ export type Account = {
   links: {
     projects: string
     logout: string
-    notifications: string
-    notificationsRead: string
   }
 }
 

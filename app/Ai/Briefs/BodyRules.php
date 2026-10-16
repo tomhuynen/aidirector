@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Ai\Briefs;
 
 /**
- * How a person's body turns in a keyframe. An image model that is told to
- * turn only the head or an arm twists it against a body that still faces
- * the other way, which looks unnatural.
+ * How a person's pose may look in a keyframe: any pose a real person can
+ * take naturally. Staging and checking use the same rule, so a pose that is
+ * staged as asked is never reported as wrong.
  */
 final class BodyRules
 {
-    public const string TURNING = 'A person turns as a whole: when they look at or aim at something that is not in front of them, their shoulders and hips turn toward it with the head and their feet turn on the spot, so the body faces what they look at; only a small glance turns the head alone. Never twist a head or an arm against a body that faces elsewhere.';
+    public const string NATURAL_POSE = 'Every pose is one a real person takes naturally: the neck, arms, wrists and hands bend only the way a real body bends, and the weight rests believably on what carries it, also mid-step, kneeling, crouching or sitting. A head may turn far, such as to look over the shoulder, when the upper body twists with it.';
 }

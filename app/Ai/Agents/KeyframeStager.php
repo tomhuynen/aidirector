@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ai\Agents;
 
 use App\Ai\Agents\Concerns\SetsReasoningEffort;
+use App\Ai\Briefs\BodyRules;
 use App\Ai\Briefs\HandRules;
 use App\Ai\Contracts\HasReasoningEffort;
 use App\Models\Element;
@@ -47,14 +48,14 @@ class KeyframeStager implements Agent, HasReasoningEffort, HasStructuredOutput
             - box: where they are in the new keyframe, as top, left, bottom and right on a 0 to 1000 grid of the frame, from the top left. The box holds the whole person or vehicle tightly. Its bottom is where the feet or wheels touch the floor, on a floor that is really there in the image, never on a wall, a counter or the sky.
             - Size: a person is as tall as people at that distance in this place would be, judged by doors, vehicles and other people in the image; further back is smaller. A car is about as tall as a person's shoulders and two to three times as long as a person is wide.
             - In front or behind: a box may overlap a thing of the place only when the person or vehicle stands in front of it or behind it in the description; then put the bottom of the box nearer to the camera (lower in the frame) when they are in front, and further away (higher) when they are behind.
-            - facing: which way they face as seen from the camera, named after what they look at or turn to, such as "side-on, facing the car on the right" or "back to the camera, facing the barrier".
+            - facing: which way the body faces as seen from the camera, named after what the body is turned to, such as "side-on, facing the car on the right" or "back to the camera, facing the barrier"; the head may turn from it to what they look at, as the description says.
             - pose: their pose and what their hands do, in one short sentence.
             - changed: false when they are already in the image in exactly this spot and pose; then copy their box from where they are. True when they are new, move, turn or change pose.
 
             Also list the things of the place, not the cast, whose state changes in this keyframe compared with the image, such as a door that closes or a barrier arm that opens, each with its box and its new state. Leave the list empty when nothing changes.
 
             An object someone holds or carries belongs to their box; leave it out of the list. Leave out the cast that the keyframe does not show.
-            TEXT . "\n\nIn the pose: " . HandRules::RECEIVING;
+            TEXT . "\n\nIn the pose: " . BodyRules::NATURAL_POSE . ' ' . HandRules::RECEIVING;
     }
 
     /**

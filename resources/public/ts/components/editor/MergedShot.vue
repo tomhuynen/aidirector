@@ -29,10 +29,7 @@
         </h3>
         <ol class="space-y-3">
           <li v-for="(part, i) in merge.parts" :key="part.id">
-            <Link
-              :href="part.url"
-              class="group flex gap-3 rounded-lg border border-border p-2 transition-colors hover:border-muted-foreground/60"
-            >
+            <div class="flex gap-3 rounded-lg border border-border p-2">
               <img
                 v-if="part.thumbnailUrl"
                 :src="part.thumbnailUrl"
@@ -44,13 +41,13 @@
                 <span class="block text-xs text-muted-foreground tabular-nums">
                   {{ $t('Part :n', { n: String(i + 1) }) }} · {{ $t(':count s', { count: String(part.duration) }) }}
                 </span>
-                <span class="block truncate text-sm font-medium group-hover:text-signal">{{ part.title }}</span>
+                <span class="block truncate text-sm font-medium">{{ part.title }}</span>
               </span>
-            </Link>
+            </div>
           </li>
         </ol>
         <p class="text-xs leading-relaxed text-muted-foreground">
-          {{ $t('Open a part to change its keyframes or render its video again; the merged video follows.') }}
+          {{ $t('To change a part, unmerge the shot, change it and merge again.') }}
         </p>
       </section>
 
@@ -124,7 +121,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { Link, useForm } from '@inertiajs/vue3'
+import { useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { Button } from '@shared:ui/button'
@@ -146,7 +143,6 @@ export type ShotMerge = {
     duration: number
     thumbnailUrl: string | null
     videoUrl: string | null
-    url: string
   }[]
   links: { update: string; unmerge: string }
 }

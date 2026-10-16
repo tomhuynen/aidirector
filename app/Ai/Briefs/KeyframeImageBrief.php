@@ -70,7 +70,9 @@ class KeyframeImageBrief
         $closeUp = $shot->kindOrScene() === ShotKind::CLOSE_UP;
 
         // A close-up is about the hands and the object; the scene's composition and staging would pull back to whole figures.
-        if ($closeUp) {
+        if ($shot->isInsert()) {
+            $lines[] = 'Composition: the one thing is the only subject, large, sharp and readable in the middle of the frame. No people, no hands and no other objects in front of it.';
+        } elseif ($closeUp) {
             $lines[] = 'Composition: the object and the hands are the subject, large, sharp and in the middle of the frame. Draw only the part of the people the frame shows: their clothing exactly as in their pictures, one layer, never a second jacket or shirt.';
         } else {
             $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';

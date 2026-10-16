@@ -63,6 +63,7 @@ it('lists the benchmarks with the cases this tenant has for them', function () {
             ['style-options', 'Propose a round of styles, the first one or "more like this" from a style sheet.', 1],
             ['cast-suggestions', 'Suggest recurring people, places or objects from the brief confirmed in the chat.', 0],
             ['keyframe-plan', 'Plan a shot from its idea: storyline and keyframe descriptions.', 0],
+            ['keyframe-check', 'Check a drawn keyframe: unnatural poses and what a viewer would see change.', 0],
         ])
         ->assertSuccessful();
 });
@@ -160,6 +161,31 @@ it('plans every shot from its idea', function () {
 
     StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Idea: A driver stops at the gate.'));
     StorylineWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Idea: A visitor keeps to the quay path.'));
+});
+
+it('checks every drawn keyframe with the images and model the app uses, judged on natural poses', function () {
+    Storage::fake(App\Enums\Disk::TENANT->value);
+    $shot = Shot::factory()->for($this->project)->create(['status' => App\Enums\ShotStatus::KEYFRAMES_READY]);
+
+    foreach ([1, 2, 3] as $position) {
+        $image = imagecreatetruecolor(16, 9);
+        ob_start();
+        imagepng($image);
+        $keyframe = App\Models\Keyframe::factory()->for($shot)->create(['position' => $position]);
+        $render = $keyframe->addMediaFromString((string) ob_get_clean())->usingFileName("k{$position}.png")->toMediaCollection(App\Models\Keyframe::RENDERS);
+        $keyframe->forceFill(['render_id' => $render->id])->save();
+    }
+
+    App\Ai\Agents\KeyframeChecker::fake(fn() => ['inventory' => [], 'issues' => []]);
+
+    $this->artisan('ai:bench', ['benchmarks' => ['keyframe-check'], '--no-judge' => true])
+        ->expectsOutputToContain('2 cases × 1 variants × 1 runs = 2 calls.')
+        ->assertSuccessful();
+
+    App\Ai\Agents\KeyframeChecker::assertPrompted(fn($prompt) => $prompt->model === Config::get('pipeline.models.keyframe_check')
+        && $prompt->attachments->count() >= 2
+        && str_contains((string) $prompt->agent->instructions(), App\Ai\Briefs\BodyRules::NATURAL_POSE));
+    expect(app(App\Ai\Bench\Benchmarks::class)->find('keyframe-check')->criteria())->toHaveKey('natural_pose');
 });
 
 it('skips a benchmark this tenant has no data for', function () {

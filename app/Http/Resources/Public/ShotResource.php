@@ -11,8 +11,8 @@ use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateVoiceOver;
 use App\Models\Keyframe;
 use App\Models\Shot;
-use App\Support\Decisions\ShotIssues;
 use App\Support\Shots\RenderEstimates;
+use App\Support\Shots\ShotIssues;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -46,6 +46,8 @@ class ShotResource extends JsonResource
             'status' => $this->status,
             /** A scene at one place, or a montage of separate stills; scene until planned. */
             'kind' => $this->kind ?? ShotKind::SCENE,
+            /** A presenter or an insert: its one keyframe is all it has, so no keyframe is added. */
+            'oneKeyframe' => $this->kindOrScene()->keepsOneKeyframe(),
             'statusLabel' => $this->status->description(),
             /** @var string|null */
             'purposeOverride' => $this->purpose_override,
@@ -113,8 +115,34 @@ class ShotResource extends JsonResource
             'videoError' => $this->video_error,
             /** @var string|null */
             'videoUrl' => $this->mediaUrl($this->video()),
+            /**
+             * What the video was made from: the model, the prompt it got and a summary for the director.
+             *
+             * @var array{model: string, prompt: string, summary: string|null}|null
+             */
+            'videoSent' => $this->video_prompt === null ? null : [
+                'model' => match (true) {
+                    $this->isInsert() => 'ffmpeg',
+                    $this->isPresenter() => (string) config('pipeline.models.presenter'),
+                    default => (string) config('pipeline.models.video'),
+                },
+                'prompt' => $this->video_prompt,
+                'summary' => $this->video_summary,
+            ],
+            /**
+             * How long each keyframe lasts, in order; none for a scene, which the video model paces, or a presenter.
+             *
+             * @var list<float>|null
+             */
+            'keyframeSeconds' => $this->resource->exists && $this->kindOrScene()->showsKeyframeTimes() ? $this->keyframeSeconds() : null,
             /** @var string|null */
             'videoDownloadUrl' => $this->downloadUrl($this->video()),
+            /**
+             * What the video can be trimmed from: the rendered video, its length, and where the cut starts and ends in it; null when it cannot be trimmed.
+             *
+             * @var array{url: string, seconds: float, start: float, end: float}|null
+             */
+            'videoTrim' => $this->videoTrim(),
             /**
              * The video of a presenter shot in each language, each with its own sound.
              *
@@ -136,7 +164,7 @@ class ShotResource extends JsonResource
             /**
              * The conversation about the plan: the director's messages and the plan director's replies, some with the plan they wrote into the shot.
              *
-             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}, about?: string, changes?: array<int, string>, proposed?: array{keyframe: string, name: string, change: string, fields?: array<int, array{field: string, from: string, to: string}>, state?: string}, storylines?: array<int, array{title: string, kind: string, storyline: string, needs?: string}>, confirm?: bool, pickPlace?: bool, voiceOver?: array{text: string, seconds?: int, state?: string}}>
+             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}, about?: string, changes?: array<int, string>, proposed?: array{keyframe: string, name: string, change: string, fields?: array<int, array{field: string, from: string, to: string}>, state?: string}, storylines?: array<int, array{title: string, kind: string, storyline: string, needs?: string}>, confirm?: bool, pickPlace?: bool, places?: array<int, string>, voiceOver?: array{text: string, seconds?: int, state?: string}}>
              */
             'planChat' => array_values((array) ($this->plan_chat ?? [])),
             /**
@@ -156,6 +184,7 @@ class ShotResource extends JsonResource
                 'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
                 'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
                 'videoGenerate' => route('public.shots.video.generate', [$this->project, $this->resource]),
+                'videoTrim' => route('public.shots.video.trim', [$this->project, $this->resource]),
                 'planChat' => route('public.shots.plan.chat', [$this->project, $this->resource]),
                 'planChange' => route('public.shots.plan.change', [$this->project, $this->resource]),
                 'planVoiceOver' => route('public.shots.plan.voice-over', [$this->project, $this->resource]),
@@ -269,6 +298,28 @@ class ShotResource extends JsonResource
      * A signed link to a private media file. The expiry is rounded to the hour
      * so the link stays the same while the page polls and the browser can cache it.
      */
+    /**
+     * @return array{url: string, seconds: float, start: float, end: float}|null
+     */
+    private function videoTrim(): ?array
+    {
+        if (! $this->resource->exists || ! $this->resource->canTrimVideo()) {
+            return null;
+        }
+
+        $video = $this->video();
+        $original = $this->resource->videoOriginal() ?? $video;
+        $seconds = (float) $original->getCustomProperty(Shot::VIDEO_SECONDS);
+        $trim = $original->is($video) ? null : $video->getCustomProperty(Shot::VIDEO_TRIM);
+
+        return [
+            'url' => (string) $this->mediaUrl($original),
+            'seconds' => $seconds,
+            'start' => (float) ($trim['start'] ?? 0),
+            'end' => (float) ($trim['end'] ?? $seconds),
+        ];
+    }
+
     private function mediaUrl(?Media $media): ?string
     {
         if ($media === null) {

@@ -28,6 +28,8 @@ return [
         // Adjusts an existing keyframe and leaves the rest alone; kept everything else identical in a test of 2026-10-04.
         'keyframe_edit' => env('AI_KEYFRAME_EDIT_MODEL', 'openai/gpt-image-2.5-sunburst'),
         'video' => env('AI_VIDEO_MODEL', 'alibaba/wan-3.0'),
+        // Renders scenes and close-ups when the video provider is luma: every keyframe is pinned to its moment in the clip.
+        'luma_video' => env('AI_LUMA_VIDEO_MODEL', 'ray-3.2'),
         // Speaks the voice-over; the voice per language is set under voice_over.voices.
         'voice' => env('AI_VOICE_MODEL', 'microsoft/mai-voice-2.1'),
         // Animates the project cover into a seamless loop; needs first and last frame control.
@@ -40,8 +42,6 @@ return [
         // Blocks a keyframe on the image before it: where each of the cast stands, faces and how they pose.
         'keyframe_stager' => env('AI_KEYFRAME_STAGER_MODEL', 'google/gemini-3.8-flash'),
         'keyframe_check' => env('AI_KEYFRAME_CHECK_MODEL', 'google/gemini-3.8-flash'),
-        // Checks afterwards whether the place stayed the same; sees shifted floor lines best, its findings become notes.
-        'place_check' => env('AI_PLACE_CHECK_MODEL', 'openai/gpt-5.5'),
     ],
 
     /*
@@ -113,12 +113,6 @@ return [
     'keyframe_check' => env('AI_KEYFRAME_CHECK', true),
 
     /*
-     * After drawing, a second model compares the place with keyframe 1; what it finds becomes notes.
-     * Off: the layout model keeps the place, and the check mostly reported drift a viewer does not see.
-     */
-    'place_check' => env('AI_PLACE_CHECK', false),
-
-    /*
      * Changes and check findings are labelled in the background; a kind of
      * correction that comes back in this many different shots is suggested
      * as a project rule.
@@ -139,6 +133,14 @@ return [
         'max_element_references' => 3,
         // Measures the depth of a place, so a person or a thing is drawn at the size it has where it stands: Depth Anything 3 metric on Replicate.
         'depth_model' => env('AI_DEPTH_MODEL', 'd2ef7653aa75f87e3b502738a3f57ca2b09ba92f6f286075c8929a69937a013f'),
+        // How the layout model draws: whether it draws keyframes 2 and later on the keyframe before (otherwise the keyframe
+        // model draws them whole and the layout model only edits), whether it may search the web and images first, and
+        // whether it draws at the shot's aspect ratio instead of picking one from the prompt and the first image.
+        'layout' => [
+            'draws_keyframes' => (bool) env('AI_LAYOUT_DRAWS_KEYFRAMES', true),
+            'grounding' => (bool) env('AI_LAYOUT_GROUNDING', true),
+            'fixed_ratio' => (bool) env('AI_LAYOUT_FIXED_RATIO', false),
+        ],
         // Measured in code after each edit: a render whose background moved compared with the image it was drawn on is drawn again.
         'drift' => [
             'enabled' => (bool) env('AI_DRIFT_CHECK', true),
@@ -178,6 +180,14 @@ return [
     'ffmpeg' => [
         'binary' => env('FFMPEG_BINARY', 'ffmpeg'),
         'ffprobe' => env('FFPROBE_BINARY', 'ffprobe'),
+    ],
+
+    /*
+     * An insert's clip is made from its one still in code: how much the camera
+     * pushes in over the clip, as a share of the frame; 0 holds the still.
+     */
+    'insert' => [
+        'push_in' => 0.06,
     ],
 
     /*
@@ -223,17 +233,26 @@ return [
 
     'video' => [
         'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
+        // Who renders scenes and close-ups: openrouter (the video model above) or luma (Ray, with pinned keyframes). Montages and presenters stay on OpenRouter.
+        'provider' => env('AI_VIDEO_PROVIDER', 'openrouter'),
         // The default for projects without their own; the lowest the model offers, for quick tests.
         'resolution' => env('AI_VIDEO_RESOLUTION', '480p'),
         // What Wan 3.0 renders; a model without 4K refuses it.
         'resolutions' => ['480p', '720p', '1080p'],
         // The shortest clip the video model renders (Wan 3.0 takes 2 to 30 seconds); a short action is a short shot.
         'min_duration' => 2,
-        'max_duration' => 15,
+        // Luma renders at most 10 seconds.
+        'max_duration' => (int) env('AI_VIDEO_MAX_DURATION', 15),
         // A render takes about a minute: the first check waits, later ones follow quicker.
         'first_poll_seconds' => 45,
         'poll_seconds' => 20,
         'max_wait_minutes' => 30,
+        // What a Luma clip costs in USD, by resolution and length; the API returns no cost. From lumalabs.ai/api on 2026-10-16.
+        'luma_prices' => [
+            '540p' => [5 => 0.15, 10 => 0.45],
+            '720p' => [5 => 0.30, 10 => 0.90],
+            '1080p' => [5 => 1.20, 10 => 3.60],
+        ],
     ],
 
 ];

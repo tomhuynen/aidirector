@@ -47,7 +47,7 @@ class ChangeCastMember implements ShouldQueue
         }
 
         $shot = $this->keyframe->shot()->with('project')->firstOrFail();
-        $keyframe = $this->keyframe->load('media')->setRelation('shot', $shot);
+        $keyframe = $this->keyframe->load(['media', 'elements.media'])->setRelation('shot', $shot);
 
         $painter->change($keyframe, $this->name, $this->change);
 

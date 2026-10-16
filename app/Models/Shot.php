@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use RedExplosion\Sqids\Concerns\HasSqids;
 use Spatie\MediaLibrary\HasMedia;
@@ -47,11 +48,23 @@ class Shot extends Model implements HasMedia
     /** On a merged shot's video: how long it lasts, in seconds. */
     public const VIDEO_SECONDS = 'seconds';
 
+    /** The video as it was rendered, kept while the shot's video is a part cut out of it. */
+    public const VIDEO_ORIGINAL = 'video_original';
+
+    /** On a trimmed video: where it starts and ends in the rendered video, in seconds, and that video's media id. */
+    public const VIDEO_TRIM = 'trim';
+
     /** The clip of each still of a montage, with its position as a custom property, kept until they are joined. */
     public const MONTAGE_CLIPS = 'montage_clips';
 
     /** The video of a presenter shot per language, with its sound, with the locale as a custom property. */
     public const PRESENTER_VIDEOS = 'presenter_videos';
+
+    /** The place of a scene without people, from the camera of keyframe 1: what shows where someone stood once they move or leave. */
+    public const PLATE = 'plate';
+
+    /** On the plate: the image of keyframe 1 it was made from; a new one is made when keyframe 1 changes. */
+    public const PLATE_FROM = 'from_render';
 
     protected $guarded = [];
 
@@ -220,7 +233,7 @@ class Shot extends Model implements HasMedia
     /**
      * The keyframes planned for the chosen storyline.
      *
-     * @return list<array{title: string, description: string, staging?: array<string, mixed>, spatial?: string, elements?: list<string>, copied?: bool}>
+     * @return list<array{title: string, description: string, staging?: array<string, mixed>, spatial?: string, elements?: list<string>, copied?: bool, seconds?: float|int}>
      */
     public function storylineKeyframes(): array
     {
@@ -251,12 +264,17 @@ class Shot extends Model implements HasMedia
         return $this->kind === ShotKind::PRESENTER;
     }
 
+    public function isInsert(): bool
+    {
+        return $this->kind === ShotKind::INSERT;
+    }
+
     /**
      * Whether every keyframe is drawn on its own instead of on one shared place.
      */
     public function drawsStandalone(): bool
     {
-        return $this->isMontage() || $this->isPresenter();
+        return $this->isMontage() || $this->isPresenter() || $this->isInsert();
     }
 
     /**
@@ -490,6 +508,16 @@ class Shot extends Model implements HasMedia
     }
 
     /**
+     * Whether keyframe 1 is an exact copy of a keyframe of another shot, made
+     * when this shot was added after it. It is never drawn, and the plan goes
+     * on from it.
+     */
+    public function opensWithCopy(): bool
+    {
+        return ($this->storyline['opening_copy'] ?? false) === true;
+    }
+
+    /**
      * Whether the planned keyframe at a position is a copy the director has not described yet.
      */
     public function plannedKeyframeIsCopy(int $position): bool
@@ -550,6 +578,8 @@ class Shot extends Model implements HasMedia
         $this->unsetRelation('keyframes');
         $this->updateStoredJson('keyframe_review', fn(?array $review) => self::renumberedReview($review, $moved));
         $this->replacePlannedKeyframes($arranged);
+        $this->fitDurationTo(collect($keyframes));
+
         // A keyframe deleted or copied: the shot is timed again for what its keyframes show now.
         if (count($plans) !== count($arranged)) {
             RetimeShot::dispatch($this);
@@ -606,8 +636,10 @@ class Shot extends Model implements HasMedia
      */
     public function forgetKeyframes(): void
     {
-        $this->keyframes()->get()->each->delete();
+        // Keyframe 1 of a shot that opens with a copy stays: it is never drawn, only copied when the shot was added.
+        $this->keyframes()->when($this->opensWithCopy(), fn($keyframes) => $keyframes->where('position', '>', 1))->get()->each->delete();
         $this->unsetRelation('keyframes');
+        $this->clearMediaCollection(self::PLATE);
         $this->forceFill(['keyframe_review' => null]);
         $this->forgetVideo();
     }
@@ -618,8 +650,9 @@ class Shot extends Model implements HasMedia
     public function forgetVideo(): void
     {
         $this->clearMediaCollection(self::VIDEO);
+        $this->clearMediaCollection(self::VIDEO_ORIGINAL);
 
-        $this->forceFill(['video_prompt' => null, 'video_job_id' => null, 'video_error' => null])->save();
+        $this->forceFill(['video_prompt' => null, 'video_summary' => null, 'video_job_id' => null, 'video_error' => null])->save();
     }
 
     /**
@@ -635,12 +668,35 @@ class Shot extends Model implements HasMedia
         return $this->getFirstMedia(self::VIDEO);
     }
 
+    /**
+     * The rendered video the shot's video was cut from, while it is cut.
+     */
+    public function videoOriginal(): ?Media
+    {
+        $original = $this->getFirstMedia(self::VIDEO_ORIGINAL);
+        $trim = $this->video()?->getCustomProperty(self::VIDEO_TRIM);
+
+        return $original !== null && is_array($trim) && ($trim['original'] ?? null) === $original->getKey() ? $original : null;
+    }
+
+    /**
+     * Whether the video can be cut shorter: a video of its own, made from
+     * the keyframes; a merged shot is timed by its parts and a presenter has
+     * a video per language.
+     */
+    public function canTrimVideo(): bool
+    {
+        return $this->video() !== null && ! $this->isMerged() && ! $this->isPresenter() && is_numeric($this->video()->getCustomProperty(self::VIDEO_SECONDS));
+    }
+
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection(self::VOICE_OVERS)->acceptsMimeTypes(['audio/mpeg', 'audio/mp3']);
         $this->addMediaCollection(self::VIDEO)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
+        $this->addMediaCollection(self::VIDEO_ORIGINAL)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
+        $this->addMediaCollection(self::PLATE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
     }
 
     /** @return BelongsTo<Project, $this> */
@@ -662,6 +718,59 @@ class Shot extends Model implements HasMedia
     public function durationInSeconds(): int
     {
         return $this->duration ?? $this->storylineFraming()['seconds'] ?? $this->project->default_duration;
+    }
+
+    /**
+     * How long each keyframe lasts, in order, until the next one is reached;
+     * the last one is held to the end. For a close-up or an insert they are
+     * the seconds the director set, the others the average of those. Other
+     * shots are timed by the planner, as shares of the shot length; without
+     * a plan the length is shared evenly.
+     *
+     * @param  Collection<int, Keyframe>|null  $keyframes
+     * @return list<float>
+     */
+    public function keyframeSeconds(?Collection $keyframes = null): array
+    {
+        $keyframes = ($keyframes ?? $this->keyframes()->get())->sortBy('position')->values();
+        $set = $keyframes->pluck('seconds')->filter(fn(?float $seconds) => $seconds !== null);
+
+        if ($set->isNotEmpty()) {
+            return $keyframes->map(fn(Keyframe $keyframe) => $keyframe->seconds ?? (float) $set->avg())->all();
+        }
+
+        $plans = $this->storylineKeyframes();
+        $count = $keyframes->isEmpty() ? count($plans) : $keyframes->count();
+        $planned = array_map(fn(int $index) => is_numeric($plans[$index]['seconds'] ?? null) ? max(0.0, (float) $plans[$index]['seconds']) : null, range(0, max($count - 1, 0)));
+        $length = (float) self::clampSeconds($this->durationInSeconds());
+        $timed = array_filter($planned, fn(?float $seconds) => $seconds !== null);
+
+        if ($count === 0) {
+            return [];
+        }
+
+        if (array_sum($timed) <= 0) {
+            return array_fill(0, $count, $length / $count);
+        }
+
+        // A keyframe the planner did not time, such as a copied first keyframe, takes the average of the others.
+        $planned = array_map(fn(?float $seconds) => $seconds ?? array_sum($timed) / count($timed), $planned);
+
+        return array_map(fn(float $seconds) => $seconds * $length / array_sum($planned), $planned);
+    }
+
+    /**
+     * Once the director timed a keyframe, the shot lasts as long as its keyframes together.
+     *
+     * @param  Collection<int, Keyframe>  $keyframes
+     */
+    public function fitDurationTo(Collection $keyframes): void
+    {
+        if ($keyframes->every(fn(Keyframe $keyframe) => $keyframe->seconds === null)) {
+            return;
+        }
+
+        $this->forceFill(['duration' => self::clampSeconds((int) ceil(array_sum($this->keyframeSeconds($keyframes)) - 0.001))])->save();
     }
 
     /**

@@ -6,14 +6,16 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Models\Shot;
-use App\Notifications\Public\GenerationFinished;
-use App\Support\Shots\MergeShots;
-use App\Support\Video\OpenRouterVideoClient;
+use App\Support\Video\LumaVideoClient;
 use App\Support\Video\SilentVideo;
+use App\Support\Video\VideoJobs;
+use App\Support\Video\VideoTrimmer;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -41,7 +43,7 @@ class DownloadVideo implements ShouldQueue
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
-    public function handle(OpenRouterVideoClient $videos): void
+    public function handle(VideoJobs $videos): void
     {
         $shot = $this->shot->load('project');
 
@@ -50,17 +52,27 @@ class DownloadVideo implements ShouldQueue
             return;
         }
 
-        $shot->addMediaFromString(app(SilentVideo::class)->strip($videos->download($this->jobId)))
+        $clip = $videos->download($this->jobId);
+
+        // Luma renders 5 or 10 seconds; the last keyframe is held past the shot's end, which is cut off.
+        if (GenerateVideo::rendersOnLuma() && LumaVideoClient::lengthFor(GenerateVideo::duration($shot)) > GenerateVideo::duration($shot)) {
+            $clip = $this->cut($clip, GenerateVideo::duration($shot));
+        }
+
+        $shot->addMediaFromString(app(SilentVideo::class)->strip($clip))
             ->usingFileName("shot-{$shot->position}.mp4")
+            ->withCustomProperties([Shot::VIDEO_SECONDS => GenerateVideo::duration($shot)])
             ->toMediaCollection(Shot::VIDEO);
 
         $shot->generations()->create([
             'director_id' => $shot->project->director_id,
             'kind' => 'video',
-            'provider' => 'openrouter',
-            'model' => Config::get('pipeline.models.video'),
+            'provider' => GenerateVideo::provider(),
+            'model' => GenerateVideo::model(),
             'prompt' => $shot->video_prompt,
-            'cost' => is_numeric($this->usage['cost'] ?? null) ? $this->usage['cost'] : null,
+            'cost' => GenerateVideo::rendersOnLuma()
+                ? LumaVideoClient::cost(LumaVideoClient::lengthFor(GenerateVideo::duration($shot)), $shot->videoResolution())
+                : (is_numeric($this->usage['cost'] ?? null) ? $this->usage['cost'] : null),
             'duration_ms' => self::waitedMs($shot),
             'usage' => $this->usage ?: null,
         ]);
@@ -69,15 +81,6 @@ class DownloadVideo implements ShouldQueue
             'status' => ShotStatus::VIDEO_READY,
             'video_error' => null,
         ])->save();
-
-        GenerationFinished::ready(__('The video of “:shot” is ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
-            ->sendTo($shot->project);
-
-        $merged = $shot->mergedInto()->first();
-
-        if ($merged !== null) {
-            app(MergeShots::class)->rejoin($merged);
-        }
     }
 
     public function failed(?Throwable $exception): void
@@ -95,8 +98,8 @@ class DownloadVideo implements ShouldQueue
         $shot->generations()->create([
             'director_id' => $shot->project->director_id,
             'kind' => 'video',
-            'provider' => 'openrouter',
-            'model' => Config::get('pipeline.models.video'),
+            'provider' => GenerateVideo::provider(),
+            'model' => GenerateVideo::model(),
             'prompt' => $shot->video_prompt,
             'duration_ms' => self::waitedMs($shot),
             'error' => $error,
@@ -106,9 +109,21 @@ class DownloadVideo implements ShouldQueue
             'status' => ShotStatus::KEYFRAMES_READY,
             'video_error' => __('The video could not be rendered. Please try again.'),
         ])->save();
+    }
 
-        GenerationFinished::failed(__('The video of “:shot” could not be rendered', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
-            ->sendTo($shot->project);
+    private function cut(string $clip, int $seconds): string
+    {
+        $directory = storage_path('tmp/cut-' . Str::uuid());
+        File::ensureDirectoryExists($directory);
+
+        try {
+            File::put("{$directory}/clip.mp4", $clip);
+            app(VideoTrimmer::class)->trim("{$directory}/clip.mp4", "{$directory}/cut.mp4", 0.0, (float) $seconds);
+
+            return File::get("{$directory}/cut.mp4");
+        } finally {
+            File::deleteDirectory($directory);
+        }
     }
 
     private static function waitedMs(Shot $shot): ?int

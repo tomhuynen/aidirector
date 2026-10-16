@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots\Plan;
 
 use App\Enums\ElementType;
-use App\Http\Controllers\Public\Shots\Concerns\ReturnsToDecisions;
 use App\Jobs\UpdateElementImage;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
@@ -21,8 +20,6 @@ use Illuminate\Validation\ValidationException;
  */
 class ElementsController
 {
-    use ReturnsToDecisions;
-
     public function store(Project $project, Shot $shot)
     {
         Gate::authorize(ShotPolicy::UPDATE, $shot);
@@ -56,15 +53,20 @@ class ElementsController
             'added_elements' => array_values(array_unique([...($storyline['added_elements'] ?? []), ...$added])),
         ]);
 
-        $turns = array_values((array) ($shot->plan_chat ?? []));
-        $offered = collect($turns)->keys()->reverse()->first(fn(int $index) => ($turns[$index]['role'] ?? '') === 'assistant' && ! empty($turns[$index]['cast']));
+        $shot->updateStoredJson('plan_chat', function (?array $stored) use ($added) {
+            $turns = array_values((array) $stored);
+            $offered = collect($turns)->keys()->reverse()->first(fn(int $index) => ($turns[$index]['role'] ?? '') === 'assistant' && ! empty($turns[$index]['cast']));
 
-        if ($offered !== null) {
+            if ($offered === null) {
+                return $stored;
+            }
+
             $turns[$offered]['cast'] = array_values(array_unique([...$turns[$offered]['cast'], ...$added]));
-            $shot->forceFill(['plan_chat' => $turns])->save();
-        }
 
-        return $this->afterAction($project, $shot);
+            return $turns;
+        });
+
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 
     /**
@@ -76,6 +78,6 @@ class ElementsController
 
         $shot->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['new_elements' => true]));
 
-        return $this->afterAction($project, $shot);
+        return redirect()->route('public.shots.view', [$project, $shot]);
     }
 }

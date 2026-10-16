@@ -65,11 +65,39 @@ it('describes a turn three-quarters away from or toward the camera', function ()
     expect($staging->describe())->toBe('The Helmeted visitor is turned three-quarters away from the camera, facing into the frame to the right and looks at the naval vessel. The Damen host is turned three-quarters toward the camera, facing the left of the frame.');
 });
 
-it('has the body follow where someone looks, in the staging and in an adjustment', function () {
+it('faces the body to what the hands work on and turns the head to what they look at', function () {
+    expect(App\Ai\Briefs\StagingRules::rules())
+        ->toContain('The body faces what their hands work on or where they go')
+        ->toContain('the body turns with it only when it lies further round than a head can turn')
+        ->not->toContain('The body turns toward what they look at');
+});
+
+it('puts something out of view on the side of the frame where it is in the place', function () {
+    $shot = Shot::factory()->create();
+    $rule = 'Something out of view is at the edge of the frame on the side where it is in the place';
+
+    expect(App\Ai\Briefs\StagingRules::rules())->toContain($rule)
+        ->and((string) (new StorylineWriter($shot))->instructions())->toContain($rule)
+        ->and((string) (new PlanDirector($shot, []))->instructions())->toContain($rule)->toContain('it stays out of view, at the edge of the frame the staging rules give for it');
+});
+
+it('allows any natural pose, in the staging, an adjustment and the check', function () {
     $keyframe = Keyframe::factory()->create();
 
-    expect(App\Ai\Briefs\StagingRules::rules())->toContain(App\Ai\Briefs\BodyRules::TURNING)
+    expect(App\Ai\Briefs\StagingRules::rules())->toContain(App\Ai\Briefs\BodyRules::NATURAL_POSE)
+        ->and((string) (new App\Ai\Agents\KeyframeChecker($keyframe, ['keyframe 1', 'the keyframe to check']))->instructions())
+        ->toContain(App\Ai\Briefs\BodyRules::NATURAL_POSE)
+        ->toContain('is a high issue in category person, named by who it is and what is unnatural')
+        ->toContain('Allowed changes, never report these: a natural pose or gesture')
         ->and((string) (new App\Ai\Agents\TweakInterpreter($keyframe, []))->instructions())
-        ->toContain(App\Ai\Briefs\BodyRules::TURNING)
+        ->toContain(App\Ai\Briefs\BodyRules::NATURAL_POSE)
         ->not->toContain('the feet and stance unless the change needs them');
+});
+
+it('notes an unnatural pose in keyframe 1', function () {
+    $reading = App\Support\Shots\KeyframeReading::fromArray(['cast' => [
+        ['name' => 'Security guard', 'box' => ['top' => 100, 'left' => 100, 'bottom' => 900, 'right' => 300], 'facing' => 'side-on', 'pose' => 'looks back', 'placed_right' => true, 'looks_right' => true, 'pose_right' => false, 'problem' => ''],
+    ]], ['Security guard']);
+
+    expect($reading->problems())->toBe(['Security guard stands in an unnatural pose.']);
 });

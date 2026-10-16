@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Ai\Agents\PlanDirector;
+use App\Enums\ElementType;
 use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateStoryline;
@@ -160,6 +161,21 @@ describe('create', function () {
 
         talkTo($this, planShot($this->project), 'let me choose the place')
             ->assertJsonPath('messages.1.pickPlace', true);
+    });
+
+    it('asks which of the places that fit before offering the cast, and offers only those', function () {
+        $quiet = Element::factory()->for($this->project)->create(['name' => 'Quiet corridor', 'type' => ElementType::PLACE]);
+        $clean = Element::factory()->for($this->project)->create(['name' => 'Clean route corridor', 'type' => ElementType::PLACE]);
+        $visitor = Element::factory()->for($this->project)->create(['name' => 'Visitor', 'type' => ElementType::PERSON]);
+        PlanDirector::fake([directorReply(['stage' => 'cast', 'reply' => 'Which corridor?', 'pick_place' => true, 'places' => ['Quiet corridor', 'clean route corridor', 'Visitor']])]);
+
+        talkTo($this, planShot($this->project), 'i want another corridor')
+            ->assertJsonPath('messages.1.pickPlace', true)
+            ->assertJsonPath('messages.1.places', fn(array $ids) => collect($ids)->sort()->values()->all() === collect([$quiet->sqid, $clean->sqid])->sort()->values()->all());
+
+        PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Choosing the place comes before offering the cast')
+            && str_contains((string) $prompt->agent->instructions(), 'offer to make a new one only when none of them fits'));
+        expect($visitor->sqid)->not->toBeIn($this->project->shots()->first()->plan_chat[1]['places']);
     });
 
     it('suggests a new voice-over and uses it only once the director accepts it', function () {
@@ -328,7 +344,9 @@ describe('create', function () {
 
         PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '1. SH020: A visitor walks up to the counter. (scene)')
             && str_contains($prompt->prompt, '2. SH030: Hands slide the cracked badge across the counter. (close-up, continuing from SH020) <- this shot')
-            && str_contains((string) $prompt->agent->instructions(), 'what another shot of the sequence shows never happens in this one'));
+            && str_contains((string) $prompt->agent->instructions(), 'what another shot of the sequence shows never happens in this one')
+            && str_contains((string) $prompt->agent->instructions(), 'is not in this shot\'s cast, place or keyframes, also when the director picked it before the story was split into shots')
+            && str_contains((string) $prompt->agent->instructions(), 'Each line says only what the director said for that shot'));
     });
 
     it('updates the sequence when it is agreed again, instead of adding it twice', function () {
@@ -521,20 +539,54 @@ describe('reorder and destroy', function () {
         )->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.reorder', $this->project), ['shots' => [$third->sqid, $first->sqid, $second->sqid]])
-            ->assertRedirect(route('public.projects.view', $this->project));
+            ->from(route('public.shots.view', [$this->project, $first]))
+            ->post(route('public.shots.reorder', $this->project), ['groups' => [[$third->sqid], [$first->sqid], [$second->sqid]]])
+            ->assertRedirect(route('public.shots.view', [$this->project, $first]));
 
         expect($third->fresh()->position)->toBe(1)
             ->and($first->fresh()->position)->toBe(2)
             ->and($second->fresh()->position)->toBe(3);
     });
 
-    it('rejects an order that does not cover every shot', function () {
+    it('groups the shots dropped on each other, keeps a group\'s key and takes a shot dragged out of its group out of it', function () {
+        [$first, $second, $third, $fourth] = Shot::factory()->for($this->project)->count(4)->sequence(
+            ['position' => 1, 'group_key' => 'sequence-a'],
+            ['position' => 2, 'group_key' => 'sequence-a'],
+            ['position' => 3, 'group_key' => 'sequence-a'],
+            ['position' => 4],
+        )->create();
+
+        // The third leaves its group and forms a new one with the fourth; the first stays on its own.
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.reorder', $this->project), ['groups' => [[$second->sqid, $first->sqid], [$fourth->sqid, $third->sqid]]])
+            ->assertSessionHasNoErrors();
+
+        $key = $fourth->fresh()->group_key;
+
+        expect([$second->fresh()->position, $first->fresh()->position, $fourth->fresh()->position, $third->fresh()->position])->toBe([1, 2, 3, 4])
+            ->and($first->fresh()->group_key)->toBe('sequence-a')
+            ->and($second->fresh()->group_key)->toBe('sequence-a')
+            ->and($key)->not->toBeNull()->not->toBe('sequence-a')
+            ->and($third->fresh()->group_key)->toBe($key);
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.reorder', $this->project), ['groups' => [[$second->sqid], [$first->sqid], [$fourth->sqid, $third->sqid]]])
+            ->assertSessionHasNoErrors();
+
+        expect($first->fresh()->group_key)->toBeNull()
+            ->and($second->fresh()->group_key)->toBeNull();
+    });
+
+    it('rejects an order that does not cover every shot, or lists one twice', function () {
         [$first] = Shot::factory()->for($this->project)->count(2)->sequence(['position' => 1], ['position' => 2])->create();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.reorder', $this->project), ['shots' => [$first->sqid]])
-            ->assertSessionHasErrors('shots');
+            ->post(route('public.shots.reorder', $this->project), ['groups' => [[$first->sqid]]])
+            ->assertSessionHasErrors('groups');
+
+        actingAs($this->director, 'director')
+            ->post(route('public.shots.reorder', $this->project), ['groups' => [[$first->sqid], [$first->sqid]]])
+            ->assertSessionHasErrors('groups');
     });
 
     it('destroys a shot and closes the gap', function () {

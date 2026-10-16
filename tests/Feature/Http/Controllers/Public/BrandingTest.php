@@ -145,13 +145,13 @@ it('keeps the branding\'s logos in keyframes and their changes, and allows no ot
     $layout = new App\Support\Shots\KeyframeLayout([['name' => 'Damen host', 'box' => [100, 100, 900, 500], 'facing' => 'facing the camera', 'pose' => 'arms down', 'changed' => true]]);
 
     expect(TextRules::forImages($this->project))->toBe(TextRules::NO_TEXT)
-        ->and(App\Ai\Briefs\KeyframeLayoutBrief::changed($keyframe, $layout, 'Damen host', 'He waves.'))->toContain(TextRules::NO_TEXT);
+        ->and(App\Ai\Briefs\KeyframeLayoutBrief::changed($keyframe, $layout, ['Damen host' => 'He waves.']))->toContain(TextRules::NO_TEXT);
 
     withLogo($this->project, 'Damen');
     $keyframe = $keyframe->fresh();
 
     expect(TextRules::forImages($this->project->fresh()))->toContain('The only exception is the Damen logo where it is on the people, places and things in the attached pictures')
-        ->and(App\Ai\Briefs\KeyframeLayoutBrief::changed($keyframe, $layout, 'Damen host', 'He waves.'))->toContain('The only exception is the Damen logo where it already is in the image')
+        ->and(App\Ai\Briefs\KeyframeLayoutBrief::changed($keyframe, $layout, ['Damen host' => 'He waves.']))->toContain('The only exception is the Damen logo where it already is in the image')
         ->and(App\Ai\Briefs\KeyframeImageBrief::tweak($this->project->fresh(), 'He waves.'))->toContain('The only exception is the Damen logo where it already is in the image');
 });
 

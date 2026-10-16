@@ -6,12 +6,12 @@ namespace App\Support\Shots;
 
 /**
  * What the reader found in keyframe 1: for each of the cast where they stand,
- * whether that is where the description puts them, and whether they look
- * like their picture. Boxes are on the grid of {@see KeyframeLayout}.
+ * whether that is where the description puts them, whether their pose is
+ * natural, and whether they look like their picture. Boxes are on the grid of {@see KeyframeLayout}.
  *
  * @phpstan-import-type Box from KeyframeLayout
  *
- * @phpstan-type Read array{name: string, box: Box, facing: string, pose: string, placed_right: bool, target: Box, looks_right: bool, problem: string}
+ * @phpstan-type Read array{name: string, box: Box, facing: string, pose: string, placed_right: bool, looks_right: bool, pose_right: bool, problem: string}
  */
 final class KeyframeReading
 {
@@ -37,15 +37,14 @@ final class KeyframeReading
                 continue;
             }
 
-            $placedRight = (bool) ($read['placed_right'] ?? true);
             $cast[] = [
                 'name' => $name,
                 'box' => $box,
                 'facing' => trim((string) ($read['facing'] ?? '')),
                 'pose' => trim((string) ($read['pose'] ?? '')),
-                'placed_right' => $placedRight,
-                'target' => $placedRight ? $box : (KeyframeLayout::box($read['target'] ?? null) ?? $box),
+                'placed_right' => (bool) ($read['placed_right'] ?? true),
                 'looks_right' => (bool) ($read['looks_right'] ?? true),
+                'pose_right' => (bool) ($read['pose_right'] ?? true),
                 'problem' => trim((string) ($read['problem'] ?? '')),
             ];
         }
@@ -54,17 +53,28 @@ final class KeyframeReading
     }
 
     /**
-     * Whether anyone stands in the wrong spot or does not look like their picture.
+     * Who stands in the wrong spot, in an unnatural pose or does not look like
+     * their picture, one sentence each, for the director.
+     *
+     * @return list<string>
      */
-    public function needsFixing(): bool
+    public function problems(): array
     {
+        $problems = [];
+
         foreach ($this->cast as $read) {
-            if (! $read['placed_right'] || ! $read['looks_right']) {
-                return true;
+            if ($read['placed_right'] && $read['looks_right'] && $read['pose_right']) {
+                continue;
             }
+
+            $problems[] = $read['problem'] !== '' ? $read['problem'] : match (true) {
+                ! $read['placed_right'] => "{$read['name']} does not stand where the description puts them.",
+                ! $read['pose_right'] => "{$read['name']} stands in an unnatural pose.",
+                default => "{$read['name']} does not look like their picture.",
+            };
         }
 
-        return false;
+        return $problems;
     }
 
     /**

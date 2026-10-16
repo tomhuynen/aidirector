@@ -10,7 +10,6 @@ use App\Enums\CorrectionSource;
 use App\Enums\Disk;
 use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
-use App\Jobs\CheckKeyframePlace;
 use App\Jobs\ClassifyCorrection;
 use App\Jobs\DrawKeyframe;
 use App\Jobs\GenerateKeyframeOption;
@@ -24,9 +23,9 @@ use App\Models\Element;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Support\Decisions\ShotIssues;
 use App\Support\Images\OpenRouterImageClient;
 use App\Support\Shots\KeyframeChain;
+use App\Support\Shots\ShotIssues;
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Client\RequestException;
@@ -306,47 +305,6 @@ describe('job', function () {
         KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'Image 2: the keyframe directly before: the reference for the state of objects, such as what is held or what is in a box, and for how the people look in this shot.')
             && str_contains((string) $prompt->agent->instructions(), 'Image 3: the keyframe to check.')
             && $prompt->attachments->count() === 3);
-    });
-
-    it('checks the place afterwards with its own model and keeps what it finds as a note, without redrawing', function () {
-        Queue::fake([CheckKeyframePlace::class]);
-        Config::set(['pipeline.keyframe_check' => true, 'pipeline.place_check' => true, 'pipeline.models.place_check' => 'place/model', 'pipeline.models.keyframe_check' => 'check/model']);
-        Image::fake(fn() => fakePng());
-        ShotReviewer::fake(fn() => ['clear' => true, 'notes' => []]);
-        KeyframeChecker::fake(fn() => ['inventory' => [], 'issues' => []]);
-
-        $shot = plannedShot($this->project);
-        renderAllKeyframes($shot);
-        $second = $shot->keyframes()->with('media')->where('position', 2)->firstOrFail();
-
-        Queue::assertPushed(CheckKeyframePlace::class, fn(CheckKeyframePlace $job) => $job->keyframe->is($second) && $job->renderId === $second->render()->id);
-        expect($second->fresh()->isBusy())->toBeFalse();
-
-        KeyframeChecker::fake(fn() => ['inventory' => [], 'issues' => [
-            ['category' => 'place', 'change' => 'The yellow floor line runs under her feet instead of along the left.', 'severity' => 'high'],
-            ['category' => 'place', 'change' => 'A window is a little narrower.', 'severity' => 'low'],
-        ]]);
-
-        (new CheckKeyframePlace($second, $second->render()->id))->handle(app(KeyframePainter::class));
-
-        expect($second->fresh()->render()->getCustomProperty(Keyframe::PLACE_ISSUES))->toBe(['The yellow floor line runs under her feet instead of along the left.'])
-            ->and($second->fresh()->renders())->toHaveCount(1);
-        KeyframeChecker::assertPrompted(fn($prompt) => $prompt->model === 'place/model' && $prompt->attachments->count() === 2
-            && str_contains((string) $prompt->agent->instructions(), 'something put into or taken out of a bin or box')
-            && str_contains($prompt->prompt, 'What the keyframe to check should show:'));
-
-        $issues = app(ShotIssues::class);
-        $shot->forceFill(['status' => ShotStatus::KEYFRAMES_READY])->save();
-        $groups = $issues->groups($shot->fresh(), $shot->keyframes()->with('media')->get());
-
-        expect($groups[0]['key'])->toBe('keyframe-2')
-            ->and($groups[0]['issues'])->toBe(['The place differs from keyframe 1: The yellow floor line runs under her feet instead of along the left.']);
-
-        expect($issues->openNotes($shot->fresh(), $shot->keyframes()->with('media')->get()))->toBe(['Keyframe 2: The place differs from keyframe 1: The yellow floor line runs under her feet instead of along the left.']);
-
-        $issues->dismiss($shot->fresh(), 'keyframe-2');
-
-        expect($issues->groups($shot->fresh(), $shot->keyframes()->with('media')->get()))->toBe([]);
     });
 
     it('uses keyframe 1 as it is when it shows no people', function () {
@@ -1750,15 +1708,14 @@ describe('starting the plan over', function () {
     });
 });
 
-describe('text and places in the checks', function () {
-    it('never asks for text and accepts a change of place the description asks for', function () {
+describe('text in the checks', function () {
+    it('never asks for text', function () {
         $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::KEYFRAMES_READY]);
         $keyframe = Keyframe::factory()->for($shot)->create(['description' => 'Through the windscreen the car has driven through the gate.']);
 
-        expect((string) (new KeyframeChecker($keyframe, ['keyframe 1', 'the keyframe to check'], KeyframeChecker::PLACE))->instructions())
-            ->toContain('only that change is allowed')
-            ->and((string) (new KeyframeChecker($keyframe, ['keyframe 1', 'the keyframe to check']))->instructions())
+        expect((string) (new KeyframeChecker($keyframe, ['keyframe 1', 'the keyframe to check']))->instructions())
             ->toContain('never ask for text to make one recognisable')
+            ->toContain('hidden behind a person or a thing standing in front of it, wholly or in part: it is covered, not gone')
             ->and((string) (new TweakInterpreter($keyframe, []))->instructions())
             ->toContain('Never ask for text');
     });
@@ -1778,6 +1735,21 @@ describe('length', function () {
         Queue::assertPushed(App\Jobs\GenerateVoiceOver::class);
         App\Ai\Agents\ShotTimer::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '2. Posting: A man in a navy suit pushes a white envelope')
             && str_contains((string) $prompt->agent->instructions(), 'picking up, handing over or putting down an object: 1 second'));
+    });
+
+    it('keeps how long each keyframe takes, as the timer gives it', function () {
+        Queue::fake([App\Jobs\GenerateVoiceOver::class]);
+        $count = count(plannedKeyframes());
+        App\Ai\Agents\ShotTimer::fake([['seconds' => 4, 'keyframes' => [...array_fill(0, $count - 1, 1), 2]]]);
+        $shot = Shot::factory()->for($this->project)->create(['duration' => null, 'storyline' => ['framing' => ['spot' => 'The counter.', 'seconds' => 5], 'keyframes' => plannedKeyframes()]]);
+
+        (new App\Jobs\RetimeShot($shot))->handle();
+
+        $seconds = array_column($shot->fresh()->storylineKeyframes(), 'seconds');
+
+        expect($seconds)->toEqual([...array_fill(0, $count - 1, 1), 2])
+            ->and($shot->fresh()->durationInSeconds())->toBe(4);
+        App\Ai\Agents\ShotTimer::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'how long it takes from it to the next one'));
     });
 
     it('leaves the voice-over to the director unless voice-overs are made automatically, except for a presenter', function () {

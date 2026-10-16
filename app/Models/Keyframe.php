@@ -48,9 +48,6 @@ class Keyframe extends Model implements HasMedia
 
     public const TWEAK_INSTRUCTION = 'tweak_instruction';
 
-    /** On a render: how the place differs from keyframe 1, found after drawing. */
-    public const PLACE_ISSUES = 'place_issues';
-
     /** On a render drawn on a base image: the share of the background that stayed in place, from 0 to 1. */
     public const STILLNESS = 'stillness';
 
@@ -89,6 +86,7 @@ class Keyframe extends Model implements HasMedia
             'status' => KeyframeStatus::class,
             'layout' => 'array',
             'staging' => 'array',
+            'seconds' => 'float',
         ];
     }
 

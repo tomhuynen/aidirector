@@ -21,6 +21,7 @@ use App\Models\Shot;
 use App\Support\Shots\KeyframeChain;
 use App\Support\Video\ClipJoiner;
 use App\Support\Video\OpenRouterVideoClient;
+use App\Support\Video\StillVideo;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\File;
@@ -157,7 +158,7 @@ describe('video', function () {
                 ->addMediaFromString(stillPng())->usingFileName("still-{$index}.png")->toMediaCollection(Keyframe::RENDERS);
         }
 
-        (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(KeyframePainter::class));
+        (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(KeyframePainter::class), app(StillVideo::class));
 
         Http::assertSentCount(3);
         // Each clip lasts its share of the 7-second shot (2.67 s), rounded up to whole seconds; the join cuts it back.
@@ -213,6 +214,10 @@ describe('video', function () {
             ['position' => 3, 'job_id' => 'clip_3', 'status' => 'pending'],
         ]]);
 
+        foreach (montagePlan() as $index => $plan) {
+            Keyframe::factory()->for($shot)->create(['position' => $index + 1, ...$plan]);
+        }
+
         (new PollShotClips($shot))->handle(app(OpenRouterVideoClient::class), app(ClipJoiner::class));
 
         $shot->refresh();
@@ -227,8 +232,9 @@ describe('video', function () {
             ->and((float) $shot->generations()->where('kind', 'video')->value('cost'))->toEqualWithDelta(0.3, 0.001);
     })->skip(fn() => ! Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
 
-    it('spreads the shot length over the stills', function () {
-        expect(PollShotClips::clipLength(7, 3))->toBe(2.67)
-            ->and(PollShotClips::clipLength(4, 6))->toBe(1.5);
+    it('cuts each clip to how long its still shows, with its share of the crossfades', function () {
+        expect(PollShotClips::clipLengths([7 / 3, 7 / 3, 7 / 3]))->toBe([2.67, 2.67, 2.67])
+            ->and(PollShotClips::clipLengths(array_fill(0, 6, 4 / 6)))->toBe(array_fill(0, 6, 1.5))
+            ->and(PollShotClips::clipLengths([1.5, 4.0]))->toBe([1.75, 4.25]);
     });
 });

@@ -1,0 +1,87 @@
+import {
+  applyUrlDefaults,
+  queryParams,
+  type RouteDefinition,
+  type RouteQueryOptions,
+  validateParameters,
+} from './../../../../../wayfinder'
+/**
+ * @see \Laravel\Horizon\Http\Controllers\HomeController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/HomeController.php:14
+ * @route '/admin/system/horizon/{view?}'
+ */
+export const index = (
+  args?: { view?: string | number } | [view: string | number] | string | number,
+  options?: RouteQueryOptions,
+): RouteDefinition<'get'> => ({
+  url: index.url(args, options),
+  method: 'get',
+})
+
+index.definition = {
+  methods: ['get', 'head'],
+  url: '/admin/system/horizon/{view?}',
+} satisfies RouteDefinition<['get', 'head']>
+
+/**
+ * @see \Laravel\Horizon\Http\Controllers\HomeController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/HomeController.php:14
+ * @route '/admin/system/horizon/{view?}'
+ */
+index.url = (
+  args?: { view?: string | number } | [view: string | number] | string | number,
+  options?: RouteQueryOptions,
+) => {
+  if (typeof args === 'string' || typeof args === 'number') {
+    args = { view: args }
+  }
+
+  if (Array.isArray(args)) {
+    args = {
+      view: args[0],
+    }
+  }
+
+  args = applyUrlDefaults(args)
+
+  validateParameters(args, ['view'])
+
+  const parsedArgs = {
+    view: args?.view,
+  }
+
+  return (
+    index.definition.url.replace('{view?}', parsedArgs.view?.toString() ?? '').replace(/\/+$/, '') +
+    queryParams(options)
+  )
+}
+
+/**
+ * @see \Laravel\Horizon\Http\Controllers\HomeController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/HomeController.php:14
+ * @route '/admin/system/horizon/{view?}'
+ */
+index.get = (
+  args?: { view?: string | number } | [view: string | number] | string | number,
+  options?: RouteQueryOptions,
+): RouteDefinition<'get'> => ({
+  url: index.url(args, options),
+  method: 'get',
+})
+
+/**
+ * @see \Laravel\Horizon\Http\Controllers\HomeController::index
+ * @see vendor/laravel/horizon/src/Http/Controllers/HomeController.php:14
+ * @route '/admin/system/horizon/{view?}'
+ */
+index.head = (
+  args?: { view?: string | number } | [view: string | number] | string | number,
+  options?: RouteQueryOptions,
+): RouteDefinition<'head'> => ({
+  url: index.url(args, options),
+  method: 'head',
+})
+
+const HomeController = { index }
+
+export default HomeController

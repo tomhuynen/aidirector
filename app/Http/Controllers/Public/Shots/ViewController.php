@@ -14,7 +14,6 @@ use App\Http\Resources\Public\ShotResource;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
-use App\Support\Decisions\DecisionQueue;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
@@ -25,12 +24,15 @@ class ViewController
     {
         Gate::authorize(ShotPolicy::VIEW, $shot);
 
+        // A part of a merged shot is changed by unmerging it first, so it opens the merged shot.
+        if ($shot->merged_into_id !== null) {
+            return redirect()->route('public.shots.view', [$project, $shot->mergedInto()->firstOrFail()]);
+        }
+
         $shot->setRelation('project', $project);
 
         return Inertia::render('shots/view', [
             'project' => fn() => ProjectResource::make($project),
-            /** @var int How many decisions wait for the director in this project. */
-            'decisionsCount' => fn() => app(DecisionQueue::class)->count($project),
             'shot' => fn() => ShotResource::make($shot),
             /** @var array<int, array{value: string, label: string, description: string}> */
             'shotKinds' => fn() => ShotKind::catalogue(),
@@ -50,18 +52,9 @@ class ViewController
             /**
              * For a merged shot: its parts and how their clips are joined.
              *
-             * @var array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null, url: string}>, links: array{update: string, unmerge: string}}|null
+             * @var array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null}>, links: array{update: string, unmerge: string}}|null
              */
             'merge' => fn() => $this->merge($project, $shot),
-            /**
-             * For a part of a merged shot: the shot it was merged into.
-             *
-             * @var array{title: string, url: string}|null
-             */
-            'mergedInto' => fn() => ($merged = $shot->mergedInto()->first()) === null ? null : [
-                'title' => $merged->title,
-                'url' => route('public.shots.view', [$project, $merged]),
-            ],
             'siblings' => fn() => ShotListItemResource::collection(
                 $project->shots()->with(['project', 'media', 'keyframes.media', 'parts.keyframes.media'])->withCount(['keyframes', 'parts'])->get()
             ),
@@ -69,7 +62,7 @@ class ViewController
     }
 
     /**
-     * @return array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null, url: string}>, links: array{update: string, unmerge: string}}|null
+     * @return array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null}>, links: array{update: string, unmerge: string}}|null
      */
     private function merge(Project $project, Shot $shot): ?array
     {
@@ -89,7 +82,6 @@ class ViewController
                 'duration' => $part->durationInSeconds(),
                 'thumbnailUrl' => ShotListItemResource::make($part)->resolve()['thumbnailUrl'],
                 'videoUrl' => ($video = $part->video()) === null ? null : URL::temporarySignedRoute('public.media.view', now()->addHours(2), ['media' => $video]),
-                'url' => route('public.shots.view', [$project, $part]),
             ])->values()->all(),
             'links' => [
                 'update' => route('public.shots.merge.update', [$project, $shot]),

@@ -22,6 +22,9 @@ use App\Models\Tenant;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Multitenancy\DatabaseSessionManager;
+use App\Support\Video\LumaVideoClient;
+use App\Support\Video\OpenRouterVideoClient;
+use App\Support\Video\VideoJobs;
 use Carbon\CarbonImmutable;
 use Dedoc\Scramble\ScrambleServiceProvider as BaseScrambleServiceProvider;
 use Illuminate\Contracts\Foundation\Application;
@@ -30,6 +33,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Events\ResponseReceived;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -49,6 +53,8 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(ImageReplies::class);
+        $this->app->bind(VideoJobs::class, fn() => Config::get('pipeline.video.provider') === 'luma' ? $this->app->make(LumaVideoClient::class) : $this->app->make(OpenRouterVideoClient::class));
+
         if (class_exists(BaseTelescopeServiceProvider::class)) {
             $this->app->register(TelescopeServiceProvider::class);
             $this->app->register(BaseTelescopeServiceProvider::class);

@@ -75,16 +75,17 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             Rules for every shot:
             - Shot title: two to four words naming the scene, such as the place, the person or the moment.
-            - Storyline: two to four sentences, in present tense, from beginning to end, that tell the idea with one clear, visible action a viewer can follow in the shot length, not a still moment; a montage has its own rule below. Refer to the cast and sets by their names, used as a noun with "the". When the director names people, places or objects they want in the shot, use all of them.
-            - Produce between {$min} and {$max} keyframes, except for a presenter shot. Use as many as the silent story above needs and no more: every step a viewer must see to understand it without words gets its own keyframe.
+            - Storyline: two to four sentences, in present tense, from beginning to end, that tell the idea with one clear, visible action a viewer can follow in the shot length, not a still moment; a montage and an insert have their own rule below. Refer to the cast and sets by their names, used as a noun with "the". When the director names people, places or objects they want in the shot, use all of them.
+            - Produce between {$min} and {$max} keyframes, except for a presenter shot or an insert. Use as many as the silent story above needs and no more: every step a viewer must see to understand it without words gets its own keyframe.
             - Title: two to four words naming the moment.
+            - Seconds of a keyframe: how long the animation takes from this keyframe to the next, timed with the rules of thumb for the shot length, in halves of a second; for the last keyframe, how long it is held at the end, 0 when the shot ends as it reaches it. A shot of one keyframe holds it for the whole shot. Together they make the shot's seconds.
             {$staging}
-            - Spatial fact: for a scene, as its rule below says; leave it empty for a montage or a presenter shot.
+            - Spatial fact: for a scene, as its rule below says; leave it empty for a montage, a presenter shot or an insert.
             - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
             - Continuity, because the video model cannot make anything appear or change by itself, except between the separate stills of a montage: everything the shot uses, people and things, is in the frame from keyframe 1, or visibly comes in, such as walking in or being taken out of a bag or pocket that is in view; nothing appears or disappears between two keyframes. Every keyframe says where each thing the story uses is and in what state: in whose hand, where it lies or hangs, worn or not, open or closed, such as "the Damen host holds the Visitor safety vest folded in his right hand; the blue helmet lies on the bench beside him". A thing that changes hands, place or state gets a keyframe that shows it happening; a change that is hard to animate, such as putting on or taking off clothing or gear, or opening a box, also gets a keyframe halfway, such as one arm in the vest.
             - Props: use as few hand-held objects as the story needs, ideally one per character. Leave out anything that does not change what the viewer learns, such as a lighter when the point is putting the cigarette away.
             - Readable props, because the video model can only animate what it can read and turns an unclear object into a copy of the main one: every object the story needs is large enough to recognise at a glance and has a colour that stands out from the clothing and the surface behind it. Hold it away from the body, clear of other objects. When a character holds two objects, keep the hands apart and make the objects clearly different in shape and colour. Give in the cast which hand holds which object.
-            {$this->sceneRules()}{$this->closeUpRules()}{$this->montageRules()}{$this->presenterRules()}
+            {$this->sceneRules()}{$this->closeUpRules()}{$this->montageRules()}{$this->presenterRules()}{$this->insertRules()}
             - No camera language, no text or captions in frame, no sound.
             - Write in English.
             INSTRUCTIONS;
@@ -114,6 +115,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
                     ...KeyframeStaging::schema($schema),
                     'spatial' => $schema->string()->required(),
                     'elements' => $schema->array()->items($schema->string())->required(),
+                    'seconds' => $schema->number()->min(0)->required(),
                 ]))
                 // A presenter shot has one keyframe; the rules set the count for the other kinds.
                 ->min(1)
@@ -169,6 +171,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             ShotKind::MONTAGE => 'A montage is a row of separate stills, each its own place and moment: every still is drawn on its own, animated with a small movement and joined to the next with a crossfade.',
             ShotKind::PRESENTER => 'A presenter shot is one person from the cast who speaks the voice-over straight to the camera, lip-synced, from the chest up in front of a softly blurred place.',
             ShotKind::CLOSE_UP => 'A close-up is one small hand action with one object, with the camera close and still: the hands and the object fill the frame, on a person such as a badge on the chest, or on a thing such as a permit on a dashboard. Keyframe 1 is drawn first with them and the other keyframes are drawn on it.',
+            ShotKind::INSERT => 'An insert is one still of one thing the viewer must see on its own, such as a sign, a label or a warning, with no people and nothing happening; the camera pushes in slowly while it shows.',
         };
     }
 
@@ -263,6 +266,24 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Cast: the presenter stands in the centre, faces the camera and looks at the camera, with a friendly, calm expression and the mouth closed.
             - Storyline: one sentence saying who tells the viewer what, and where.
             - Seconds: the time the voice-over takes to say, between the shortest and the longest length allowed.
+            RULES;
+    }
+
+    private function insertRules(): string
+    {
+        if ($this->shot->kind !== null && $this->shot->kind !== ShotKind::INSERT) {
+            return '';
+        }
+
+        $heading = $this->shot->kind === null ? "\nFor an insert:\n" : "\n";
+
+        return $heading . <<<'RULES'
+            - Exactly one keyframe: the thing on its own, such as the no-camera sign on its wall. The silent-story rule is met by the thing itself, read at a glance.
+            - No people and no hands, unless the director asks for them; nothing moves.
+            - Place: the thing and the surface it is on, such as "the no-camera sign on the plain dockside wall", then the place behind it in a few words. Cast: empty.
+            - Elements: the thing, and the place it is in.
+            - Storyline: one sentence saying what the viewer sees.
+            - Seconds: 2 to 3, enough to read it, between the shortest and the longest length allowed.
             RULES;
     }
 

@@ -91,6 +91,8 @@ class KeyframeResource extends JsonResource
                 'chooseRender' => route('public.shots.keyframes.render', [$this->shot->project, $this->shot, $this->resource]),
                 'destroy' => route('public.shots.keyframes.destroy', [$this->shot->project, $this->shot, $this->resource]),
                 'copy' => route('public.shots.keyframes.copy', [$this->shot->project, $this->shot, $this->resource]),
+                /** @var string|null Setting how long it lasts; only in a close-up or an insert, other shots are timed by the planner. */
+                'seconds' => $this->shot->kindOrScene()->timedByHand() ? route('public.shots.keyframes.seconds', [$this->shot->project, $this->shot, $this->resource]) : null,
             ],
         ];
     }

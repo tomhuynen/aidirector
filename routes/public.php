@@ -8,14 +8,11 @@ use App\Http\Controllers\Public\Auth\LoginController;
 use App\Http\Controllers\Public\Auth\RegisterController;
 use App\Http\Controllers\Public\Auth\ResetPasswordController;
 use App\Http\Controllers\Public\Media\ViewController as MediaViewController;
-use App\Http\Controllers\Public\Notifications\IndexController as NotificationIndexController;
-use App\Http\Controllers\Public\Notifications\ReadController as NotificationReadController;
 use App\Http\Controllers\Public\Projects\Branding\DestroyController as BrandingDestroyController;
 use App\Http\Controllers\Public\Projects\Branding\StoreController as BrandingStoreController;
 use App\Http\Controllers\Public\Projects\ChatController as ProjectChatController;
 use App\Http\Controllers\Public\Projects\CoverController as ProjectCoverController;
 use App\Http\Controllers\Public\Projects\CreateController as ProjectCreateController;
-use App\Http\Controllers\Public\Projects\DecisionsController as ProjectDecisionsController;
 use App\Http\Controllers\Public\Projects\DestroyController as ProjectDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\DestroyController as ElementDestroyController;
 use App\Http\Controllers\Public\Projects\Elements\PickController as ElementPickController;
@@ -43,6 +40,7 @@ use App\Http\Controllers\Public\Shots\Keyframes\LayoutController as KeyframeLayo
 use App\Http\Controllers\Public\Shots\Keyframes\MoveController as KeyframeMoveController;
 use App\Http\Controllers\Public\Shots\Keyframes\RenderController as KeyframeRenderController;
 use App\Http\Controllers\Public\Shots\Keyframes\ReorderController as KeyframeReorderController;
+use App\Http\Controllers\Public\Shots\Keyframes\SecondsController as KeyframeSecondsController;
 use App\Http\Controllers\Public\Shots\Keyframes\StoreController as KeyframeStoreController;
 use App\Http\Controllers\Public\Shots\Keyframes\TweakController as KeyframeTweakController;
 use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpdateController;
@@ -54,6 +52,7 @@ use App\Http\Controllers\Public\Shots\Plan\VoiceOverController as ShotPlanVoiceO
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
 use App\Http\Controllers\Public\Shots\RetryController as ShotRetryController;
 use App\Http\Controllers\Public\Shots\Video\GenerateController as VideoGenerateController;
+use App\Http\Controllers\Public\Shots\Video\TrimController as VideoTrimController;
 use App\Http\Controllers\Public\Shots\ViewController as ShotViewController;
 use App\Http\Controllers\Public\Shots\VoiceOverController as ShotVoiceOverController;
 use App\Http\Controllers\Uploads\StoreController as UploadStoreController;
@@ -79,9 +78,6 @@ Route::name('auth.')->group(function () {
 });
 
 Route::middleware('auth:director')->group(function () {
-    Route::get('notifications', [NotificationIndexController::class, 'index'])->name('notifications.index');
-    Route::post('notifications/read', [NotificationReadController::class, 'store'])->name('notifications.read');
-
     Route::prefix('projects')
         ->name('projects.')
         ->group(function () {
@@ -93,7 +89,6 @@ Route::middleware('auth:director')->group(function () {
             Route::get('{project}/cover', [ProjectCoverController::class, 'show'])->name('cover.view');
             Route::post('{project}/format', [ProjectFormatController::class, 'store'])->name('format');
             Route::post('{project}/voice-over', [ProjectVoiceOverController::class, 'store'])->name('voice-over');
-            Route::get('{project}/decisions', [ProjectDecisionsController::class, 'view'])->name('decisions');
             Route::post('{project}/rules/{rule}/accept', [ProjectRuleController::class, 'accept'])->scopeBindings()->name('rules.accept');
             Route::post('{project}/rules/{rule}/dismiss', [ProjectRuleController::class, 'dismiss'])->scopeBindings()->name('rules.dismiss');
             Route::delete('{project}', [ProjectDestroyController::class, 'destroy'])->name('destroy');
@@ -162,6 +157,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/keyframes/{keyframe}/layout', [KeyframeLayoutController::class, 'store'])->name('keyframes.layout');
             Route::post('{shot}/keyframes/{keyframe}/move', [KeyframeMoveController::class, 'store'])->name('keyframes.move');
             Route::post('{shot}/keyframes/{keyframe}/render', [KeyframeRenderController::class, 'store'])->name('keyframes.render');
+            Route::post('{shot}/keyframes/{keyframe}/seconds', [KeyframeSecondsController::class, 'store'])->name('keyframes.seconds');
             Route::get('{shot}/keyframes/{keyframe}/image/{conversion?}', [KeyframeImageController::class, 'view'])
                 ->whereIn('conversion', [Keyframe::THUMBNAIL])
                 ->name('keyframes.image');
@@ -172,6 +168,7 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/issues/{group}/dismiss', [ShotIssueController::class, 'dismiss'])->name('issues.dismiss');
             Route::post('{shot}/retry', [ShotRetryController::class, 'store'])->name('retry');
             Route::post('{shot}/video/generate', [VideoGenerateController::class, 'store'])->name('video.generate');
+            Route::post('{shot}/video/trim', [VideoTrimController::class, 'store'])->name('video.trim');
             Route::post('{shot}/voice-over', [ShotVoiceOverController::class, 'store'])->name('voice-over');
             Route::post('{shot}/voice-over/audio', [ShotVoiceOverController::class, 'audio'])->name('voice-over.audio');
             Route::delete('{shot}', [ShotDestroyController::class, 'destroy'])->name('destroy');

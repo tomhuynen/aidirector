@@ -53,6 +53,7 @@ class StoreController
         ]);
 
         $shot->appendPlannedKeyframe($plan);
+        $shot->fitDurationTo($shot->keyframes()->get());
         // One more step, described already: the shot is timed again.
         RetimeShot::dispatch($shot);
 
@@ -66,11 +67,12 @@ class StoreController
     /**
      * A keyframe can be added once keyframe 1 is chosen and rendered, nothing is
      * rendering, and the shot is below the maximum the director may add by hand.
+     * A presenter and an insert keep their one keyframe.
      */
     public static function canAddTo(Shot $shot, int $count, bool $firstRendered, bool $anyRendering): bool
     {
         return in_array($shot->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_READY], true)
-            && ! $shot->isPresenter()
+            && ! $shot->kindOrScene()->keepsOneKeyframe()
             && $count > 0
             && $count < (int) Config::get('pipeline.keyframes.max_manual')
             && $firstRendered

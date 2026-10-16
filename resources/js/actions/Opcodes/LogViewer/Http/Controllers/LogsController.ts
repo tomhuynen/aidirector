@@ -1,0 +1,48 @@
+import { queryParams, type RouteDefinition, type RouteQueryOptions } from './../../../../../wayfinder'
+/**
+ * @see \Opcodes\LogViewer\Http\Controllers\LogsController::index
+ * @see vendor/opcodesio/log-viewer/src/Http/Controllers/LogsController.php:19
+ * @route '/admin/system/logs/api/logs'
+ */
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+  url: index.url(options),
+  method: 'get',
+})
+
+index.definition = {
+  methods: ['get', 'head'],
+  url: '/admin/system/logs/api/logs',
+} satisfies RouteDefinition<['get', 'head']>
+
+/**
+ * @see \Opcodes\LogViewer\Http\Controllers\LogsController::index
+ * @see vendor/opcodesio/log-viewer/src/Http/Controllers/LogsController.php:19
+ * @route '/admin/system/logs/api/logs'
+ */
+index.url = (options?: RouteQueryOptions) => {
+  return index.definition.url + queryParams(options)
+}
+
+/**
+ * @see \Opcodes\LogViewer\Http\Controllers\LogsController::index
+ * @see vendor/opcodesio/log-viewer/src/Http/Controllers/LogsController.php:19
+ * @route '/admin/system/logs/api/logs'
+ */
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+  url: index.url(options),
+  method: 'get',
+})
+
+/**
+ * @see \Opcodes\LogViewer\Http\Controllers\LogsController::index
+ * @see vendor/opcodesio/log-viewer/src/Http/Controllers/LogsController.php:19
+ * @route '/admin/system/logs/api/logs'
+ */
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+  url: index.url(options),
+  method: 'head',
+})
+
+const LogsController = { index }
+
+export default LogsController

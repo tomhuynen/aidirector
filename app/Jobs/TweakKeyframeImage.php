@@ -12,7 +12,6 @@ use App\Enums\KeyframeStatus;
 use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Element;
 use App\Models\Keyframe;
-use App\Notifications\Public\GenerationFinished;
 use App\Support\Corrections\RecordCorrection;
 use App\Support\Shots\KeyframeChain;
 use App\Support\Shots\KeyframeStaging;
@@ -124,15 +123,6 @@ class TweakKeyframeImage implements ShouldQueue
         if (! $this->describedByDirector) {
             RecordCorrection::record($keyframe->shot->project, CorrectionSource::ADJUSTMENT, $this->instruction, $keyframe->shot, $keyframe, $intent);
         }
-
-        $shot = $keyframe->shot;
-
-        GenerationFinished::ready(
-            __('Keyframe :number of “:shot” is adjusted', ['number' => $keyframe->position, 'shot' => $shot->title]),
-            route('public.shots.view', [$shot->project, $shot]),
-            $render,
-            Keyframe::THUMBNAIL,
-        )->sendTo($shot->project);
     }
 
     /**
@@ -241,12 +231,5 @@ class TweakKeyframeImage implements ShouldQueue
             'status' => KeyframeStatus::FAILED,
             'render_error' => trim(__('The image could not be adjusted. Please try again.') . ' ' . Str::limit((string) $exception?->getMessage(), 300)),
         ]);
-
-        $shot = $this->keyframe->shot()->with('project')->first();
-
-        if ($shot !== null) {
-            GenerationFinished::failed(__('Keyframe :number of “:shot” could not be adjusted', ['number' => $this->keyframe->position, 'shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
-                ->sendTo($shot->project);
-        }
     }
 }

@@ -8,8 +8,6 @@ use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
 use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Shot;
-use App\Notifications\Public\GenerationFinished;
-use App\Support\Shots\MergeShots;
 use App\Support\Video\ClipJoiner;
 use App\Support\Video\OpenRouterVideoClient;
 use App\Support\Video\SilentVideo;
@@ -164,10 +162,10 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
             })->all();
 
             $output = "{$directory}/montage.mp4";
-            $length = self::clipLength($shot->durationInSeconds(), count($paths));
+            $lengths = self::clipLengths($shot->keyframeSeconds());
             $timeline = count($paths) > 1
-                ? $joiner->join($paths, ShotTransition::CROSSFADE, $output, array_fill(0, count($paths), $length))
-                : ['starts' => [0.0], 'duration' => (float) $length];
+                ? $joiner->join($paths, ShotTransition::CROSSFADE, $output, $lengths)
+                : ['starts' => [0.0], 'duration' => $lengths[0]];
 
             $shot->addMedia(count($paths) > 1 ? $output : $paths[0])
                 ->usingFileName("shot-{$shot->position}.mp4")
@@ -206,25 +204,22 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
             'montage_clips' => null,
             'video_error' => null,
         ])->save();
-
-        GenerationFinished::ready(__('The video of “:shot” is ready', ['shot' => $shot->title]), route('public.shots.view', [$shot->project, $shot]))
-            ->sendTo($shot->project);
-
-        $merged = $shot->mergedInto()->first();
-
-        if ($merged !== null) {
-            app(MergeShots::class)->rejoin($merged);
-        }
     }
 
     /**
-     * How long each still shows: together, with the crossfades overlapping, they fill the shot length.
+     * How long the clip of each still is cut to: the seconds it shows plus its
+     * share of the crossfades, so together, overlapping, they last as long as
+     * the stills.
+     *
+     * @param  list<float>  $seconds  how long each still shows, in order
+     * @return list<float>
      */
-    public static function clipLength(int $seconds, int $count): float
+    public static function clipLengths(array $seconds): array
     {
-        $overlap = ClipJoiner::FADE_SECONDS * max($count - 1, 0);
+        $count = count($seconds);
+        $overlap = ClipJoiner::FADE_SECONDS * max($count - 1, 0) / max($count, 1);
 
-        return round(max(1.5, ($seconds + $overlap) / max($count, 1)), 2);
+        return array_map(fn(float $shows) => round(max(1.5, $shows + $overlap), 2), $seconds);
     }
 
     public function failed(?Throwable $exception): void

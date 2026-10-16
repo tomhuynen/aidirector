@@ -47,8 +47,38 @@
         v-for="(shot, i) in shots"
         :key="shot.id"
         :data-shot="shot.id"
-        :class="cn('group relative', groupOutline(i), tab(i) && 'mt-7')"
+        :draggable="canDrag"
+        :class="cn('group relative', groupOutline(i), tab(i) && 'mt-7', dragged === shot.id && 'opacity-40')"
+        @dragstart="startDrag($event, shot)"
+        @dragend="endDrag"
+        @dragover.prevent="hover($event, i)"
+        @drop.prevent="drop"
       >
+        <!-- Where the dragged shot lands: inside a group the line stays within its outline, between groups it runs the full width. -->
+        <span
+          v-if="target?.kind === 'between' && lineAt(i)"
+          :class="
+            cn(
+              'pointer-events-none absolute z-20 h-0.5 rounded-full bg-current',
+              lineAt(i) === 'top' ? '-top-[3px]' : '-bottom-[3px]',
+              target.inside ? 'inset-x-4 text-signal' : '-inset-x-1 text-foreground/80',
+            )
+          "
+        >
+          <!-- A small triangle at each end, pointing inwards to where the shot lands. -->
+          <span
+            class="absolute top-1/2 -left-1 size-0 -translate-y-1/2 border-y-[5px] border-l-[6px] border-y-transparent border-l-current"
+          />
+          <span
+            class="absolute top-1/2 -right-1 size-0 -translate-y-1/2 border-y-[5px] border-r-[6px] border-y-transparent border-r-current"
+          />
+          <span
+            v-if="target.inside"
+            class="absolute -top-2.5 right-0 rounded bg-signal px-1.5 text-[10px] leading-4 font-medium text-white"
+          >
+            {{ $t('In group') }}
+          </span>
+        </span>
         <!-- On the border of the open shot's group: merges the group, or splits a merged shot again. -->
         <button
           v-if="tab(i) === 'merge'"
@@ -101,49 +131,41 @@
             <p class="truncate text-sm text-muted-foreground">{{ shot.title || $t('New shot') }}</p>
           </div>
         </label>
-        <div
-          v-else-if="reorderUrl"
-          class="absolute top-1/2 right-2 z-10 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex"
-        >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            class="size-6 bg-background/90"
-            :disabled="i === 0 || reordering"
-            :aria-label="$t('Move up')"
-            @click.prevent="move(i, -1)"
-          >
-            <ArrowUp class="size-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            class="size-6 bg-background/90"
-            :disabled="i === shots.length - 1 || reordering"
-            :aria-label="$t('Move down')"
-            @click.prevent="move(i, 1)"
-          >
-            <ArrowDown class="size-3.5" />
-          </Button>
-        </div>
         <Link
           v-if="!editing"
           :href="shot.url"
           preserve-scroll
+          draggable="false"
           :class="
             cn(
-              'flex items-center gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors hover:bg-card',
-              shot.id === highlightedId && 'border-signal bg-signal-soft/60 hover:bg-signal-soft/60',
+              'relative flex items-center gap-3 px-2 py-2 transition-colors hover:bg-card',
+              rowShape(i),
+              canDrag && 'cursor-grab',
+              shot.id === highlightedId && 'bg-signal-soft/60 hover:bg-signal-soft/60',
+              shot.id === highlightedId && !inGroup(i, -1) && !inGroup(i, 1) && 'border-signal',
+              target?.kind === 'onto' && target.id === shot.id && 'border-signal bg-signal-soft ring-2 ring-signal/50',
             )
           "
         >
+          <!-- Dropped on top: the two form a group, or the dragged shot joins this one's group. -->
+          <span
+            v-if="target?.kind === 'onto' && target.id === shot.id"
+            class="pointer-events-none absolute top-1 right-1.5 rounded bg-signal px-1.5 text-[10px] leading-4 font-medium text-white"
+          >
+            {{
+              sameGroup(dragged, shot.id)
+                ? $t('Move here')
+                : shot.groupKey && groupShots(i).length > 1
+                  ? $t('Add to group')
+                  : $t('Make a group')
+            }}
+          </span>
           <span class="relative shrink-0">
             <img
               v-if="shot.thumbnailUrl"
               :src="shot.thumbnailUrl"
               :alt="shot.title"
+              draggable="false"
               :class="
                 cn(
                   'block h-11 w-[72px] rounded-md border border-border object-cover',
@@ -242,7 +264,7 @@ import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { cn } from '@shared/lib/utils'
 import { Button } from '@shared:ui/button'
 import { Checkbox } from '@shared:ui/checkbox'
-import { ArrowDown, ArrowUp, Clock, Combine, LoaderCircle, Play, Plus, Split, SquarePen, Trash2 } from 'lucide-vue-next'
+import { Clock, Combine, LoaderCircle, Play, Plus, Split, SquarePen, Trash2 } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import MergeShotsDialog from './MergeShotsDialog.vue'
@@ -292,8 +314,9 @@ const props = defineProps<{
  * highlights the one that plays instead of the open shot.
  */
 /**
- * Shots planned together share a purple outline: the first of a run opens
- * it, the last closes it, and the gap between them is taken inside.
+ * Shots in a group share an outline, purple for the open shot's group: the
+ * first of a run opens it, the last closes it, and the gap between them is
+ * taken inside.
  */
 const inGroup = (i: number, step: number) => {
   const key = props.shots[i]?.groupKey
@@ -302,19 +325,30 @@ const inGroup = (i: number, step: number) => {
 }
 
 const groupOutline = (i: number) => {
-  // The line shows only while the open shot is in the group; otherwise it is transparent, so the list does not shift.
-  const line = groupShots(i).some((shot) => shot.id === props.currentId) ? 'border-signal/70' : 'border-transparent'
+  // Every group is outlined, so a group shows as soon as it is formed; the open shot's group stands out.
+  const line = groupShots(i).some((shot) => shot.id === props.currentId) ? 'border-signal/70' : 'border-border'
 
   // A merged shot is outlined on its own.
   if (!inGroup(i, -1) && !inGroup(i, 1)) return props.shots[i]?.partsCount ? cn('rounded-xl border-2 p-1', line) : ''
 
-  // The list spaces its items with a margin below each; inside a group that gap is taken as padding, so the line runs on.
+  // The shots sit against the outline; the list's gap below each is left out inside a group, so the line runs on.
   return cn(
-    'border-x-2 px-1 pt-1',
+    'border-x-2',
     line,
     inGroup(i, -1) ? '' : 'rounded-t-xl border-t-2',
-    inGroup(i, 1) ? 'mb-0! pb-1' : 'rounded-b-xl border-b-2 pb-1',
+    inGroup(i, 1) ? 'mb-0!' : 'rounded-b-xl border-b-2',
   )
+}
+
+/**
+ * A shot on its own has a rounded border of its own; inside a group the
+ * shots are parted by a line, and the first and last follow the outline's
+ * corners, so a selected shot's fill fits inside it.
+ */
+const rowShape = (i: number) => {
+  if (!inGroup(i, -1) && !inGroup(i, 1)) return 'rounded-lg border border-transparent'
+
+  return cn(inGroup(i, -1) ? '' : 'rounded-t-[10px]', inGroup(i, 1) ? 'border-b border-border' : 'rounded-b-[10px]')
 }
 
 /** The shots of the group that shot i is in. */
@@ -415,20 +449,89 @@ const canMergeSelection = computed(() => {
   return indexes[indexes.length - 1] - indexes[0] === indexes.length - 1
 })
 
-const move = (index: number, delta: number) => {
-  if (!props.reorderUrl) {
-    return
+/*
+ * Dragging: a shot dropped between two others lands there, inside the
+ * group when both neighbours are in it and on its own otherwise; a shot
+ * dropped on top of another joins that shot's group, or forms one with it.
+ * Every shot is a group of its own until it is grouped.
+ */
+type DropTarget = { kind: 'onto'; id: string } | { kind: 'between'; index: number; inside: boolean }
+
+const dragged = ref<string | null>(null)
+const target = ref<DropTarget | null>(null)
+
+const canDrag = computed(() => Boolean(props.reorderUrl) && !editing.value && !reordering.value)
+
+/** The shots in order as groups of ids: shots next to each other with the same key form one. */
+const currentGroups = () =>
+  props.shots.reduce<string[][]>((groups, shot, i) => {
+    if (inGroup(i, -1)) groups[groups.length - 1].push(shot.id)
+    else groups.push([shot.id])
+
+    return groups
+  }, [])
+
+/** The nearest shot before or from a place in the list, leaving out the one that is dragged. */
+const neighbour = (from: number, step: -1 | 1, moving: string) => {
+  for (let i = from; i >= 0 && i < props.shots.length; i += step) {
+    if (props.shots[i].id !== moving) return props.shots[i]
   }
 
+  return undefined
+}
+
+/** Whether a line between the shots at index - 1 and index falls inside one group. */
+const insideAt = (index: number, moving: string) => {
+  const before = neighbour(index - 1, -1, moving)
+  const after = neighbour(index, 1, moving)
+
+  return Boolean(before?.groupKey) && before?.groupKey === after?.groupKey
+}
+
+/** Whether two shots are in the same group of two or more. */
+const sameGroup = (one: string | null, other: string) =>
+  one !== null && one !== other && currentGroups().some((group) => group.includes(one) && group.includes(other))
+
+/**
+ * The groups after the shot is placed: between two shots, or on top of one.
+ * On top of a shot of its own group it takes that shot's place, so a group
+ * is put in order by dropping its shots on each other.
+ */
+const placed = (moving: string, drop: DropTarget): string[][] => {
   const order = props.shots.map((shot) => shot.id)
-  const [moved] = order.splice(index, 1)
-  order.splice(index + delta, 0, moved)
+  const takesPlace =
+    drop.kind === 'onto' && sameGroup(moving, drop.id) && order.indexOf(drop.id) < order.indexOf(moving)
+  const groups = currentGroups()
+    .map((group) => group.filter((id) => id !== moving))
+    .filter((group) => group.length > 0)
+
+  if (drop.kind === 'onto') {
+    const group = groups.find((members) => members.includes(drop.id))
+    group?.splice(group.indexOf(drop.id) + (takesPlace ? 0 : 1), 0, moving)
+
+    return groups
+  }
+
+  const after = neighbour(drop.index, 1, moving)
+
+  if (!after) return [...groups, [moving]]
+
+  const at = groups.findIndex((members) => members.includes(after.id))
+
+  if (drop.inside) groups[at].splice(groups[at].indexOf(after.id), 0, moving)
+  else groups.splice(at, 0, [moving])
+
+  return groups
+}
+
+const save = (groups: string[][]) => {
+  if (!props.reorderUrl || JSON.stringify(groups) === JSON.stringify(currentGroups())) return
 
   reordering.value = true
 
   router.post(
     props.reorderUrl,
-    { shots: order },
+    { groups },
     {
       preserveScroll: true,
       only: ['siblings'],
@@ -437,6 +540,52 @@ const move = (index: number, delta: number) => {
       },
     },
   )
+}
+
+const startDrag = (event: DragEvent, shot: ShotListItem) => {
+  if (!canDrag.value) return
+
+  dragged.value = shot.id
+  event.dataTransfer?.setData('text/plain', shot.id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+const endDrag = () => {
+  dragged.value = null
+  target.value = null
+}
+
+/** The top and bottom quarter of a shot drop between shots; the middle drops on top of it. */
+const hover = (event: DragEvent, i: number) => {
+  const moving = dragged.value
+
+  if (!moving) return
+
+  const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const ratio = (event.clientY - box.top) / box.height
+
+  if (ratio > 0.25 && ratio < 0.75) {
+    target.value = props.shots[i].id === moving ? null : { kind: 'onto', id: props.shots[i].id }
+
+    return
+  }
+
+  const index = ratio <= 0.25 ? i : i + 1
+  target.value = { kind: 'between', index, inside: insideAt(index, moving) }
+}
+
+/** Which edge of shot i shows the line for a drop between shots. */
+const lineAt = (i: number): 'top' | 'bottom' | null => {
+  if (target.value?.kind !== 'between') return null
+  if (target.value.index === i) return 'top'
+
+  return target.value.index === props.shots.length && i === props.shots.length - 1 ? 'bottom' : null
+}
+
+const drop = () => {
+  if (dragged.value && target.value) save(placed(dragged.value, target.value))
+
+  endDrag()
 }
 
 /*

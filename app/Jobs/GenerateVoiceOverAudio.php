@@ -70,10 +70,6 @@ class GenerateVoiceOverAudio implements ShouldQueue
             ->toMediaCollection(Shot::VOICE_OVERS);
 
         $shot->setVoiceOverTrack($this->locale, 'ready');
-
-        if ($shot->mergedInto !== null) {
-            MergeShotAudio::start($shot->mergedInto, [$this->locale]);
-        }
     }
 
     public function failed(?Throwable $exception): void

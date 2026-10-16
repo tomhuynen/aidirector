@@ -183,6 +183,18 @@ final class KeyframeStaging
         ];
     }
 
+    public static function facing(string $faces): string
+    {
+        return match ($faces) {
+            'camera' => 'faces the camera',
+            'camera-left', 'camera-right' => 'is turned three-quarters toward the camera, facing the ' . substr($faces, 7) . ' of the frame',
+            'left', 'right' => "is side-on facing {$faces}",
+            'away-left', 'away-right' => 'is turned three-quarters away from the camera, facing into the frame to the ' . substr($faces, 5),
+            'away' => 'has the back to the camera',
+            default => '',
+        };
+    }
+
     /**
      * One person of the cast in one sentence, such as "The Damen host stands
      * on the right, is side-on facing left, looks at the Helmeted visitor
@@ -190,7 +202,7 @@ final class KeyframeStaging
      *
      * @param  Member  $member
      */
-    private static function sentence(array $member): string
+    public static function sentence(array $member): string
     {
         $hand = match ($member['hand']) {
             'both' => ' in both hands',
@@ -205,14 +217,7 @@ final class KeyframeStaging
                 'right' => 'stands on the right',
                 default => '',
             },
-            match ($member['faces']) {
-                'camera' => 'faces the camera',
-                'camera-left', 'camera-right' => 'is turned three-quarters toward the camera, facing the ' . substr($member['faces'], 7) . ' of the frame',
-                'left', 'right' => "is side-on facing {$member['faces']}",
-                'away-left', 'away-right' => 'is turned three-quarters away from the camera, facing into the frame to the ' . substr($member['faces'], 5),
-                'away' => 'has the back to the camera',
-                default => '',
-            },
+            self::facing($member['faces']),
             $member['looks_at'] !== '' ? "looks at {$member['looks_at']}" : '',
             $member['holds'] !== '' ? "holds {$member['holds']}{$hand}" : '',
             $member['doing'],
