@@ -114,7 +114,7 @@ it('keeps what was made while the chat answered, so the reply does not take it o
     PlanDirector::fake([function () use ($shot) {
         actingAs($this->director, 'director')->post(route('public.shots.plan.elements', [$this->project, $shot]));
 
-        return ['reply' => 'Shall I go on?', 'stage' => 'cast', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [], 'remove_shots' => [], 'changes' => [], 'proposal' => null];
+        return ['reply' => 'Shall I go on?', 'stage' => 'cast', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'direct' => '', 'remove_shots' => [], 'changes' => [], 'proposal' => null];
     }]);
 
     $response = actingAs($this->director, 'director')

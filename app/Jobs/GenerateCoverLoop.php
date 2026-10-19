@@ -28,6 +28,8 @@ class GenerateCoverLoop implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     /** The widest ratio the video models offer; the cover is padded to it. */
     public const ASPECT_RATIO = '21:9';
 

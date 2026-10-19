@@ -31,6 +31,8 @@ class GenerateVoiceOverAudio implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly Shot $shot,
         public readonly string $locale,

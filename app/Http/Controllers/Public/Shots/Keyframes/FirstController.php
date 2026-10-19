@@ -19,12 +19,12 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * The step between planning and rendering: the director picks one of the
- * options drawn for keyframe 1, or asks for more.
+ * options drawn for the start frame, or asks for more.
  */
 class FirstController
 {
     /**
-     * Choose an option for keyframe 1 and render the other keyframes from it.
+     * Choose an option for the start frame and draw the end frame from it.
      */
     public function choose(KeyframeRenderRequest $request, Project $project, Shot $shot)
     {
@@ -34,7 +34,7 @@ class FirstController
 
         $first = $shot->keyframes()->with('media')->firstOrFail();
         $render = $first->renders()->firstWhere('id', $request->integer('render'))
-            ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the first keyframe.')]);
+            ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the start frame.')]);
 
         if ($first->isBusy()) {
             throw ValidationException::withMessages(['render' => __('Wait until the adjusted option is drawn.')]);
@@ -48,7 +48,7 @@ class FirstController
     }
 
     /**
-     * Draw another batch of options for keyframe 1.
+     * Draw another batch of options for the start frame.
      */
     public function more(Project $project, Shot $shot)
     {
@@ -73,7 +73,7 @@ class FirstController
     }
 
     /**
-     * Adjust one option for keyframe 1 before choosing it. The adjusted
+     * Adjust one option for the start frame before choosing it. The adjusted
      * version is added as a new option, so the original stays available.
      */
     public function adjust(FirstKeyframeAdjustRequest $request, Project $project, Shot $shot)
@@ -84,7 +84,7 @@ class FirstController
 
         $first = $shot->keyframes()->with('media')->firstOrFail();
         $render = $first->renders()->firstWhere('id', $request->integer('render'))
-            ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the first keyframe.')]);
+            ?? throw ValidationException::withMessages(['render' => __('That option does not belong to the start frame.')]);
 
         if ($first->isBusy()) {
             throw ValidationException::withMessages(['instruction' => __('Wait until the current adjustment is done.')]);
@@ -100,7 +100,7 @@ class FirstController
     private function ensureChoosing(Shot $shot, string $field): void
     {
         if ($shot->status !== ShotStatus::FIRST_KEYFRAME_READY) {
-            throw ValidationException::withMessages([$field => __('The first keyframe is not waiting for a choice.')]);
+            throw ValidationException::withMessages([$field => __('The start frame is not waiting for a choice.')]);
         }
     }
 }

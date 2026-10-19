@@ -109,7 +109,7 @@
           </div>
           <!-- Select and Move of the keyframe shown are put here, centred above it. -->
           <div
-            v-if="!showVideo && !adding && selected?.imageUrl && selected.moveUrl"
+            v-if="!showVideo && selected?.imageUrl && selected.moveUrl"
             id="keyframe-tools"
             data-keeps-selection
             class="flex shrink-0 items-center justify-center"
@@ -120,7 +120,7 @@
           >
             <!-- What the selected keyframe shows, centred in the space left of the image; a presenter's is what they say. -->
             <div
-              v-if="!showVideo && !adding && selected && isPortrait"
+              v-if="!showVideo && selected && isPortrait"
               class="absolute inset-y-0 left-0 flex items-center justify-center px-6"
               :style="{ width: sideWidth }"
             >
@@ -135,7 +135,7 @@
                   v-else
                   :key="selected.id"
                   :keyframe="selected"
-                  :index="selectedIndex"
+                  :label="frameLabel(selectedIndex)"
                   :selected-member="selectedMember"
                   :following="followingCount[selected.id] ?? 0"
                   :disabled="busy(selected)"
@@ -176,7 +176,7 @@
               :style="frameSize"
             />
             <div
-              v-else-if="!showVideo && !adding && selected?.imageUrl"
+              v-else-if="!showVideo && selected?.imageUrl"
               data-keeps-selection
               class="relative flex max-h-full max-w-full items-end justify-center"
               :style="frameSize"
@@ -240,18 +240,12 @@
               >
                 {{ $t('No video yet. Render it from the keyframes.') }}
               </p>
-              <p
-                v-else-if="adding"
-                class="rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-muted-foreground"
-              >
-                {{ $t('New keyframe :n. Describe it on the right.', { n: String(keyframes.length + 1) }) }}
-              </p>
               <div
                 v-else-if="selected"
                 class="max-w-md space-y-2 rounded-lg border border-border bg-background/90 px-5 py-4 text-center"
               >
                 <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                  {{ $t('Keyframe :n of :total', { n: String(selectedIndex + 1), total: String(keyframes.length) }) }}
+                  {{ frameLabel(selectedIndex) }}
                 </p>
                 <!-- The title and description are in the column on the right. -->
                 <p v-if="busy(selected)" class="flex items-center justify-center gap-2 pt-1 text-xs text-signal">
@@ -265,8 +259,7 @@
       </div>
     </section>
 
-    <!-- The conversation about the shot goes on here; the panels below stay for now, hidden. -->
-    <!-- The chat, or the new keyframe's form; without a video column it runs the full height. -->
+    <!-- The conversation about the shot goes on here; without a video column it runs the full height. -->
     <div
       v-if="sidePanel"
       :class="cn('relative col-start-2 row-start-1 flex min-h-0', !showVideoColumn && 'row-span-2')"
@@ -291,7 +284,7 @@
         </svg>
       </button>
       <aside
-        v-if="chat && !adding && !showVideo"
+        v-if="chat && !showVideo"
         class="flex shrink-0 flex-col border-l border-border px-5 py-4"
         :style="{ width: `${columnWidth}px` }"
       >
@@ -307,32 +300,11 @@
           :target="chatTarget"
           :change-url="chat.changeUrl"
           :voice-over-url="chat.voiceOverUrl"
+          :sequence-url="chat.sequenceUrl"
           :following="followingCount"
           :issues="!choosing.active && selected && !busy(selected) ? issuesFor(selected.id) : null"
         />
       </aside>
-      <FirstKeyframeInspector
-        v-if="showInspectors && choosing.active && keyframes[0]"
-        :keyframe="keyframes[0]"
-        :adjust-url="choosing.adjustUrl"
-        :selected="selectedOption"
-        :busy="choosing.pending || Boolean(choosing.adjusting)"
-      />
-      <NewKeyframeInspector
-        v-else-if="adding"
-        :position="keyframes.length + 1"
-        :store-url="newKeyframe.storeUrl"
-        @added="adding = false"
-      />
-      <KeyframeInspector
-        v-else-if="showInspectors && selected && !showVideo"
-        :key="selected.id"
-        :keyframe="selected"
-        :index="selectedIndex"
-        :can-delete="canArrange"
-        :can-copy="keyframes.length < newKeyframe.max"
-        :issues="issuesFor(selected.id)"
-      />
     </div>
 
     <!-- While trimming, the timeline takes the place of the keyframes and the video. -->
@@ -392,25 +364,65 @@
         <p v-for="(issue, i) in shotIssues" :key="i" class="pl-7 text-muted-foreground">{{ issue }}</p>
       </div>
 
-      <!-- Scrolls sideways only; the room below takes the larger click area of the length buttons. -->
+      <!-- The end frame is handed on to the shots that continue from it: confirmed by the director, and settled again after it changed. -->
+      <div
+        v-if="sequence && sequence.continuedBy.length > 0 && !generating"
+        :class="
+          cn(
+            'flex items-center gap-3 rounded-lg border px-3 py-2 text-sm',
+            sequence.staleFollowers.length > 0 ? 'border-amber-500/50 bg-amber-500/10' : 'border-border bg-card',
+          )
+        "
+      >
+        <template v-if="sequence.staleFollowers.length > 0">
+          <TriangleAlert class="size-4 shrink-0 text-amber-500" />
+          <p class="min-w-0 flex-1">
+            {{
+              $t('The end frame changed. :shots drawn from the earlier version.', {
+                shots: shotsWere(sequence.staleFollowers),
+              })
+            }}
+          </p>
+          <Button type="button" size="sm" :disabled="continuation.processing" @click="resetFollowers">
+            <RefreshCw class="size-4" />
+            {{ $t('Draw them again') }}
+          </Button>
+          <Button type="button" size="sm" variant="ghost" :disabled="continuation.processing" @click="keepFollowers">
+            {{ $t('Keep them') }}
+          </Button>
+        </template>
+        <template v-else-if="sequence.endFrameConfirmed">
+          <Check class="size-4 shrink-0 text-signal" />
+          <p class="min-w-0 flex-1 text-muted-foreground">
+            {{ $t('End frame confirmed · :shots from it.', { shots: shotsContinue(sequence.continuedBy) }) }}
+          </p>
+        </template>
+        <template v-else>
+          <TriangleAlert v-if="sequence.openIssues" class="size-4 shrink-0 text-amber-500" />
+          <Clock v-else class="size-4 shrink-0 text-muted-foreground" />
+          <p class="min-w-0 flex-1">
+            {{ $t(':shots from this end frame and wait for it.', { shots: shotsContinue(sequence.continuedBy) }) }}
+            <span v-if="sequence.openIssues" class="text-muted-foreground">
+              {{ $t('The check found something in this shot; look at it before you confirm.') }}
+            </span>
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            :disabled="!sequence.confirmable || continuation.processing"
+            @click="confirmEndFrame"
+          >
+            <LoaderCircle v-if="continuation.processing" class="size-4 animate-spin" />
+            <Check v-else class="size-4" />
+            {{ $t('Confirm end frame') }}
+          </Button>
+        </template>
+      </div>
+      <InputError :message="continuation.errors.confirm ?? continuation.errors.followers" />
+
+      <!-- The start frame and the end frame, or the stills of a montage; scrolls sideways only. -->
       <ul class="flex items-start gap-4 overflow-x-auto overflow-y-hidden pb-3">
-        <li
-          v-for="(keyframe, i) in strip"
-          :key="keyframe.id"
-          :draggable="canArrange"
-          :class="
-            cn(
-              'w-44 shrink-0 space-y-2 transition-opacity',
-              canArrange && 'cursor-grab active:cursor-grabbing',
-              keyframe.id === draggingId && 'opacity-40',
-            )
-          "
-          :title="canArrange ? $t('Drag to change the order') : undefined"
-          @dragstart="startDrag($event, keyframe.id)"
-          @dragover.prevent="dragOver(keyframe.id)"
-          @drop.prevent="drop"
-          @dragend="endDrag"
-        >
+        <li v-for="(keyframe, i) in keyframes" :key="keyframe.id" class="w-44 shrink-0 space-y-2">
           <button
             type="button"
             :class="
@@ -436,11 +448,11 @@
               :image-url="keyframe.thumbnailUrl"
               compact
             />
-            <!-- Waiting for the keyframe before: a still clock, so the only moving loader is the drawing's progress. -->
+            <!-- Waiting for the start frame: a still clock, so the only moving loader is the drawing's progress. -->
             <span
               v-if="keyframe.status === 'waiting'"
               class="absolute inset-0 flex items-center justify-center bg-background/40 text-muted-foreground"
-              :title="$t('Waits for the keyframe before')"
+              :title="$t('Waits for the start frame')"
             >
               <Clock class="size-5" />
             </span>
@@ -457,36 +469,11 @@
               </span>
             </span>
           </button>
-          <KeyframeSeconds
-            v-if="keyframeSeconds"
-            :seconds="secondsOf(i)"
-            :url="keyframe.secondsUrl"
-            :disabled="video.pending || choosing.active"
-          />
-          <!-- Without times, a label keeps the row in line with the one under Add keyframe. -->
-          <p v-else class="mt-2 px-1 text-sm text-muted-foreground">{{ $t('Keyframe :n', { n: String(i + 1) }) }}</p>
-        </li>
-        <!-- A presenter speaks from one still; an insert shows one. -->
-        <li v-if="!oneKeyframe" class="w-44 shrink-0">
-          <button
-            type="button"
-            :disabled="!canAdd"
-            :class="
-              cn(
-                'flex h-28 w-full items-center justify-center rounded-lg border border-dashed border-border bg-card/60 text-muted-foreground transition-colors enabled:hover:border-muted-foreground/60 enabled:hover:text-foreground disabled:opacity-50',
-                adding && 'border-solid border-signal text-signal ring-2 ring-signal/40',
-              )
-            "
-            @click="startAdding"
-          >
-            <Plus class="size-6" />
-          </button>
-          <p :class="cn('mt-2 px-1 text-sm text-muted-foreground', adding && 'font-semibold text-foreground')">
-            {{ $t('Add keyframe') }}
+          <p class="mt-2 px-1 text-sm text-muted-foreground tabular-nums">
+            {{ frameLabel(i) }}<template v-if="keyframeSeconds"> · {{ keyframeSeconds[i]?.toFixed(1) }} s</template>
           </p>
         </li>
       </ul>
-      <InputError :message="arrangeError" />
     </section>
 
     <!-- Shown once there is a video, or once one can be rendered; until then the keyframes take the width. -->
@@ -576,7 +563,6 @@ import {
   Download,
   LoaderCircle,
   Play,
-  Plus,
   RefreshCw,
   Scissors,
   TriangleAlert,
@@ -586,13 +572,9 @@ import {
 import { computed, ref, watch } from 'vue'
 
 import FirstKeyframeChooser from './FirstKeyframeChooser.vue'
-import FirstKeyframeInspector from './FirstKeyframeInspector.vue'
-import KeyframeInspector from './KeyframeInspector.vue'
-import KeyframeSeconds from './KeyframeSeconds.vue'
 import KeyframeStagingForm from './KeyframeStagingForm.vue'
 import { isBusy, type KeyframeStatus } from './keyframeStatus'
 import KeyframeTools, { type LayoutMember } from './KeyframeTools.vue'
-import NewKeyframeInspector from './NewKeyframeInspector.vue'
 import Placeholder from './Placeholder.vue'
 import PlanChat, { type ChatTarget, type PlanChatTurn } from './PlanChat.vue'
 import RenderProgress from './RenderProgress.vue'
@@ -661,10 +643,6 @@ export type PanelKeyframe = {
   updateUrl: string | null
   tweakUrl: string | null
   chooseRenderUrl: string | null
-  destroyUrl: string | null
-  copyUrl?: string | null
-  /** Setting how long it lasts; none for a presenter, who is as long as what they say. */
-  secondsUrl?: string | null
 }
 
 export type PanelChoosing = {
@@ -677,9 +655,22 @@ export type PanelChoosing = {
   adjusting?: boolean
 }
 
-export type PanelNewKeyframe = {
-  storeUrl: string
-  max: number
+export type PanelSequence = {
+  /** The shot this one continues from, such as SH120. */
+  continuesFrom: string | null
+  /** The shots that continue from this one's end frame, such as SH130. */
+  continuedBy: string[]
+  /** The director confirmed the end frame as it is drawn now. */
+  endFrameConfirmed: boolean
+  /** The end frame is drawn and checked, so it can be confirmed. */
+  confirmable: boolean
+  /** The checks found something in this shot. */
+  openIssues: boolean
+  /** The shots that continue from this one and were drawn from an earlier version of its end frame. */
+  staleFollowers: string[]
+  confirmUrl: string
+  resetUrl: string
+  keepUrl: string
 }
 
 export type PanelVideo = {
@@ -713,11 +704,15 @@ const props = defineProps<{
     changeUrl?: string
     /** Uses or declines a voice-over the chat suggested. */
     voiceOverUrl?: string
+    /** Makes the shots of a sequence the chat laid out, or leaves it. */
+    sequenceUrl?: string
   }
   keyframes: PanelKeyframe[]
+  /** The kind of shot: a scene or close-up has a start frame and an end frame, a montage its stills. */
+  kind: string
   aspectRatio: string
   duration: number
-  /** How long each keyframe lasts, in order; none for a scene, which the video model paces, or a presenter. */
+  /** How long each still of a montage shows, in order; none for the other kinds. */
   keyframeSeconds?: number[] | null
   generating: boolean
   error?: string | null
@@ -725,16 +720,14 @@ const props = defineProps<{
   retryUrl: string
   video: PanelVideo
   choosing: PanelChoosing
+  /** The shot's place in its sequence; null outside one. */
+  sequence?: PanelSequence | null
   /** How long a keyframe and a video usually take, in seconds, for the progress line. */
   renderSeconds: { keyframe: number; video: number }
   /** One person speaks the voice-over to the camera, with a video per language. */
   presenter?: boolean
-  /** The shot keeps its one keyframe: no keyframe is added. */
-  oneKeyframe?: boolean
   /** What the presenter says. */
   voiceOver?: string | null
-  newKeyframe: PanelNewKeyframe
-  reorderUrl: string
   /** What the checks found, per keyframe position or for the whole shot (position null). */
   issueGroups?: PanelIssueGroup[]
   /** The keyframes are being reviewed together right now. */
@@ -747,11 +740,16 @@ const props = defineProps<{
 
 const selectedIndex = ref(0)
 
-/** The keyframe 1 option the director selected, shared by the options and the column that adjusts them. */
+/** The start frame option the director selected, shared by the options and the chat about them. */
 const selectedOption = ref<number | null>(null)
 
-/** The inspectors of a keyframe and of keyframe 1 are kept, but the chat takes their place. */
-const showInspectors = false
+/** What a keyframe is called: the start or end frame of a scene or close-up, a still of a montage, the one frame otherwise. */
+const frameLabel = (index: number) => {
+  if (props.kind === 'montage') return $t('Still :n', { n: String(index + 1) })
+  if (props.kind === 'presenter' || props.kind === 'insert') return $t('The frame')
+
+  return index === 0 ? $t('Start frame') : $t('End frame')
+}
 
 /** The one of the cast selected in the keyframe, whom the chat is about. */
 const selectedMember = ref<string | null>(null)
@@ -773,25 +771,25 @@ const chatTarget = computed<ChatTarget>(() => {
     return {
       kind: 'option',
       option: selectedOption.value,
-      label: $t('About option :n for keyframe 1', { n: String(number) }),
+      label: $t('About option :n for the start frame', { n: String(number) }),
     }
   }
 
   if (!selected.value) return null
 
-  const n = String(selectedIndex.value + 1)
+  const frame = frameLabel(selectedIndex.value)
 
   return selectedMember.value
     ? {
         kind: 'keyframe',
         keyframe: selected.value.id,
         member: selectedMember.value,
-        label: $t('About :name in keyframe :n', { name: selectedMember.value, n }),
+        label: $t('About :name in the :frame', { name: selectedMember.value, frame: frame.toLowerCase() }),
       }
     : {
         kind: 'keyframe',
         keyframe: selected.value.id,
-        label: $t('About keyframe :n · :title', { n, title: selected.value.title }),
+        label: $t(':frame · :title', { frame, title: selected.value.title }),
       }
 })
 
@@ -822,21 +820,10 @@ const currentVideo = computed(() => {
     : { url: props.video.url, downloadUrl: props.video.downloadUrl }
 })
 
-const adding = ref(false)
-
 const selectKeyframe = (index: number) => {
   selectedIndex.value = index
   showVideo.value = false
-  adding.value = false
   editing.value = false
-}
-
-/**
- * Selects the empty slot at the end of the strip; the right column becomes the form for it.
- */
-const startAdding = () => {
-  adding.value = true
-  showVideo.value = false
 }
 
 watch(
@@ -936,38 +923,7 @@ const frameSize = computed(() => ({
   width: isPortrait.value ? undefined : '100%',
 }))
 
-/** How long a keyframe lasts: its own seconds, or an even share of the shot while it is only planned. */
-const secondsOf = (index: number) =>
-  props.keyframeSeconds?.[index] ?? props.duration / Math.max(props.keyframes.length, 1)
-
-const selectVideo = () => {
-  showVideo.value = true
-  adding.value = false
-}
-
-const canAdd = computed(
-  () =>
-    !props.choosing.active &&
-    !props.generating &&
-    !props.video.pending &&
-    props.keyframes.length > 0 &&
-    props.keyframes.length < props.newKeyframe.max &&
-    props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.updateUrl && !busy(keyframe)),
-)
-
-/**
- * Keyframes can be dragged into a new order or deleted once all of them are
- * drawn and nothing else is being generated.
- */
-const canArrange = computed(
-  () =>
-    !props.choosing.active &&
-    !props.generating &&
-    !props.video.pending &&
-    !arranging.value &&
-    props.keyframes.length > 1 &&
-    props.keyframes.every((keyframe) => keyframe.imageUrl && keyframe.destroyUrl && !busy(keyframe)),
-)
+const selectVideo = () => (showVideo.value = true)
 
 const busy = (keyframe: PanelKeyframe) => isBusy(keyframe.status)
 
@@ -980,7 +936,7 @@ const drawing = (keyframe: PanelKeyframe) => keyframe.status === 'drawing'
 const renderLabel = (keyframe: PanelKeyframe): string | null => {
   switch (keyframe.status) {
     case 'waiting':
-      return $t('Waits for the keyframe before')
+      return $t('Waits for the start frame')
     case 'drawing':
       return $t('Generating image…')
     case 'checking':
@@ -990,83 +946,9 @@ const renderLabel = (keyframe: PanelKeyframe): string | null => {
   }
 }
 
-const isSelected = (id: string) => !showVideo.value && !adding.value && selected.value?.id === id
+const isSelected = (id: string) => !showVideo.value && selected.value?.id === id
 
 const selectById = (id: string) => selectKeyframe(props.keyframes.findIndex((keyframe) => keyframe.id === id))
-
-const draggingId = ref<string | null>(null)
-const dragOrder = ref<string[]>([])
-const arranging = ref(false)
-const arrangeError = ref<string | undefined>()
-
-/**
- * While dragging, and until the server confirms, the strip shows the order being dragged.
- */
-const strip = computed(() => {
-  if (draggingId.value === null && !arranging.value) return props.keyframes
-
-  return dragOrder.value
-    .map((id) => props.keyframes.find((keyframe) => keyframe.id === id))
-    .filter((keyframe): keyframe is PanelKeyframe => keyframe !== undefined)
-})
-
-const startDrag = (event: DragEvent, id: string) => {
-  if (!canArrange.value) {
-    event.preventDefault()
-
-    return
-  }
-
-  draggingId.value = id
-  dragOrder.value = props.keyframes.map((keyframe) => keyframe.id)
-  arrangeError.value = undefined
-
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', id)
-  }
-}
-
-const dragOver = (overId: string) => {
-  const dragged = draggingId.value
-
-  if (dragged === null || dragged === overId) return
-
-  const order = dragOrder.value.filter((id) => id !== dragged)
-  order.splice(dragOrder.value.indexOf(overId), 0, dragged)
-  dragOrder.value = order
-}
-
-const drop = () => {
-  const dragged = draggingId.value
-  const selectedId = selected.value?.id
-  draggingId.value = null
-
-  if (dragged === null) return
-
-  const unchanged = dragOrder.value.every((id, index) => props.keyframes[index]?.id === id)
-
-  if (unchanged) return
-
-  arranging.value = true
-  router.post(
-    props.reorderUrl,
-    { keyframes: dragOrder.value },
-    {
-      preserveScroll: true,
-      onSuccess: () => {
-        const index = props.keyframes.findIndex((keyframe) => keyframe.id === selectedId)
-        if (index >= 0) selectedIndex.value = index
-      },
-      onError: (errors) => (arrangeError.value = errors.keyframes),
-      onFinish: () => (arranging.value = false),
-    },
-  )
-}
-
-const endDrag = () => {
-  if (draggingId.value !== null) drop()
-}
 
 const retry = useForm({})
 const issueGroups = computed(() => props.issueGroups ?? [])
@@ -1083,6 +965,22 @@ const issuesFor = (id: string) => {
 
   return issueGroups.value.find((group) => group.position === position) ?? null
 }
+
+/** Confirming the end frame for the shots that continue from it, or settling the shots drawn from an earlier version of it. */
+const continuation = useForm<{ confirm?: string; followers?: string }>({})
+const confirmEndFrame = () => props.sequence && continuation.post(props.sequence.confirmUrl, { preserveScroll: true })
+const resetFollowers = () => props.sequence && continuation.post(props.sequence.resetUrl, { preserveScroll: true })
+const keepFollowers = () => props.sequence && continuation.post(props.sequence.keepUrl, { preserveScroll: true })
+
+/** "SH130 continues" or "SH130 and SH140 continue". */
+const shotsContinue = (codes: string[]) =>
+  codes.length === 1 ? $t(':shot continues', { shot: codes[0] ?? '' }) : $t(':shots continue', { shots: listOf(codes) })
+
+/** "SH130 was" or "SH130 and SH140 were". */
+const shotsWere = (codes: string[]) =>
+  codes.length === 1 ? $t(':shot was', { shot: codes[0] ?? '' }) : $t(':shots were', { shots: listOf(codes) })
+
+const listOf = (codes: string[]) => `${codes.slice(0, -1).join(', ')} ${$t('and')} ${codes[codes.length - 1]}`
 
 const fixing = useForm({})
 const fixAll = () => props.fixAllUrl && fixing.post(props.fixAllUrl, { preserveScroll: true })
@@ -1182,8 +1080,8 @@ const resetWidth = () => {
   rememberWidth()
 }
 
-/** The chat, or the form of a new keyframe, next to the image. */
-const sidePanel = computed(() => adding.value || Boolean(props.chat && !showVideo.value))
+/** The chat next to the image. */
+const sidePanel = computed(() => Boolean(props.chat && !showVideo.value))
 
 const showVideoColumn = computed(
   () => Boolean(props.video.url) || props.video.pending || Boolean(props.video.error) || canRenderVideo.value,

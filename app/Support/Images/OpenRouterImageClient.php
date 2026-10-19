@@ -18,6 +18,9 @@ use Throwable;
  */
 class OpenRouterImageClient
 {
+    /** The longest one image may take, in seconds: a call that stalls fails well within the job that waits for it. */
+    public const int TIMEOUT = 240;
+
     /**
      * Whether the model has to be called through this endpoint.
      */
@@ -48,7 +51,7 @@ class OpenRouterImageClient
         $response = Http::baseUrl(Config::get('pipeline.video.url'))
             ->withToken((string) Config::get('ai.providers.openrouter.key'))
             ->acceptJson()
-            ->timeout(300)
+            ->timeout(self::TIMEOUT)
             ->retry(TransientHttpFailure::ATTEMPTS, TransientHttpFailure::WAIT_MS, fn(Throwable $exception) => TransientHttpFailure::retryable($exception))
             ->withBody((string) json_encode($body, JSON_UNESCAPED_SLASHES), 'application/json')
             ->post('images')

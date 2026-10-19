@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Ai\Agents\PlanDirector;
+use App\Ai\Agents\SceneDirector;
+use App\Ai\Briefs\BodyRules;
 use App\Enums\ElementType;
 use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
@@ -41,7 +43,56 @@ function planShot(Project $project, array $attributes = []): Shot
  */
 function directorReply(array $overrides = []): array
 {
-    return ['reply' => 'Fine.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [], 'proposal' => null, ...$overrides];
+    return ['reply' => 'Fine.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'direct' => '', 'proposal' => null, ...$overrides];
+}
+
+/**
+ * One frame of a directed shot, staged.
+ *
+ * @return array<string, mixed>
+ */
+function directedFrame(string $place, string $holds = ''): array
+{
+    return ['title' => 'Frame', 'summary' => '', 'place' => $place, 'cast' => $holds === '' ? [] : [['name' => 'Visitor', 'stands' => '', 'faces' => '', 'looks_at' => '', 'holds' => $holds, 'hand' => 'right', 'doing' => '']], 'spatial' => '', 'elements' => []];
+}
+
+/**
+ * One shot as the scene director answers it.
+ *
+ * @param  list<int>  $shows
+ * @param  array<string, mixed>|null  $end
+ * @return array<string, mixed>
+ */
+function directedShot(string $title, string $action, string $kind = 'scene', array $shows = [1], ?array $end = null, int $seconds = 4): array
+{
+    return [
+        'title' => $title, 'kind' => $kind, 'purpose' => 'What the viewer must understand.', 'notice' => 'What they must notice.',
+        'start' => directedFrame('At the reception desk.'), 'action' => $action, 'end' => $end ?? directedFrame('At the reception desk.', 'the cracked badge'),
+        'seconds' => $seconds, 'cut' => 'The act is done.', 'shows' => $shows,
+    ];
+}
+
+/**
+ * The scene director's answer: a story directed into three shots, the second and third continuing the one before.
+ *
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function directedSequence(array $overrides = []): array
+{
+    return [
+        'title' => 'Cracked badge',
+        'change' => 'The cracked badge becomes a new one.',
+        'facts' => ['He shows the cracked badge.', 'The badge changes hands.', 'He gets a new one.'],
+        'context' => ['A badge is needed to pass the gate.'],
+        'must_not' => [],
+        'shots' => [
+            directedShot('Report it', 'He walks up to the counter and holds out the cracked badge.', shows: [1]),
+            directedShot('Hand it over', 'Hands slide the cracked badge across the counter.', 'close-up', [2], directedFrame('At the reception desk.'), 2),
+            directedShot('New badge back', 'The receptionist hands over a new badge.', 'close-up', [3], directedFrame('At the reception desk.', 'a new badge'), 3),
+        ],
+        ...$overrides,
+    ];
 }
 
 /**
@@ -178,6 +229,15 @@ describe('create', function () {
         expect($visitor->sqid)->not->toBeIn($this->project->shots()->first()->plan_chat[1]['places']);
     });
 
+    it('lets the director only offer the places of the cast and sets, by their exact names', function () {
+        Element::factory()->for($this->project)->create(['name' => 'Quiet corridor', 'type' => ElementType::PLACE]);
+        Element::factory()->for($this->project)->create(['name' => 'Visitor', 'type' => ElementType::PERSON]);
+        $schema = (new PlanDirector(planShot($this->project), []))->schema(new Illuminate\JsonSchema\JsonSchemaTypeFactory());
+
+        expect($schema['places']->toArray()['items']['enum'])->toBe(['Quiet corridor'])
+            ->and((string) (new PlanDirector(planShot($this->project), []))->instructions())->toContain('leave places empty only when the director asks to see every place');
+    });
+
     it('suggests a new voice-over and uses it only once the director accepts it', function () {
         PlanDirector::fake([directorReply(['reply' => 'Shorter and warmer. Shall I use it?', 'confirm' => true, 'voice_over' => 'Welcome to Damen Naval. Your safety comes first.'])]);
         $shot = planShot($this->project, ['duration' => 5, 'voice_over' => 'Welcome. Safety is our highest priority here at the yard.']);
@@ -207,7 +267,7 @@ describe('create', function () {
         $shot = planShot($this->project, ['duration' => 5]);
 
         talkTo($this, $shot, 'make it longer, three sentences')
-            ->assertJsonPath('messages.1.voiceOver', ['text' => $long, 'seconds' => 12]);
+            ->assertJsonPath('messages.1.voiceOver', ['text' => $long, 'seconds' => 10]);
 
         expect($shot->fresh()->durationInSeconds())->toBe(5);
         PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'unless the director asks for more, such as a longer text or a number of sentences'));
@@ -217,7 +277,7 @@ describe('create', function () {
             ->assertOk();
 
         expect($shot->fresh())->voice_over->toBe($long)
-            ->and($shot->fresh()->durationInSeconds())->toBe(12);
+            ->and($shot->fresh()->durationInSeconds())->toBe(10);
     });
 
     it('keeps the voice-over when the director declines the suggestion', function () {
@@ -292,7 +352,7 @@ describe('create', function () {
         // The conversation and the plan as saved are sent along every turn; nothing becomes a rule.
         PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'Director: the badge starts on her back')
             && str_contains($prompt->prompt, 'You: Should the camera stay in front of her?')
-            && str_contains($prompt->prompt, "1. Badge\nSummary: She wears her badge\nPlace: (none)\nSpatial fact: (none)\nCast and sets: Female engineer")
+            && str_contains($prompt->prompt, "1. Start frame: Badge\nSummary: She wears her badge\nPlace: (none)\nSpatial fact: (none)\nCast and sets: Female engineer")
             && str_contains((string) $prompt->agent->instructions(), 'There are no separate rules for a shot'));
     });
 
@@ -310,20 +370,36 @@ describe('create', function () {
         PlanDirector::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), '- close-up: when'));
     });
 
-    it('tells the story in several shots right after this one, grouped together', function () {
+    it('lays out the story in shots for the director to accept, then makes them right after this one, grouped together', function () {
         PlanDirector::fake([
-            directorReply(['reply' => 'Then this shot is the arrival; the others wait right after it.', 'stage' => 'kind', 'shots' => [
-                ['title' => 'Report a damaged badge', 'kind' => 'scene', 'idea' => 'A visitor walks up to the counter.', 'setting' => 'new_place', 'same_place_as' => 0],
-                ['title' => 'Hand it over', 'kind' => 'close-up', 'idea' => 'Hands slide the cracked badge across the counter.', 'setting' => 'continues', 'same_place_as' => 0],
-                ['title' => 'New badge back', 'kind' => 'close-up', 'idea' => 'The receptionist hands over a new badge.', 'setting' => 'continues', 'same_place_as' => 0],
-            ]]),
+            directorReply(['reply' => 'I lay out the shots for it.', 'stage' => 'kind', 'direct' => 'A visitor reports a cracked badge at the counter and gets a new one.']),
             directorReply(['reply' => 'Shall the receptionist slide it over?', 'stage' => 'idea']),
         ]);
+        SceneDirector::fake([directedSequence()]);
         $before = Shot::factory()->for($this->project)->create(['position' => 1]);
         $shot = planShot($this->project, ['position' => 2]);
         $after = Shot::factory()->for($this->project)->create(['position' => 3]);
 
-        talkTo($this, $shot, 'yes, those three shots')->assertJsonPath('reload', true);
+        $response = talkTo($this, $shot, 'he reports a cracked badge and gets a new one')
+            ->assertJsonPath('reload', false)
+            ->assertJsonPath('messages.1.sequence.change', 'The cracked badge becomes a new one.')
+            ->assertJsonPath('messages.1.sequence.shots.1.kind', 'close-up')
+            ->assertJsonPath('messages.1.sequence.shots.1.start.description', 'At the reception desk. The Visitor holds the cracked badge in the right hand.')
+            ->assertJsonMissingPath('messages.1.sequence.state');
+
+        expect($this->project->shots()->count())->toBe(3);
+        SceneDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'The story to direct, in the director\'s words: A visitor reports a cracked badge at the counter and gets a new one.')
+            && $prompt->model === config('pipeline.models.scene_director')
+            && $prompt->attachments->isEmpty()
+            && str_contains((string) $prompt->agent->instructions(), 'In action and the staging of the frames: ' . BodyRules::NO_TEMPO)
+            && str_contains((string) $prompt->agent->instructions(), 'the decisive change')
+            && str_contains((string) $prompt->agent->instructions(), 'Medium shot at eye level'));
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.sequence', [$this->project, $shot]), ['turn' => 1, 'accept' => true])
+            ->assertOk()
+            ->assertJsonPath('reload', true)
+            ->assertJsonPath('messages.1.sequence.state', 'accepted');
 
         $shots = $this->project->shots()->get();
         $group = $shot->fresh()->group_key;
@@ -332,33 +408,139 @@ describe('create', function () {
             ->and($shots->pluck('id')->all())->toBe([$before->id, $shot->id, $shots[2]->id, $shots[3]->id, $after->id])
             ->and($group)->not->toBeNull()
             ->and($shots->slice(1, 3)->pluck('group_key')->unique()->all())->toBe([$group])
-            ->and($shot->fresh()->title)->toBe('Report a damaged badge')
-            ->and($shot->fresh()->idea)->toBe('A visitor walks up to the counter.')
+            ->and($shot->fresh()->title)->toBe('Report it')
+            ->and($shot->fresh()->idea)->toBe('He walks up to the counter and holds out the cracked badge.')
+            ->and($shot->fresh()->storylineKeyframes())->toHaveCount(2)
+            ->and($shot->fresh()->storylineKeyframes()[1]['description'])->toBe('At the reception desk. The Visitor holds the cracked badge in the right hand.')
+            ->and($shot->fresh()->durationInSeconds())->toBe(4)
+            ->and($shot->fresh()->status)->toBe(ShotStatus::FIRST_KEYFRAME_PENDING)
             ->and($shots[2]->title)->toBe('Hand it over')
             ->and($shots[2]->kind)->toBe(App\Enums\ShotKind::CLOSE_UP)
-            ->and($shots[2]->status)->toBe(ShotStatus::STORYLINE_READY)
-            ->and($shots[2]->plan_chat[0]['text'])->toContain('Hands slide the cracked badge across the counter.');
+            ->and($shots[2]->storyline['setting_from'])->toBe(['shot_id' => $shot->id, 'keyframe' => Shot::LAST_KEYFRAME])
+            ->and($shots[2]->storylineKeyframes()[0]['description'])->toBe('At the reception desk. The Visitor holds the cracked badge in the right hand.')
+            ->and($shots[2]->plan_chat[0]['text'])->toContain('Hands slide the cracked badge across the counter.')
+            ->and($shots[3]->storyline['setting_from'])->toBe(['shot_id' => $shots[2]->id, 'keyframe' => Shot::LAST_KEYFRAME]);
+
+        // The accepted sequence stays answered: it is not made twice.
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.sequence', [$this->project, $shot]), ['turn' => 1, 'accept' => true])
+            ->assertUnprocessable();
 
         // The next shot's chat knows the whole sequence and where each shot plays.
         talkTo($this, $shots[2], 'yes');
 
-        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '1. SH020: A visitor walks up to the counter. (scene)')
+        PlanDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '1. SH020: He walks up to the counter and holds out the cracked badge. (scene)')
             && str_contains($prompt->prompt, '2. SH030: Hands slide the cracked badge across the counter. (close-up, continuing from SH020) <- this shot')
-            && str_contains((string) $prompt->agent->instructions(), 'what another shot of the sequence shows never happens in this one')
-            && str_contains((string) $prompt->agent->instructions(), 'is not in this shot\'s cast, place or keyframes, also when the director picked it before the story was split into shots')
-            && str_contains((string) $prompt->agent->instructions(), 'Each line says only what the director said for that shot'));
+            && str_contains((string) $prompt->agent->instructions(), 'what another shot of the sequence shows never happens in this one'));
     });
 
-    it('updates the sequence when it is agreed again, instead of adding it twice', function () {
-        $sequence = fn(string $second) => directorReply(['shots' => [
-            ['title' => 'Ask first', 'kind' => 'scene', 'idea' => 'The host stops the visitor at the dock.', 'setting' => 'new_place', 'same_place_as' => 0],
-            ['title' => 'Allowed spot', 'kind' => 'scene', 'idea' => $second, 'setting' => 'continues', 'same_place_as' => 0],
+    it('leaves the plan as it is when the director declines the shots', function () {
+        PlanDirector::fake([directorReply(['reply' => 'I lay out the shots for it.', 'direct' => 'A visitor reports a cracked badge.'])]);
+        SceneDirector::fake([directedSequence()]);
+        $shot = planShot($this->project, ['title' => 'As it was']);
+
+        talkTo($this, $shot, 'he reports a cracked badge');
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.sequence', [$this->project, $shot]), ['turn' => 1, 'accept' => false])
+            ->assertOk()
+            ->assertJsonPath('reload', false)
+            ->assertJsonPath('messages.1.sequence.state', 'declined');
+
+        expect($this->project->shots()->count())->toBe(1)
+            ->and($shot->fresh()->title)->toBe('As it was')
+            ->and($shot->fresh()->group_key)->toBeNull();
+    });
+
+    it('offers the cast and sets of the sequence to tick and what it misses to make, and makes the shots with the ticked ones', function () {
+        PlanDirector::fake([directorReply(['reply' => 'I lay out the shots for it.', 'direct' => 'A visitor reports a cracked badge at the counter.'])]);
+        $visitor = Element::factory()->for($this->project)->create(['type' => ElementType::PERSON, 'name' => 'Visitor']);
+        $desk = Element::factory()->for($this->project)->create(['type' => ElementType::PLACE, 'name' => 'Reception desk']);
+        $plant = Element::factory()->for($this->project)->create(['type' => ElementType::OBJECT, 'name' => 'Plant']);
+        $frame = fn(string $holds) => [...directedFrame('Reception desk, a plant on the counter.', $holds), 'elements' => ['Visitor', 'Plant']];
+        SceneDirector::fake([directedSequence([
+            'new_elements' => [['name' => 'Cracked badge', 'type' => 'object', 'description' => 'A white badge with a crack across it.'], ['name' => 'Plant', 'type' => 'object', 'description' => 'A plant.']],
+            'shots' => [
+                [...directedShot('Report it', 'He holds out the cracked badge.', shows: [1, 2, 3]), 'start' => $frame(''), 'end' => $frame('the Cracked badge')],
+            ],
+        ])]);
+        $shot = planShot($this->project);
+
+        $offered = talkTo($this, $shot, 'he reports a cracked badge')->assertJsonPath('reload', true);
+
+        expect($offered->json('messages.1.cast'))->toEqualCanonicalizing([$visitor->sqid, $plant->sqid, $desk->sqid])
+            ->and($shot->fresh()->storyline['new_elements'])->toBe([['name' => 'Cracked badge', 'type' => 'object', 'description' => 'A white badge with a crack across it.']]);
+
+        $badge = Element::factory()->for($this->project)->create(['type' => ElementType::OBJECT, 'name' => 'Cracked badge']);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.sequence', [$this->project, $shot]), ['turn' => 1, 'accept' => true, 'cast' => [$visitor->sqid, $desk->sqid, $plant->sqid, $badge->sqid]])
+            ->assertOk()
+            ->assertJsonPath('messages.1.sequence.state', 'accepted');
+
+        expect($shot->fresh()->plan_chat[1]['cast'])->toEqualCanonicalizing([$visitor->sqid, $desk->sqid, $plant->sqid, $badge->sqid]);
+
+        $keyframes = $shot->fresh()->storylineKeyframes();
+
+        expect($keyframes[0]['elements'])->toEqualCanonicalizing(['Visitor', 'Reception desk', 'Plant'])
+            ->and($keyframes[1]['elements'])->toEqualCanonicalizing(['Visitor', 'Reception desk', 'Plant', 'Cracked badge']);
+    });
+
+    it('directs the sequence again without what the director unticked, and makes the shots once it is accepted as it is', function () {
+        PlanDirector::fake([directorReply(['reply' => 'I lay out the shots for it.', 'direct' => 'A visitor reports a cracked badge at the counter.'])]);
+        $visitor = Element::factory()->for($this->project)->create(['type' => ElementType::PERSON, 'name' => 'Visitor']);
+        $desk = Element::factory()->for($this->project)->create(['type' => ElementType::PLACE, 'name' => 'Reception desk']);
+        $plant = Element::factory()->for($this->project)->create(['type' => ElementType::OBJECT, 'name' => 'Plant']);
+        $sequence = fn(string $place, array $elements) => directedSequence(['shots' => [
+            [...directedShot('Report it', 'He reports the badge.', shows: [1, 2, 3]), 'start' => [...directedFrame($place, ''), 'elements' => $elements], 'end' => [...directedFrame($place, ''), 'elements' => $elements]],
         ]]);
-        PlanDirector::fake([$sequence('The host points to a safe spot.'), $sequence('The host points away from the dock.')]);
+        SceneDirector::fake([
+            $sequence('Reception desk, a plant on the counter.', ['Visitor', 'Plant']),
+            $sequence('Reception desk, a bare counter.', ['Visitor', 'Plant']),
+        ]);
+        $shot = planShot($this->project);
+        $accept = fn(array $cast) => actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.sequence', [$this->project, $shot]), ['turn' => 1, 'accept' => true, 'cast' => $cast]);
+
+        talkTo($this, $shot, 'he reports a cracked badge');
+
+        $accept([$visitor->sqid, $desk->sqid])
+            ->assertOk()
+            ->assertJsonPath('reload', false)
+            ->assertJsonMissingPath('messages.1.sequence.state')
+            ->assertJsonPath('messages.1.sequence.shots.0.start.staging.place', 'Reception desk, a bare counter.')
+            ->assertJsonPath('messages.1.sequence.shots.0.start.elements', ['Visitor', 'Reception desk'])
+            ->assertJsonPath('messages.1.left_out', ['Plant']);
+
+        expect($shot->fresh()->plan_chat[1]['cast'])->toEqualCanonicalizing([$visitor->sqid, $desk->sqid])
+            ->and($shot->fresh()->idea)->not->toBe('He reports the badge.');
+        SceneDirector::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'never use them, and choose another of the cast and sets where the story needs one: Plant')
+            && str_contains($prompt->prompt, "The story to direct, in the director's words: A visitor reports a cracked badge at the counter."));
+
+        $accept([$visitor->sqid, $desk->sqid])->assertOk()->assertJsonPath('messages.1.sequence.state', 'accepted');
+
+        expect($shot->fresh()->storylineKeyframes()[0]['elements'])->toEqualCanonicalizing(['Visitor', 'Reception desk']);
+    });
+
+    it('updates the sequence when it is accepted again, instead of adding it twice', function () {
+        PlanDirector::fake([
+            directorReply(['reply' => 'Laid out.', 'direct' => 'The host stops the visitor at the dock and points to a safe spot.']),
+            directorReply(['reply' => 'Laid out again.', 'direct' => 'The host stops the visitor at the dock and points away from it.']),
+        ]);
+        $sequence = fn(string $second) => directedSequence(['facts' => ['The host stops him.', 'The host points.'], 'shots' => [
+            directedShot('Ask first', 'The host stops the visitor at the dock.', shows: [1]),
+            directedShot('Allowed spot', $second, shows: [2]),
+        ]]);
+        SceneDirector::fake([$sequence('The host points to a safe spot.'), $sequence('The host points away from the dock.')]);
         $shot = planShot($this->project, ['position' => 1]);
+        $accept = fn(int $turn) => actingAs($this->director, 'director')
+            ->postJson(route('public.shots.plan.sequence', [$this->project, $shot]), ['turn' => $turn, 'accept' => true])
+            ->assertOk();
 
         talkTo($this, $shot, 'ok');
+        $accept(1);
         talkTo($this, $shot->fresh(), 'perfect');
+        $accept(3);
 
         $shots = $this->project->shots()->get();
 
@@ -366,6 +548,25 @@ describe('create', function () {
             ->and($shots[1]->idea)->toBe('The host points away from the dock.')
             ->and($shots[1]->plan_chat)->toHaveCount(1)
             ->and($shots[1]->plan_chat[0]['text'])->toContain('The host points away from the dock.');
+    });
+
+    it('does not offer a sequence that leaves a fact unseen or shows what must not happen', function () {
+        PlanDirector::fake([directorReply(['reply' => 'I lay out the shots.', 'direct' => 'He reaches for the bag but does not touch it.'])]);
+        SceneDirector::fake([directedSequence([
+            'facts' => ['He reaches for the bag.', 'He stops before he touches it.', 'The owner comes back.'],
+            'must_not' => ['the hand touches the bag'],
+            'shots' => [
+                directedShot('Reach', 'He reaches for the bag.', shows: [1]),
+                directedShot('Stop', 'He stops.', shows: [2], end: directedFrame('Hall. The hand touches the bag.')),
+            ],
+        ])]);
+        $shot = planShot($this->project);
+
+        talkTo($this, $shot, 'he reaches for the bag')
+            ->assertJsonPath('messages.1.text', 'I lay out the shots. (The sequence does not hold up yet: No shot shows: The owner comes back. Shot 2 has in its end frame what must not happen: the hand touches the bag Tell me the story again, or what to change.)')
+            ->assertJsonMissingPath('messages.1.sequence');
+
+        expect($this->project->shots()->count())->toBe(1);
     });
 
     it('removes only untouched shots of the sequence the director agreed to drop', function () {

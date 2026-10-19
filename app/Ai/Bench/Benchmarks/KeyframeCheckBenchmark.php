@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Ai\Bench\Benchmarks;
 
 use App\Ai\Agents\KeyframeChecker;
+use App\Ai\Bench\AgentBenchmark;
 use App\Ai\Bench\BenchCase;
-use App\Ai\Bench\Benchmark;
 use App\Ai\KeyframePainter;
 use App\Models\Keyframe;
 use Illuminate\Support\Collection;
@@ -18,7 +18,7 @@ use Laravel\Ai\Files\StoredImage;
  * every keyframe that has one: a pose that is not natural is reported, and
  * nothing a viewer would not see as a mistake.
  */
-class KeyframeCheckBenchmark extends Benchmark
+class KeyframeCheckBenchmark extends AgentBenchmark
 {
     public function __construct(private readonly KeyframePainter $painter) {}
 

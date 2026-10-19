@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Ai\Bench\Benchmarks;
 
 use App\Ai\Agents\ElementSuggester;
+use App\Ai\Bench\AgentBenchmark;
 use App\Ai\Bench\BenchCase;
-use App\Ai\Bench\Benchmark;
 use App\Models\ElementRound;
 use Illuminate\Support\Collection;
 
@@ -14,7 +14,7 @@ use Illuminate\Support\Collection;
  * Suggesting cast and sets for every round the director confirmed in the
  * intake chat.
  */
-class CastSuggestionsBenchmark extends Benchmark
+class CastSuggestionsBenchmark extends AgentBenchmark
 {
     public function name(): string
     {

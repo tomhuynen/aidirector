@@ -30,6 +30,8 @@ class GenerateElementSuggestions implements ShouldQueue
 
     public int $timeout = 180;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly ElementRound $round,
     ) {

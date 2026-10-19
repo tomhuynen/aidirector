@@ -10,7 +10,6 @@ use App\Enums\Disk;
 use App\Enums\ElementType;
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
-use App\Http\Controllers\Public\Shots\Keyframes\StoreController;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
 use App\Jobs\GenerateStoryline;
@@ -21,6 +20,7 @@ use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Shots\KeyframeChain;
+use App\Support\Video\LumaVideoClient;
 use App\Support\Video\OpenRouterVideoClient;
 use App\Support\Video\StillVideo;
 use Illuminate\Support\Facades\Config;
@@ -99,25 +99,12 @@ it('draws the still straight away, the thing alone in the middle, and checks it 
     (new GenerateRemainingKeyframes($shot->fresh()))->handle(app(KeyframePainter::class), app(KeyframeChain::class));
 
     expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
-        ->and($shot->keyframes()->with('media')->first()->render())->not->toBeNull()
-        ->and(StoreController::canAddTo($shot->fresh(), 1, true, false))->toBeFalse();
+        ->and($shot->keyframes()->with('media')->first()->render())->not->toBeNull();
     Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Insert: the one thing fills about half of the frame')
         && $prompt->contains('No people, no hands and no other objects in front of it')
         && ! $prompt->contains('Staging: the people are inside the place'));
     KeyframeChecker::assertPrompted(fn($prompt) => str_contains((string) $prompt->agent->instructions(), 'This keyframe is an insert'));
 });
-
-it('offers no keyframe to add to an insert or a presenter, and does to a scene', function (ShotKind $kind, bool $one) {
-    $shot = Shot::factory()->for($this->project)->create(['kind' => $kind, 'status' => ShotStatus::KEYFRAMES_READY]);
-
-    actingAs($this->director, 'director')
-        ->get(route('public.shots.view', [$this->project, $shot]))
-        ->assertInertia(fn($page) => $page->where('shot.oneKeyframe', $one));
-})->with([
-    'insert' => [ShotKind::INSERT, true],
-    'presenter' => [ShotKind::PRESENTER, true],
-    'scene' => [ShotKind::SCENE, false],
-]);
 
 it('makes the clip from the still in code, without the video model', function () {
     Queue::fake();
@@ -126,7 +113,7 @@ it('makes the clip from the still in code, without the video model', function ()
     $still = Keyframe::factory()->for($shot)->create(['position' => 1]);
     $still->addMediaFromString(insertPng())->usingFileName('still.png')->toMediaCollection(Keyframe::RENDERS);
 
-    (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(KeyframePainter::class), app(StillVideo::class));
+    (new GenerateVideo($shot))->handle(app(LumaVideoClient::class), app(OpenRouterVideoClient::class), app(KeyframePainter::class), app(StillVideo::class));
 
     $video = $shot->fresh()->getFirstMedia(Shot::VIDEO);
     $directory = storage_path('tmp/insert-test');

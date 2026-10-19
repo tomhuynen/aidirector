@@ -28,6 +28,8 @@ class FixKeyframe implements ShouldQueue
 
     public int $timeout = 600;
 
+    public bool $failOnTimeout = true;
+
     /**
      * @param  list<string>  $problems
      */

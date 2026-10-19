@@ -16,7 +16,7 @@ use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Config;
 
 /**
- * Draws one option for keyframe 1. The options of a round run side by side
+ * Draws one option for the start frame. The options of a round run side by side
  * in one batch; {@see GenerateKeyframes::finishOptions()} runs when all are done.
  */
 #[DeleteWhenMissingModels]
@@ -27,7 +27,9 @@ class GenerateKeyframeOption implements ShouldQueue
     use Queueable;
     use RetriesHiccups;
 
-    public int $timeout = 300;
+    public int $timeout = 540;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(
         public readonly Keyframe $keyframe,

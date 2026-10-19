@@ -12,9 +12,9 @@ use App\Models\Project;
 use App\Models\Shot;
 
 /**
- * Composes the prompt the image model gets for one keyframe. Keyframe 1 is
- * drawn from the project's visual style, its brief and its cast and sets.
- * Every later keyframe is an edit of keyframe 1, so the place and the camera
+ * Composes the prompt the image model gets for one keyframe. The start frame
+ * is drawn from the project's visual style, its brief and its cast and sets.
+ * The end frame is an edit of the start frame, so the place and the camera
  * stay still. Which images are attached, and in which order, is decided by
  * {@see KeyframeReferences}.
  */
@@ -31,6 +31,10 @@ class KeyframeImageBrief
 
         if ($references->first !== null) {
             return self::onFirstKeyframe($shot, $keyframe, $references);
+        }
+
+        if ($references->view !== null) {
+            return self::backToView($shot, $keyframe, $references);
         }
 
         $style = $shot->project->style;
@@ -74,6 +78,9 @@ class KeyframeImageBrief
             $lines[] = 'Composition: the one thing is the only subject, large, sharp and readable in the middle of the frame. No people, no hands and no other objects in front of it.';
         } elseif ($closeUp) {
             $lines[] = 'Composition: the object and the hands are the subject, large, sharp and in the middle of the frame. Draw only the part of the people the frame shows: their clothing exactly as in their pictures, one layer, never a second jacket or shirt.';
+        } elseif ($shot->kindOrScene() === ShotKind::MEDIUM) {
+            $lines[] = 'Composition: the person from the waist up is the subject, their face and both hands readable, with the object they act on in the lower half of the frame, large and clear. The frame is cut at the waist; never the whole figure. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is.';
+            $lines[] = 'Staging: the person is inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches them: no railings, pillars, poles, barriers or machines directly behind or in front of them.';
         } else {
             $lines[] = 'Composition: the action is the subject. Put the people and the object they act on, such as a door, a bin or a sign, together in the centre of the frame, large and clear, so they get the most attention. Keep the background simple and subdued: fewer details, softer and lower in contrast than the subject, only enough to show where it is. Everything in the background must make physical sense: vehicles, containers and machines stand on open ground at their real size, never on or against a wall and never overlapping a building; leave them out when there is no room for them.';
             $lines[] = 'Staging: the people are inside the place, in front of a calm part of it that already belongs there; never put a separate wall, panel or backdrop in front of the place. Nothing crosses or touches a figure: no railings, pillars, poles, barriers or machines directly behind or in front of the people. Any sign or context object sits on that surface beside the people, clearly readable, not touching them. The ground near the feet is plain.';
@@ -91,8 +98,18 @@ class KeyframeImageBrief
             $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the place of this shot. Draw this same place, with its buildings, signs, furniture and objects, colours and light, and put the cast into it as described. Choose the camera and the framing for the action, as the framing says, not the view of the picture.';
         }
 
+        if ($references->master !== null) {
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the master plate of this sequence, {$references->masterLabel}: the place as it really is. Draw the walls, the floor, the doors, the signs, the fixed objects and the light exactly like it, seen from this keyframe's camera; never copy its framing or its people. Where it and any other attached image differ about the place, the master plate is right.";
+        }
+
         if ($references->setting !== null) {
-            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. This keyframe plays in exactly that place, at that moment or right after it: keep its furniture, surfaces, objects, colours and light, and the people's clothing. Keep the screen direction: whoever is on the left there is on the left here, and comes in from the same side. Move the camera as the framing says; never copy that image's framing.";
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is {$references->settingLabel}. " . match (true) {
+                $shot->isInsert() => 'This keyframe plays in exactly that place: keep its walls, surfaces, objects, colours and light, without its people. The camera is this keyframe\'s own, close on the one thing.',
+                $references->settingIsMoment => 'This keyframe shows exactly that instant from another camera position, as a match cut: everyone stands, bends, looks and holds exactly as they do there, with the same hand positions, the same objects in the same state and the same clothing. '
+                    . ($references->master !== null ? 'Take only the people and the objects from it: the place and the light come from the master plate. ' : 'Keep its place and light. ')
+                    . 'Keep the screen direction: whoever is on the left there is on the left here. Only the camera changes: frame it as the framing says, and never copy that image\'s framing.',
+                default => "This keyframe plays in exactly that place: keep its furniture, surfaces, objects, colours and light, and the people's clothing. Keep the screen direction: whoever is on the left there is on the left here, and comes in from the same side. Move the camera as the framing says; never copy that image's framing.",
+            };
         }
 
         foreach ($references->elementImages as $entry) {
@@ -151,8 +168,8 @@ class KeyframeImageBrief
     }
 
     /**
-     * The prompt for a keyframe after the first: an edit of keyframe 1, which
-     * is attached first, so the place, the camera and the style cannot shift.
+     * The prompt for the end frame: an edit of the start frame, which is
+     * attached first, so the place, the camera and the style cannot shift.
      * Only the people, their poses and the objects they handle change.
      *
      * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
@@ -162,10 +179,11 @@ class KeyframeImageBrief
         $castNames = implode(' and ', $references->castNames);
 
         $lines = [
-            'Edit the first attached image. It is keyframe 1 of this shot: the place, seen from a camera that does not move.',
+            'Edit the first attached image. It is the start frame of this shot: the place, seen from a camera that does not move. This is the end frame, the result of the act.',
             // The place stays put; what the story changes in it, such as a door that is shut by now, follows the story.
             'Change only what this keyframe needs: the people, their poses and positions, and the objects they handle. The place itself stays exactly as it is in the first image: the walls, the floor and every line on it, signs, windows, fixed machines and the background, at the same place, size and angle, with the same framing, camera, light and style.',
-            'The state of things follows the story: open or closed, on or off, full or empty, smoke or none, held or in its place, as this keyframe shows and the keyframe before, even when the first image or a picture shows it otherwise. Whatever is picked up or taken out leaves its spot empty: a handset lifted off its hook leaves the cradle empty, and the object is never drawn twice.',
+            'The framing is the same crop at the same distance as the first image: never zoom out to show more of the people or the place, and never zoom in. A face or a body that is outside the first image stays outside.',
+            'The state of things follows the story: open or closed, on or off, full or empty, smoke or none, held or in its place, as this keyframe shows, even when the first image or a picture shows it otherwise. Whatever is picked up or taken out leaves its spot empty: a handset lifted off its hook leaves the cradle empty, and the object is never drawn twice.',
             match (true) {
                 $references->firstShowsCast => 'The people already in the first image move and change pose as described; never add a second copy of anyone.',
                 // A close-up shows the hands at work on the surface; the people's sleeves and gloves show who they are.
@@ -206,8 +224,42 @@ class KeyframeImageBrief
             $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the picture of {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . '. It decides how it looks, not its state: open, held or lifted off its hook follows the description. Do not copy its background or pose.';
         }
 
-        if ($references->previous !== null) {
-            $lines[] = 'The ' . $ordinals[$attached++] . ' attached image is the keyframe directly before this one. Carry over the state and position of every object from it, such as what the people hold, what is in their pockets and what lies in a bin or box, unless this keyframe changes it, and keep the people looking the same as there. Do not copy its pose.';
+        $lines[] = TextRules::forImages($shot->project) . ' Signs and markings already in the first image stay where they are.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The prompt for the start frame of a shot that returns to the camera of
+     * an earlier shot: an edit of that camera's last frame, so the place and
+     * the framing cannot shift, with the people in the poses of the end frame
+     * of the shot before, which is attached second.
+     *
+     * @param  array{title: string, description: string, spatial?: string|null}  $keyframe
+     */
+    private static function backToView(Shot $shot, array $keyframe, KeyframeReferences $references): string
+    {
+        $lines = [
+            "Edit the first attached image. It is {$references->viewLabel}: this shot returns to that camera. This is the start frame of the shot.",
+            'The place stays exactly as it is in the first image: the walls, the floor and every line on it, doors, signs, windows, fixed objects and the background, at the same place, size and angle, with the same framing, camera, light and style. The framing is the same crop at the same distance: never zoom in or out.',
+            $references->setting !== null
+                ? "The second attached image is {$references->settingLabel}: the instant this keyframe continues, seen from another camera. Put the people and the objects in exactly that instant: where they stand relative to the objects, how they bend, look and hold their hands, and what they hold, in the same state. The people already in the first image move to those poses; whoever this keyframe does not name leaves the frame, with the place behind them shown as it is; never add a second copy of anyone. Keep the screen direction of both images."
+                : 'The people and the objects stay exactly as they are in the first image.',
+            '',
+            'This keyframe shows: ' . Keyframe::joined($keyframe['description'], $keyframe['spatial'] ?? null),
+            '',
+        ];
+
+        $ordinals = $references->setting !== null ? ['third', 'fourth', 'fifth', 'sixth', 'seventh'] : ['second', 'third', 'fourth', 'fifth', 'sixth'];
+        $attached = 0;
+
+        foreach ($references->elementImages as $entry) {
+            $element = $entry['element'];
+            $lines[] = 'The ' . $ordinals[$attached++] . " attached image is the picture of {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . '. It decides how it looks, not its state or pose. Do not copy its background or pose.';
+        }
+
+        if (($rules = $shot->project->rulesBrief()) !== '') {
+            $lines[] = "Project rules, always follow them:\n{$rules}";
         }
 
         $lines[] = TextRules::forImages($shot->project) . ' Signs and markings already in the first image stay where they are.';
@@ -216,7 +268,7 @@ class KeyframeImageBrief
     }
 
     /**
-     * Keyframes after the first are drawn on top of keyframe 1.
+     * The end frame is drawn on top of the start frame.
      */
     public static function usesFirstKeyframe(int $position): bool
     {
@@ -224,15 +276,7 @@ class KeyframeImageBrief
     }
 
     /**
-     * From keyframe 3 on, the keyframe directly before is attached too; for keyframe 2 that is keyframe 1 itself.
-     */
-    public static function usesPreviousKeyframe(int $position): bool
-    {
-        return $position > 2;
-    }
-
-    /**
-     * A staging direction per option of keyframe 1, so the options differ on purpose.
+     * A staging direction per option of the start frame, so the options differ on purpose.
      * The directions repeat for further batches.
      */
     public static function variation(int $index): string
@@ -248,7 +292,7 @@ class KeyframeImageBrief
 
     /**
      * The prompt for correcting the current render of a keyframe with a small change.
-     * With `$withPreviousKeyframe` the keyframe before it is attached second, as context;
+     * With `$withPreviousKeyframe` the start frame is attached second, as context;
      * the logos of the branding the change asks for follow, so they are drawn from their picture.
      *
      * @param  list<string>  $logos  the brands of the attached logos, in order
@@ -263,7 +307,7 @@ class KeyframeImageBrief
             "Change only this: {$instruction}",
             'Keep everything else exactly as it is: the character, the environment, the objects, the framing, the colours and the style.',
             $withPreviousKeyframe
-                ? 'The second attached image is the keyframe directly before this one in the same shot. Use it to see how the character and the objects look and where they are, and copy them from it when the change asks for something that is missing. Do not copy its pose or framing.'
+                ? 'The second attached image is the start frame of the same shot. Use it to see how the character and the objects look and where they are, and copy them from it when the change asks for something that is missing. Do not copy its pose or framing.'
                 : null,
             // At most two logos follow, so the ordinals always reach.
             ...array_map(fn(string $brand) => 'The ' . $ordinals[$attached++] . " attached image is the {$brand} logo.", $logos),

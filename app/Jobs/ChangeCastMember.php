@@ -29,6 +29,8 @@ class ChangeCastMember implements ShouldQueue
 
     public int $timeout = 600;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly Keyframe $keyframe,
         public readonly int $version,

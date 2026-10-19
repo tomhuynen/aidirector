@@ -27,6 +27,7 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <!-- The tests fake the image model through the chat endpoint; a local .env may name a model served through the images endpoint. -->
         <env name="AI_KEYFRAME_MODEL" value="google/gemini-3.1-flash-image-preview" force="true"/>
+        <env name="AI_SEQUENCE_VIDEO_MODEL" value="" force="true"/>
         <env name="REPLICATE_API_TOKEN" value="" force="true"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>

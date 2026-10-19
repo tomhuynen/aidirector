@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Ai\Agents\VideoPromptWriter;
+use App\Ai\Briefs\BodyRules;
 use App\Enums\AspectRatio;
 use App\Enums\Disk;
 use App\Enums\ShotStatus;
@@ -13,6 +14,7 @@ use App\Models\Director;
 use App\Models\Keyframe;
 use App\Models\Project;
 use App\Models\Shot;
+use App\Support\Video\LumaVideoClient;
 use App\Support\Video\OpenRouterVideoClient;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\File;
@@ -25,10 +27,19 @@ use function Pest\Laravel\actingAs;
 beforeEach(function () {
     Storage::fake(Disk::TENANT->value);
     Queue::fake();
+    Illuminate\Support\Facades\Config::set('services.luma.key', 'luma-key');
 
     $this->director = Director::factory()->create();
     $this->project = Project::factory()->ownedBy($this->director)->create(['aspect_ratio' => AspectRatio::PORTRAIT]);
 });
+
+/**
+ * Runs the video job with the clients the app uses.
+ */
+function generateVideo(Shot $shot): void
+{
+    (new GenerateVideo($shot))->handle(app(LumaVideoClient::class), app(OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class), app(App\Support\Video\StillVideo::class));
+}
 
 function pngOf(int $width, int $height): string
 {
@@ -41,11 +52,12 @@ function pngOf(int $width, int $height): string
     return (string) ob_get_clean();
 }
 
-function renderedShot(Project $project, int $count = 4, array $attributes = []): Shot
+function renderedShot(Project $project, int $count = 2, array $attributes = []): Shot
 {
     $shot = Shot::factory()->for($project)->create([
         'status' => ShotStatus::KEYFRAMES_READY,
         'duration' => 6,
+        'storyline' => ['keyframes' => [['title' => 'Moment 1', 'description' => 'The man in moment 1.', 'seconds' => 4], ['title' => 'Moment 2', 'description' => 'The man in moment 2.', 'seconds' => 2]]],
         ...$attributes,
     ]);
 
@@ -89,8 +101,8 @@ describe('generate', function () {
     });
 
     it('waits until every keyframe has an image', function () {
-        $shot = renderedShot($this->project);
-        Keyframe::factory()->for($shot)->create(['position' => 5]);
+        $shot = renderedShot($this->project, 1);
+        Keyframe::factory()->for($shot)->create(['position' => 2]);
 
         actingAs($this->director, 'director')
             ->post(route('public.shots.video.generate', [$this->project, $shot]))
@@ -123,71 +135,83 @@ describe('job', function () {
         Illuminate\Support\Facades\Config::set('pipeline.voice_over.automatic', true);
         Queue::fake([App\Jobs\GenerateVoiceOverAudio::class, PollVideos::class]);
         VideoPromptWriter::fake([videoPromptParts()]);
-        Http::fake(['openrouter.ai/api/v1/videos' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
+        Http::fake(['agents.lumalabs.ai/v1/generations' => Http::response(['id' => 'gen-1', 'state' => 'queued'], 201)]);
 
         $this->project->settings = new App\Support\Projects\ProjectSettings(voiceOver: true, voiceOverLocales: ['nl-NL', 'de-DE']);
         $this->project->save();
         $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'voice_over' => 'Wait behind the line.']);
 
-        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class), app(App\Support\Video\StillVideo::class));
+        generateVideo($shot);
 
         Queue::assertPushed(App\Jobs\GenerateVoiceOverAudio::class, fn($job) => $job->locale === 'nl-NL');
         Queue::assertPushed(App\Jobs\GenerateVoiceOverAudio::class, fn($job) => $job->locale === 'de-DE');
         expect($shot->fresh()->voice_over_tracks)->toEqual(['nl-NL' => ['status' => 'pending'], 'de-DE' => ['status' => 'pending']]);
     });
 
-    it('submits every keyframe as its own reference with a prompt that forbids inventing anything', function () {
+    it('pins the start frame on the first frame and the end frame on the last, so Ray times the act, with a prompt that forbids inventing anything', function () {
+        Queue::fake([PollVideos::class]);
         VideoPromptWriter::fake([videoPromptParts()]);
-        Http::fake(['openrouter.ai/api/v1/videos' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
+        Http::fake(['agents.lumalabs.ai/v1/generations' => Http::response(['id' => 'gen-1', 'state' => 'queued'], 201)]);
 
         $this->project->forceFill(['video_resolution' => '1080p'])->save();
-        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'duration' => 30]);
+        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING]);
 
-        (new GenerateVideo($shot))->handle(app(App\Support\Video\OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class), app(App\Support\Video\StillVideo::class));
+        generateVideo($shot);
 
         $shot->refresh();
 
-        expect($shot->video_job_id)->toBe('vid_123')
+        expect($shot->video_job_id)->toBe('gen-1')
             ->and($shot->video_summary)->toBe('The man lights a cigarette, notices the sign and puts it out.')
             ->and($shot->video_submitted_at)->not->toBeNull()
             ->and($shot->video_prompt)
-            ->toContain('Create one continuous, natural 15-second animation')
-            ->toContain('the very first frame of the video must match keyframe 1 exactly, and the very last frame of the video must match keyframe 4 exactly')
-            ->toContain('the first frame is keyframe 1 exactly and the last frame is keyframe 4 exactly')
-            ->toContain('The 4 reference images are the keyframes of this shot, supplied in chronological order')
-            ->not->toContain('collage')
-            ->toContain('Pace it naturally within the 15 seconds')
-            ->not->toContain('Timing:')
+            ->toContain('Create one continuous, natural 10-second animation of one shot, from the supplied start frame to the supplied end frame.')
+            ->toContain('the very first frame of the video must match the start frame exactly, and the very last frame of the video must match the end frame exactly')
+            ->toContain('The act plays at the speed real people move at, never slowed down and never stretched to fill the clip: the end frame is reached as soon as the act is done, and from there everything holds still, exactly as in the end frame, until the clip ends.')
             ->toContain('Visual style: Preserve the soft 3D illustration style')
-            ->toContain('Action sequence: The man lights the cigarette (keyframe 1)')
+            ->toContain('Action: The man lights the cigarette (keyframe 1)')
             ->toContain('The no-smoking sign stays on the yellow barrier.')
             ->toContain('Do not introduce new story events or visual elements.')
-            ->toContain('Primary objective: faithfully animate the supplied storyboard')
             ->toContain('Let the people act, as animated characters do: facial expressions that fit the moment')
-            ->not->toContain('facial reactions, camera shots');
+            ->not->toContain('reference images')
+            ->not->toContain('storyboard');
 
-        VideoPromptWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "1. Moment 1: The man in moment 1.\n2. Moment 2")
-            && count($prompt->attachments) === 4
+        VideoPromptWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "The frames:\nStart frame. Moment 1: The man in moment 1.\nEnd frame. Moment 2: The man in moment 2.")
+            && count($prompt->attachments) === 2
             && str_contains($prompt->prompt, 'Where a description and its image differ, the image is right')
-            && ! str_contains($prompt->prompt, 'Storyline')
-            && str_contains((string) $prompt->agent->instructions(), 'describe every person exactly as drawn in the keyframes')
+            && str_contains((string) $prompt->agent->instructions(), 'plays one shot from its start frame to its end frame')
+            && str_contains((string) $prompt->agent->instructions(), 'describe every person exactly as drawn in the frames')
             && str_contains((string) $prompt->agent->instructions(), 'Describe a thing that must not move as a fixed part of the place')
-            && str_contains((string) $prompt->agent->instructions(), 'how the people feel and react in each moment')
             && str_contains((string) $prompt->agent->instructions(), 'presses the handle down once, the door is locked and does not move, he lets go'));
 
-        Http::assertSent(fn(Request $request) => $request->url() === 'https://openrouter.ai/api/v1/videos'
-            && $request['model'] === config('pipeline.models.video')
-            && $request['duration'] === 15
+        // Six seconds planned: the shortest clip Ray renders that holds them, with the end frame on its last frame.
+        Http::assertSent(fn(Request $request) => $request->url() === 'https://agents.lumalabs.ai/v1/generations'
+            && $request->hasHeader('Authorization', 'Bearer luma-key')
+            && $request['model'] === 'ray-3.2'
             && $request['aspect_ratio'] === '9:16'
-            && $request['generate_audio'] === false
-            && $request['resolution'] === '1080p'
-            && count($request['input_references']) === 4
-            && collect($request['input_references'])->every(fn(array $reference) => str_starts_with($reference['image_url']['url'], 'data:image/png;base64,'))
-            // No first frame: Wan 3.0 would leave the references out.
-            && ! isset($request['frame_images'])
+            && $request['video']['resolution'] === '1080p'
+            && $request['video']['duration'] === '10s'
+            && $request['video']['keyframe_indexes'] === [0, 240]
+            && count($request['video']['keyframes']) === 2
+            && $request['video']['keyframes'][0]['media_type'] === 'image/png'
             && $request['prompt'] === $shot->video_prompt);
 
         Queue::assertPushed(PollVideos::class);
+    });
+
+    it('holds the start frame when the shot has no end frame, and lets Ray time a shot the planner did not time', function () {
+        VideoPromptWriter::fake([videoPromptParts(), videoPromptParts()]);
+        Http::fake(['agents.lumalabs.ai/v1/generations' => Http::response(['id' => 'gen-1', 'state' => 'queued'], 201)]);
+        $held = renderedShot($this->project, 1, ['status' => ShotStatus::VIDEO_PENDING, 'storyline' => ['keyframes' => [['title' => 'Moment 1', 'description' => 'The man in moment 1.']]]]);
+        $untimed = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING, 'storyline' => ['keyframes' => [['title' => 'Moment 1', 'description' => 'One.'], ['title' => 'Moment 2', 'description' => 'Two.']]]]);
+
+        generateVideo($held);
+        generateVideo($untimed);
+
+        expect($held->fresh()->video_prompt)->toContain('The shot holds the start frame: nothing changes')
+            ->and($untimed->fresh()->video_prompt)->toContain('The act plays at the speed real people move at');
+        VideoPromptWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, "The one frame the shot holds:\nStart frame. Moment 1"));
+        // One frame: pinned on the first frame and held to where the shot ends.
+        Http::assertSent(fn(Request $request) => $request['video']['keyframe_indexes'] === [0, 144] && count($request['video']['keyframes']) === 2);
     });
 
     it('renders at the project resolution or the default', function () {
@@ -229,15 +253,15 @@ function renderingShot(Project $project, string $jobId, int $secondsAgo = 60): S
 describe('poll', function () {
     it('checks every rendering video in one round and queues the next round', function () {
         Http::fake([
-            'openrouter.ai/api/v1/videos/vid_a' => Http::response(['id' => 'vid_a', 'status' => 'in_progress']),
-            'openrouter.ai/api/v1/videos/vid_b' => Http::response(['id' => 'vid_b', 'status' => 'in_progress']),
+            'agents.lumalabs.ai/v1/generations/vid_a' => Http::response(['id' => 'vid_a', 'state' => 'dreaming']),
+            'agents.lumalabs.ai/v1/generations/vid_b' => Http::response(['id' => 'vid_b', 'state' => 'queued']),
         ]);
 
         $a = renderingShot($this->project, 'vid_a');
         $b = renderingShot($this->project, 'vid_b');
         renderingShot($this->project, 'vid_new', secondsAgo: 5);
 
-        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
+        (new PollVideos())->handle(app(LumaVideoClient::class));
 
         Http::assertSentCount(2);
         expect($a->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING)
@@ -255,112 +279,40 @@ describe('poll', function () {
 
     it('hands finished videos to the download and marks failed ones, in the same round', function () {
         Http::fake([
-            'openrouter.ai/api/v1/videos/vid_done' => Http::response(['id' => 'vid_done', 'status' => 'completed', 'usage' => ['cost' => 0.42]]),
-            'openrouter.ai/api/v1/videos/vid_bad' => Http::response(['id' => 'vid_bad', 'status' => 'failed', 'error' => 'Content policy']),
-            'openrouter.ai/api/v1/videos/vid_down' => Http::response('error code: 502', 502),
+            'agents.lumalabs.ai/v1/generations/vid_done' => Http::response(['id' => 'vid_done', 'state' => 'completed', 'output' => [['type' => 'video', 'url' => 'https://cdn.luma.test/out.mp4']]]),
+            'agents.lumalabs.ai/v1/generations/vid_bad' => Http::response(['id' => 'vid_bad', 'state' => 'failed', 'failure_reason' => 'Content moderated']),
+            'agents.lumalabs.ai/v1/generations/vid_down' => Http::response('error code: 502', 502),
         ]);
 
         $done = renderingShot($this->project, 'vid_done');
         $bad = renderingShot($this->project, 'vid_bad');
         $down = renderingShot($this->project, 'vid_down');
 
-        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
+        (new PollVideos())->handle(app(LumaVideoClient::class));
 
-        Queue::assertPushed(DownloadVideo::class, fn(DownloadVideo $job) => $job->shot->is($done) && $job->usage === ['cost' => 0.42]);
+        Queue::assertPushed(DownloadVideo::class, fn(DownloadVideo $job) => $job->shot->is($done) && $job->jobId === 'vid_done');
         expect($bad->fresh())->status->toBe(ShotStatus::KEYFRAMES_READY)->video_error->not->toBeNull()
-            ->and($bad->generations()->where('error', 'Content policy')->count())->toBe(1)
+            ->and($bad->generations()->where('error', 'Content moderated')->where('provider', 'luma')->where('model', 'ray-3.2')->count())->toBe(1)
             ->and($down->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING);
 
         // Only the unreadable one is left to check; the finished one is not downloaded twice.
         Queue::assertPushed(PollVideos::class, 1);
-        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
+        (new PollVideos())->handle(app(LumaVideoClient::class));
         Queue::assertPushed(DownloadVideo::class, 1);
     });
 
     it('gives up when the video takes too long', function () {
-        Http::fake(['openrouter.ai/api/v1/videos/vid_123' => Http::response(['id' => 'vid_123', 'status' => 'pending'])]);
+        Http::fake(['agents.lumalabs.ai/v1/generations/vid_123' => Http::response(['id' => 'vid_123', 'state' => 'dreaming'])]);
 
         $shot = renderingShot($this->project, 'vid_123', secondsAgo: 3600);
 
-        (new PollVideos())->handle(app(OpenRouterVideoClient::class));
+        (new PollVideos())->handle(app(LumaVideoClient::class));
 
         expect($shot->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY);
         Queue::assertNotPushed(PollVideos::class);
     });
 
-    it('stores the finished video and logs its cost', function () {
-        Http::fake(['openrouter.ai/api/v1/videos/vid_123/content*' => Http::response(fakeMp4(), 200, ['Content-Type' => 'video/mp4'])]);
-
-        $shot = renderingShot($this->project, 'vid_123');
-
-        (new DownloadVideo($shot, 'vid_123', ['cost' => 0.42]))->handle(app(OpenRouterVideoClient::class));
-
-        $shot->refresh();
-        $generation = $shot->generations()->where('kind', 'video')->firstOrFail();
-
-        expect($shot->status)->toBe(ShotStatus::VIDEO_READY)
-            ->and($shot->video())->not->toBeNull()
-            ->and(Storage::disk(Disk::TENANT->value)->get($shot->video()->getPathRelativeToRoot()))->toBe(fakeMp4())
-            ->and((float) $generation->cost)->toBe(0.42)
-            ->and($generation->prompt)->toBe('The prompt');
-    });
-
-    it('ignores a download for a render that was replaced', function () {
-        Http::fake();
-
-        $shot = renderingShot($this->project, 'vid_new');
-
-        (new DownloadVideo($shot, 'vid_old'))->handle(app(OpenRouterVideoClient::class));
-
-        Http::assertNothingSent();
-    });
-});
-
-describe('luma', function () {
-    beforeEach(function () {
-        Illuminate\Support\Facades\Config::set(['pipeline.video.provider' => 'luma', 'services.luma.key' => 'luma-key']);
-    });
-
-    it('pins every keyframe to the frame it is reached on and holds the last one until the shot ends', function () {
-        Queue::fake([PollVideos::class]);
-        VideoPromptWriter::fake([videoPromptParts()]);
-        Http::fake(['agents.lumalabs.ai/v1/generations' => Http::response(['id' => 'gen-1', 'state' => 'queued'], 201)]);
-        $shot = renderedShot($this->project, attributes: ['status' => ShotStatus::VIDEO_PENDING]);
-
-        (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(App\Ai\KeyframePainter::class), app(App\Support\Video\StillVideo::class));
-
-        // Six seconds over four keyframes: one every 1.5 s at 24 fps, in the shortest clip Ray renders that holds them.
-        Http::assertSent(fn(Request $request) => $request->url() === 'https://agents.lumalabs.ai/v1/generations'
-            && $request->hasHeader('Authorization', 'Bearer luma-key')
-            && $request['model'] === 'ray-3.2'
-            && $request['aspect_ratio'] === '9:16'
-            && $request['video']['duration'] === '10s'
-            && $request['video']['keyframe_indexes'] === [0, 36, 72, 108, 144]
-            && count($request['video']['keyframes']) === 5
-            && $request['video']['keyframes'][4] === $request['video']['keyframes'][3]
-            && $request['video']['keyframes'][0]['media_type'] === 'image/png');
-        expect($shot->fresh()->video_job_id)->toBe('gen-1');
-    });
-
-    it('reads the state of Luma renders and hands the finished one to the download', function () {
-        Http::fake([
-            'agents.lumalabs.ai/v1/generations/gen-done' => Http::response(['id' => 'gen-done', 'state' => 'completed', 'output' => [['type' => 'video', 'url' => 'https://cdn.luma.test/out.mp4']]]),
-            'agents.lumalabs.ai/v1/generations/gen-bad' => Http::response(['id' => 'gen-bad', 'state' => 'failed', 'failure_reason' => 'Content moderated']),
-            'agents.lumalabs.ai/v1/generations/gen-busy' => Http::response(['id' => 'gen-busy', 'state' => 'processing']),
-        ]);
-        $done = renderingShot($this->project, 'gen-done');
-        $bad = renderingShot($this->project, 'gen-bad');
-        $busy = renderingShot($this->project, 'gen-busy');
-
-        (new PollVideos())->handle(app(App\Support\Video\VideoJobs::class));
-
-        Queue::assertPushed(DownloadVideo::class, fn(DownloadVideo $job) => $job->shot->is($done));
-        expect($bad->fresh()->status)->toBe(ShotStatus::KEYFRAMES_READY)
-            ->and($bad->generations()->where('error', 'Content moderated')->where('provider', 'luma')->where('model', 'ray-3.2')->count())->toBe(1)
-            ->and($busy->fresh()->status)->toBe(ShotStatus::VIDEO_PENDING);
-    });
-
-    it('downloads the finished clip from the link the render has now', function () {
+    it('stores the finished video from the link the render has now, and logs its cost from the price list', function () {
         Http::fake([
             'agents.lumalabs.ai/v1/generations/gen-1' => Http::response(['id' => 'gen-1', 'state' => 'completed', 'output' => [['type' => 'video', 'url' => 'https://cdn.luma.test/out.mp4']]]),
             'cdn.luma.test/*' => Http::response(fakeMp4(), 200, ['Content-Type' => 'video/mp4']),
@@ -368,32 +320,50 @@ describe('luma', function () {
         $shot = renderingShot($this->project, 'gen-1');
         $shot->update(['duration' => 10]);
 
-        (new DownloadVideo($shot, 'gen-1'))->handle(app(App\Support\Video\VideoJobs::class));
+        (new DownloadVideo($shot, 'gen-1'))->handle(app(LumaVideoClient::class));
 
-        expect(Storage::disk(Disk::TENANT->value)->get($shot->fresh()->video()->getPathRelativeToRoot()))->toBe(fakeMp4())
-            ->and($shot->generations()->where('kind', 'video')->firstOrFail())->provider->toBe('luma')->cost->toEqual(0.45);
+        $shot->refresh();
+        $generation = $shot->generations()->where('kind', 'video')->firstOrFail();
+
+        expect($shot->status)->toBe(ShotStatus::VIDEO_READY)
+            ->and(Storage::disk(Disk::TENANT->value)->get($shot->video()->getPathRelativeToRoot()))->toBe(fakeMp4())
+            ->and($generation)->provider->toBe('luma')->model->toBe('ray-3.2')->cost->toEqual(0.45)->prompt->toBe('The prompt');
     });
 
-    it('cuts the held end off a clip that is longer than the shot', function () {
+    it('ignores a download for a render that was replaced', function () {
+        Http::fake();
+
+        $shot = renderingShot($this->project, 'vid_new');
+
+        (new DownloadVideo($shot, 'vid_old'))->handle(app(LumaVideoClient::class));
+
+        Http::assertNothingSent();
+    });
+
+    it('cuts the clip where the act ends, as Ray timed it, and a held frame at the planned length', function (int $frames, string $source, float $expected) {
         $clip = storage_path('framework/testing/luma-10s.mp4');
         @mkdir(dirname($clip), 0777, true);
-        Illuminate\Support\Facades\Process::run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:d=10:r=24', '-pix_fmt', 'yuv420p', $clip])->throw();
+        Illuminate\Support\Facades\Process::run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', $source, '-pix_fmt', 'yuv420p', $clip])->throw();
         Http::fake([
             'agents.lumalabs.ai/v1/generations/gen-1' => Http::response(['id' => 'gen-1', 'state' => 'completed', 'output' => [['type' => 'video', 'url' => 'https://cdn.luma.test/out.mp4']]]),
             'cdn.luma.test/*' => Http::response((string) file_get_contents($clip), 200, ['Content-Type' => 'video/mp4']),
         ]);
-        $shot = renderingShot($this->project, 'gen-1');
+        $shot = renderedShot($this->project, $frames, ['status' => ShotStatus::VIDEO_PENDING, 'video_job_id' => 'gen-1', 'video_submitted_at' => now(), 'video_prompt' => 'The prompt']);
 
-        (new DownloadVideo($shot, 'gen-1'))->handle(app(App\Support\Video\VideoJobs::class));
+        (new DownloadVideo($shot, 'gen-1'))->handle(app(LumaVideoClient::class));
 
         $stored = $shot->fresh()->video();
         File::put($clip, Storage::disk(Disk::TENANT->value)->get($stored->getPathRelativeToRoot()));
         $seconds = (float) Illuminate\Support\Facades\Process::run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', $clip])->output();
 
-        expect($seconds)->toEqualWithDelta(6.0, 0.1)
-            ->and($stored->getCustomProperty(Shot::VIDEO_SECONDS))->toBe(6);
+        expect($seconds)->toEqualWithDelta($expected, 0.1)
+            ->and((float) $stored->getCustomProperty(Shot::VIDEO_SECONDS))->toEqualWithDelta($expected, 0.1);
         @unlink($clip);
-    })->skip(fn() => ! Illuminate\Support\Facades\Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
+    })->with([
+        // Two seconds of movement, then the end frame held: cut once the averaged movement has died down, with a short tail.
+        'an act that ends early' => [2, 'testsrc=s=64x64:d=2:r=24[a];color=c=blue:s=64x64:d=8:r=24[b];[a][b]concat=n=2:v=1', 2.46],
+        'one frame held' => [1, 'color=c=blue:s=64x64:d=10:r=24', 6.0],
+    ])->skip(fn() => ! Illuminate\Support\Facades\Process::run(['ffmpeg', '-version'])->successful(), 'ffmpeg is not installed');
 });
 
 describe('page', function () {
@@ -453,4 +423,13 @@ describe('page', function () {
             ->and($shot->video_prompt)->toBeNull()
             ->and($shot->video_job_id)->toBeNull();
     });
+});
+
+it('has the video prompt writer leave the timing to the video model, without tempo words or a length', function () {
+    $shot = renderedShot($this->project);
+    $writer = new VideoPromptWriter($shot);
+
+    expect((string) $writer->instructions())->toContain(BodyRules::NO_TEMPO)
+        ->and($writer->promptFor($shot->keyframes()->orderBy('position')->get()))->toStartWith('Write the video prompt for this shot.')
+        ->not->toContain('seconds');
 });

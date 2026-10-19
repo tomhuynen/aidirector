@@ -2,15 +2,18 @@
 
 declare(strict_types=1);
 
+use App\Ai\Agents\PlaceLayoutReader;
 use App\Ai\Agents\StorylineWriter;
 use App\Ai\ElementPainter;
 use App\Ai\KeyframePainter;
 use App\Enums\Disk;
 use App\Enums\ElementType;
+use App\Enums\KeyframeStatus;
 use App\Enums\ShotStatus;
 use App\Jobs\GenerateElementReference;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateRemainingKeyframes;
+use App\Jobs\ReadPlaceLayout;
 use App\Jobs\UpdateElementImage;
 use App\Models\Director;
 use App\Models\Element;
@@ -75,14 +78,14 @@ function castShot(Project $project, array $attributes = []): Shot
 }
 
 /**
- * Draws the options for keyframe 1 and chooses the first, without detection.
+ * Draws the options for the start frame and chooses the first, without detection.
  */
 function chooseFirstKeyframe(Shot $shot): Keyframe
 {
     (new GenerateKeyframes($shot))->handle();
 
     $first = $shot->keyframes()->firstOrFail();
-    $first->forceFill(['render_id' => $first->renders()->first()->id])->save();
+    $first->forceFill(['render_id' => $first->renders()->first()->id, 'status' => KeyframeStatus::READY])->save();
 
     return $first;
 }
@@ -106,6 +109,48 @@ describe('writing', function () {
     });
 });
 
+describe('place layout', function () {
+    it('reads the layout of a drawn place and keeps it on that version of its picture', function () {
+        Image::fake(fn() => elementPng());
+        PlaceLayoutReader::fake([['layout' => 'Three doors along the left wall; the right wall is plain.']]);
+        $corridor = Element::factory()->for($this->project)->place()->create(['name' => 'Corridor', 'rendering' => true]);
+
+        (new UpdateElementImage($corridor))->handle(app(ElementPainter::class));
+
+        $corridor = $corridor->fresh();
+
+        expect($corridor->layout())->toBe('Three doors along the left wall; the right wall is plain.')
+            ->and($corridor->reference()->getCustomProperty(Element::LAYOUT))->toBe('Three doors along the left wall; the right wall is plain.');
+        PlaceLayoutReader::assertPrompted(fn($prompt) => $prompt->attachments->count() === 1
+            && str_contains($prompt->prompt, 'The place: Corridor (place)')
+            && $prompt->model === config('pipeline.models.place_layout'));
+    });
+
+    it('reads no layout for a person or an object', function () {
+        Image::fake(fn() => elementPng());
+        Queue::fake([ReadPlaceLayout::class]);
+
+        (new UpdateElementImage(Element::factory()->for($this->project)->create(['rendering' => true])))->handle(app(ElementPainter::class));
+        (new UpdateElementImage(Element::factory()->for($this->project)->object()->create(['rendering' => true])))->handle(app(ElementPainter::class));
+
+        Queue::assertNotPushed(ReadPlaceLayout::class);
+    });
+
+    it('gives the directors the layout of the chosen version of the picture', function () {
+        $corridor = withReference(Element::factory()->for($this->project)->place()->create(['name' => 'Corridor']));
+        $first = $corridor->reference();
+        $first->setCustomProperty(Element::LAYOUT, 'Doors along the left wall.')->save();
+        $corridor = withReference($corridor);
+
+        expect($this->project->elementsBrief())->not->toContain('Layout');
+
+        $corridor->forceFill(['reference_id' => $first->id])->save();
+
+        expect($this->project->elementsBrief())->toContain('Corridor (place): ')
+            ->toContain("\n  Layout, as its picture shows it: Doors along the left wall.");
+    });
+});
+
 describe('linking', function () {
     it('links the elements the plan names and attaches their images', function () {
         Image::fake(fn() => elementPng());
@@ -126,7 +171,7 @@ describe('linking', function () {
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('A man pushes an envelope into the slot.')
             && $prompt->contains("People and objects in this keyframe:\n- Mark, the visitor (person): looks exactly like its attached picture; its state")
             && ! $prompt->contains('A middle-aged man')
-            && $prompt->contains('Edit the first attached image. It is keyframe 1 of this shot')
+            && $prompt->contains('Edit the first attached image. It is the start frame of this shot')
             && $prompt->contains('The second attached image is the picture of Mark, the visitor (person). Draw Mark, the visitor exactly like it')
             && $prompt->attachments->count() === 2
             && $prompt->attachments->last()->content() === $markBytes);
@@ -153,7 +198,7 @@ describe('linking', function () {
 });
 
 describe('reference images', function () {
-    it('draws a new element from keyframe 1 before the other keyframes render', function () {
+    it('draws a new element from the start frame before the end frame is drawn', function () {
         Image::fake(fn() => elementPng());
 
         $shot = castShot($this->project);
@@ -171,7 +216,7 @@ describe('reference images', function () {
 
         Image::assertGenerated(fn(ImagePrompt $prompt) => $prompt->contains('Show only this person, full body')
             && $prompt->contains('Security guard (person): A tall woman in a dark blue uniform.')
-            && $prompt->contains('The attached image is a keyframe in which Security guard appears.')
+            && $prompt->contains('The first attached image is a keyframe in which Security guard appears.')
             && $prompt->size === '1:1'
             && $prompt->attachments->first()->content() === $firstBytes);
 

@@ -66,7 +66,7 @@ function drawnShot(Project $project): Shot
  */
 function imagesReply(array $overrides = []): array
 {
-    return ['reply' => 'Fine.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [], 'remove_shots' => [], 'changes' => [], 'proposal' => null, ...$overrides];
+    return ['reply' => 'Fine.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'direct' => '', 'remove_shots' => [], 'changes' => [], 'proposal' => null, ...$overrides];
 }
 
 it('goes on about the drawn images: the selected one is attached and a clear change is made', function () {

@@ -4,16 +4,13 @@ declare(strict_types=1);
 
 namespace App\Ai\Bench;
 
-use App\Ai\Contracts\HasReasoningEffort;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
-use Laravel\Ai\Contracts\Agent;
-use Laravel\Ai\Files\Image;
 
 /**
  * One AI step of the app, run on real data from the current tenant so every
- * variant answers exactly the prompt the app would send.
+ * variant gets exactly the prompt the app would send.
  */
 abstract class Benchmark
 {
@@ -29,9 +26,10 @@ abstract class Benchmark
      */
     abstract public function cases(): Collection;
 
-    abstract public function agent(BenchCase $case): Agent&HasReasoningEffort;
-
-    abstract public function prompt(BenchCase $case): string;
+    /**
+     * Runs the step for one case with one variant.
+     */
+    abstract public function answer(BenchCase $case, BenchVariant $variant): BenchAnswer;
 
     /**
      * What the judges score, criterion key => what a 5 looks like.
@@ -41,30 +39,11 @@ abstract class Benchmark
     abstract public function criteria(): array;
 
     /**
-     * Images sent along with the prompt; the judges see them too.
-     *
-     * @return list<Image>
-     */
-    public function attachments(BenchCase $case): array
-    {
-        return [];
-    }
-
-    /**
      * The model the app uses for this step today.
      */
     public function model(): string
     {
         return (string) Config::get('pipeline.models.text');
-    }
-
-    /**
-     * Visible answer tokens one call writes, without reasoning, as measured
-     * with GPT-5.5; only used to estimate the cost of a dry run.
-     */
-    public function expectedOutputTokens(): int
-    {
-        return 500;
     }
 
     public function case(string $key): BenchCase

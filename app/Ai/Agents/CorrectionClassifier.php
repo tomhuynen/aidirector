@@ -66,7 +66,6 @@ class CorrectionClassifier implements Agent, HasReasoningEffort, HasStructuredOu
         $source = match ($this->correction->source) {
             CorrectionSource::ADJUSTMENT => 'The director asked to adjust a keyframe image.',
             CorrectionSource::DESCRIPTION => 'The director rewrote the description of a keyframe.',
-            CorrectionSource::DELETE => 'The director deleted a keyframe the AI had planned.',
             CorrectionSource::FEEDBACK => 'The director gave feedback on the suggested storylines.',
             CorrectionSource::CHECK => 'The automatic check found a mistake in a drawn keyframe; this is always a correction.',
         };

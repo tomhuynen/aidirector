@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Ai\Bench\Benchmarks;
 
 use App\Ai\Agents\StorylineWriter;
+use App\Ai\Bench\AgentBenchmark;
 use App\Ai\Bench\BenchCase;
-use App\Ai\Bench\Benchmark;
 use App\Models\Shot;
 use Illuminate\Support\Collection;
 
@@ -14,7 +14,7 @@ use Illuminate\Support\Collection;
  * Planning a shot from its idea: the storyline, the keyframes and their
  * descriptions, as the planner drafts it for a shot made in the project setup.
  */
-class KeyframePlanBenchmark extends Benchmark
+class KeyframePlanBenchmark extends AgentBenchmark
 {
     public function name(): string
     {

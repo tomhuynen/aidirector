@@ -19,13 +19,17 @@ class ModelPrices
     private ?array $prices = null;
 
     /**
-     * The cost in dollars of one call, or null when OpenRouter does not list
-     * the model.
+     * The cost in dollars of one call: as the provider reported it, or from
+     * the tokens; null when OpenRouter does not list the model.
      *
-     * @param  array{prompt_tokens?: int, completion_tokens?: int, cache_read_input_tokens?: int}  $usage
+     * @param  array{prompt_tokens?: int, completion_tokens?: int, cache_read_input_tokens?: int, cost?: float}  $usage
      */
     public function cost(string $model, array $usage): ?float
     {
+        if (isset($usage['cost'])) {
+            return (float) $usage['cost'];
+        }
+
         $price = $this->prices()[$model] ?? null;
 
         if ($price === null) {

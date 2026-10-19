@@ -24,17 +24,23 @@ class BenchReport
     ) {}
 
     /**
-     * One row per variant: speed, tokens, cost and the judges' average per
-     * criterion; failed calls count in "ok" only.
+     * One row per variant: speed, tokens, cost, the average of each measure
+     * and the judges' average per criterion; failed calls count in "ok" only.
      *
-     * @return list<array{variant: string, ok: string, median: float|null, slowest: float|null, output_tokens: int|null, reasoning_tokens: int|null, cost: float|null, quality: float|null, scores: array<string, float|null>}>
+     * @return list<array{variant: string, ok: string, median: float|null, slowest: float|null, output_tokens: int|null, reasoning_tokens: int|null, cost: float|null, measures: array<string, float|null>, quality: float|null, scores: array<string, float|null>}>
      */
     public function summary(): array
     {
         return collect($this->variants)->map(function (BenchVariant $variant) {
             $runs = collect($this->results)->filter(fn(array $result) => $result['model'] === $variant->model && $result['effort'] === $variant->effort);
             $answered = $runs->whereNull('error');
-            $judgements = $answered->flatMap(fn(array $result) => collect($result['judgements'])->reject(fn(array $judgement) => isset($judgement['error'])))->values();
+            $judgements = $answered->flatMap(fn(array $result) => collect($result['judgements'])->reject(fn(array $judgement) => isset($judgement['error']))->values())->values();
+
+            $measures = [];
+
+            foreach ($this->measureKeys() as $measure) {
+                $measures[$measure] = $this->average($answered->pluck("measures.{$measure}"));
+            }
 
             $scores = [];
 
@@ -50,6 +56,7 @@ class BenchReport
                 'output_tokens' => $answered->isEmpty() ? null : (int) round((float) $answered->avg('usage.completion_tokens')),
                 'reasoning_tokens' => $answered->isEmpty() ? null : (int) round((float) $answered->avg('usage.reasoning_tokens')),
                 'cost' => $answered->whereNotNull('cost')->isEmpty() ? null : (float) $answered->avg('cost'),
+                'measures' => $measures,
                 'quality' => $this->average(collect($scores)->filter()),
                 'scores' => $scores,
             ];
@@ -70,6 +77,16 @@ class BenchReport
             'summary' => $this->summary(),
             'results' => $this->results,
         ];
+    }
+
+    /**
+     * Every measure any answer has, such as how much of the image stayed in place.
+     *
+     * @return list<string>
+     */
+    public function measureKeys(): array
+    {
+        return collect($this->results)->flatMap(fn(array $result) => array_keys($result['measures'] ?? []))->unique()->values()->all();
     }
 
     /**

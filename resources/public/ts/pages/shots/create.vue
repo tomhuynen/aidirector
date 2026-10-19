@@ -41,7 +41,6 @@ const shotList = computed(() =>
     title: sibling.title,
     statusLabel: sibling.statusLabel,
     duration: sibling.duration,
-    keyframesCount: sibling.keyframesCount,
     partsCount: sibling.partsCount,
     status: sibling.status,
     busy: sibling.busy,

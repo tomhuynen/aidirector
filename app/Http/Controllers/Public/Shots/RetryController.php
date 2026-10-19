@@ -19,7 +19,7 @@ class RetryController
 {
     /**
      * Try again what failed: the plan, the options for
-     * keyframe 1 when none could be drawn, or each keyframe that failed.
+     * the start frame when none could be drawn, or each keyframe that failed.
      */
     public function store(Project $project, Shot $shot, KeyframeChain $chain)
     {

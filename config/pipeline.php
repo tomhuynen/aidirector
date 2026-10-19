@@ -27,9 +27,10 @@ return [
         'image_edit' => env('AI_IMAGE_EDIT_MODEL', 'openai/gpt-5.4-image-2'),
         // Adjusts an existing keyframe and leaves the rest alone; kept everything else identical in a test of 2026-10-04.
         'keyframe_edit' => env('AI_KEYFRAME_EDIT_MODEL', 'openai/gpt-image-2.5-sunburst'),
-        'video' => env('AI_VIDEO_MODEL', 'alibaba/wan-3.0'),
-        // Renders scenes and close-ups when the video provider is luma: every keyframe is pinned to its moment in the clip.
-        'luma_video' => env('AI_LUMA_VIDEO_MODEL', 'ray-3.2'),
+        // Renders the clips on Luma: a scene or close-up from its start frame to its end frame, a still of a montage from that still.
+        'video' => env('AI_VIDEO_MODEL', 'ray-3.2'),
+        // Renders a whole sequence as one clip with its own cuts and timing, on Replicate: one drawn keyframe per shot, the first as the start frame and the others as references. Empty: every shot renders its own clip on Luma.
+        'sequence_video' => env('AI_SEQUENCE_VIDEO_MODEL'),
         // Speaks the voice-over; the voice per language is set under voice_over.voices.
         'voice' => env('AI_VOICE_MODEL', 'microsoft/mai-voice-2.1'),
         // Animates the project cover into a seamless loop; needs first and last frame control.
@@ -42,6 +43,10 @@ return [
         // Blocks a keyframe on the image before it: where each of the cast stands, faces and how they pose.
         'keyframe_stager' => env('AI_KEYFRAME_STAGER_MODEL', 'google/gemini-3.8-flash'),
         'keyframe_check' => env('AI_KEYFRAME_CHECK_MODEL', 'google/gemini-3.8-flash'),
+        // Directs a story into a sequence of shots: as good as GPT-5.5 in about a third of the time at low effort (benchmark of 2026-10-19).
+        'scene_director' => env('AI_SCENE_DIRECTOR_MODEL', 'anthropic/claude-sonnet-5.5'),
+        // Reads the layout of a place from its picture. Tried 2026-10-19 on four places against gemini-3.8-flash: both got the doors right, Haiku was faster and named more of the openings.
+        'place_layout' => env('AI_PLACE_LAYOUT_MODEL', 'anthropic/claude-haiku-5.5'),
     ],
 
     /*
@@ -80,6 +85,8 @@ return [
         'storyline_follower' => 'low',
         'shot_timer' => 'low',
         'plan_director' => 'medium',
+        'scene_director' => 'low',
+        'place_layout_reader' => null,
     ],
 
     /*
@@ -123,23 +130,21 @@ return [
     ],
 
     'keyframes' => [
-        'min' => 3,
-        // The most the planner plans; the director may add more by hand, up to max_manual.
+        // The most stills a montage has; a scene or close-up has a start frame and an end frame.
         'max' => 6,
-        'max_manual' => 10,
-        // Versions of keyframe 1, each drawn whole in the shot's place, the director chooses from before the rest is drawn.
+        // Versions of the start frame, each drawn whole in the shot's place, the director chooses from before the end frame is drawn.
         'first_options' => (int) env('AI_FIRST_KEYFRAME_OPTIONS', 3),
         // Reference images of the cast and sets attached to one keyframe render.
         'max_element_references' => 3,
         // Measures the depth of a place, so a person or a thing is drawn at the size it has where it stands: Depth Anything 3 metric on Replicate.
         'depth_model' => env('AI_DEPTH_MODEL', 'd2ef7653aa75f87e3b502738a3f57ca2b09ba92f6f286075c8929a69937a013f'),
+        // Cuts a person or a thing out of a keyframe by its name, so only the people and things that change are taken from a drawing: Lang-SAM on Replicate.
         // How the layout model draws: whether it draws keyframes 2 and later on the keyframe before (otherwise the keyframe
-        // model draws them whole and the layout model only edits), whether it may search the web and images first, and
-        // whether it draws at the shot's aspect ratio instead of picking one from the prompt and the first image.
+        // model draws them whole and the layout model only edits), and whether it may search the web and images first.
+        // It always draws at the shot's aspect ratio.
         'layout' => [
             'draws_keyframes' => (bool) env('AI_LAYOUT_DRAWS_KEYFRAMES', true),
             'grounding' => (bool) env('AI_LAYOUT_GROUNDING', true),
-            'fixed_ratio' => (bool) env('AI_LAYOUT_FIXED_RATIO', false),
         ],
         // Measured in code after each edit: a render whose background moved compared with the image it was drawn on is drawn again.
         'drift' => [
@@ -157,9 +162,11 @@ return [
     | Video
     |--------------------------------------------------------------------------
     |
-    | The video model animates the keyframes, sent as reference images. Durations are
-    | clamped to what the model accepts; the job polls OpenRouter until the
-    | clip is done or the wait runs out.
+    | Luma Ray renders a scene or close-up from its start frame, pinned on the
+    | first frame, to its end frame, pinned where the action ends and held to
+    | the last frame; a still of a montage is pinned on the first frame alone.
+    | Durations are clamped to what it accepts; the poll jobs follow the renders
+    | until they are done or the wait runs out.
     |
     */
 
@@ -171,6 +178,10 @@ return [
         'openai/gpt-image-2.5-sunburst',
         'openai/gpt-image-2.5-flare',
         'bytedance-seed/seedream-5-0-flash',
+        'openai/gpt-image-2',
+        'krea/k3-edit',
+        'black-forest-labs/flux-3-image',
+        'black-forest-labs/flux.2-klein-4b',
     ],
 
     /*
@@ -232,17 +243,15 @@ return [
     ],
 
     'video' => [
+        // The OpenRouter video API, which renders the presenter's lip-synced clips.
         'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
-        // Who renders scenes and close-ups: openrouter (the video model above) or luma (Ray, with pinned keyframes). Montages and presenters stay on OpenRouter.
-        'provider' => env('AI_VIDEO_PROVIDER', 'openrouter'),
-        // The default for projects without their own; the lowest the model offers, for quick tests.
+        // The default for projects without their own; the lowest, for quick tests. Ray has no 480p and renders 540p for it.
         'resolution' => env('AI_VIDEO_RESOLUTION', '480p'),
-        // What Wan 3.0 renders; a model without 4K refuses it.
         'resolutions' => ['480p', '720p', '1080p'],
-        // The shortest clip the video model renders (Wan 3.0 takes 2 to 30 seconds); a short action is a short shot.
+        // The shortest shot; a short action is a short shot. Ray renders 5 or 10 seconds and the clip is cut to the shot.
         'min_duration' => 2,
-        // Luma renders at most 10 seconds.
-        'max_duration' => (int) env('AI_VIDEO_MAX_DURATION', 15),
+        // Ray renders at most 10 seconds.
+        'max_duration' => (int) env('AI_VIDEO_MAX_DURATION', 10),
         // A render takes about a minute: the first check waits, later ones follow quicker.
         'first_poll_seconds' => 45,
         'poll_seconds' => 20,

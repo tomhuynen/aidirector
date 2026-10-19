@@ -12,8 +12,6 @@ use App\Enums\ShotTransition;
 use App\Events\ShotDeleting;
 use App\Jobs\GenerateKeyframes;
 use App\Jobs\GenerateVoiceOverAudio;
-use App\Jobs\RetimeShot;
-use App\Jobs\ReviewShot;
 use Closure;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -59,12 +57,6 @@ class Shot extends Model implements HasMedia
 
     /** The video of a presenter shot per language, with its sound, with the locale as a custom property. */
     public const PRESENTER_VIDEOS = 'presenter_videos';
-
-    /** The place of a scene without people, from the camera of keyframe 1: what shows where someone stood once they move or leave. */
-    public const PLATE = 'plate';
-
-    /** On the plate: the image of keyframe 1 it was made from; a new one is made when keyframe 1 changes. */
-    public const PLATE_FROM = 'from_render';
 
     protected $guarded = [];
 
@@ -274,7 +266,48 @@ class Shot extends Model implements HasMedia
      */
     public function drawsStandalone(): bool
     {
-        return $this->isMontage() || $this->isPresenter() || $this->isInsert();
+        return $this->kindOrScene()->drawsStandalone();
+    }
+
+    /**
+     * Whether the start frame is the end frame of another shot seen from this
+     * shot's camera, as a match cut: the same instant, the same poses, only
+     * the framing changes. It is drawn once, from that end frame, without
+     * options to choose from.
+     */
+    public function continuesPose(): bool
+    {
+        $from = $this->settingFrom();
+
+        return $from !== null && $from['keyframe'] !== 0 && ! $this->drawsStandalone() && ! $this->rendersInSequence();
+    }
+
+    /**
+     * Whether this shot is rendered as part of its whole sequence in one
+     * clip, when a sequence video model is set: it draws one keyframe, its
+     * start frame, in the place of the master plate, and the video model
+     * plays the act and times the cuts. A montage and a presenter render on
+     * their own.
+     */
+    public function rendersInSequence(): bool
+    {
+        return self::rendersSequences() && $this->group_key !== null && ! $this->isMontage() && ! $this->isPresenter();
+    }
+
+    /**
+     * Whether sequences render as one clip, with the sequence video model.
+     */
+    public static function rendersSequences(): bool
+    {
+        return filled(Config::get('pipeline.models.sequence_video'));
+    }
+
+    /**
+     * Whether the director picks the start frame from options drawn in the shot's place.
+     */
+    public function choosesStartFrame(): bool
+    {
+        return ! $this->drawsStandalone() && ! $this->continuesPose();
     }
 
     /**
@@ -303,20 +336,28 @@ class Shot extends Model implements HasMedia
             ->where('position', '>', $this->position)->orderBy('position')->first();
     }
 
-    /** The setting from another shot's last keyframe, whichever position that turns out to be. */
+    /** The setting from another shot's end frame, whichever position that turns out to be. */
     public const LAST_KEYFRAME = -1;
 
     /**
      * Where the keyframes take their setting from: a keyframe of another shot,
-     * its last keyframe (-1), or its place (0). Agreed in the plan chat or when
-     * a story is split into shots; without one, a close-up planned together
-     * with the shot before it continues from that shot's last keyframe, as a
-     * cut-in on the same moment.
+     * its end frame (-1), or its place (0). Agreed in the plan chat or when
+     * a story is directed into shots; without one, a shot planned together
+     * with the shots before it continues from the end frame of the last of
+     * them with people in it, as a match cut on the same instant. An insert
+     * takes only the place from that frame. A shot that renders in its
+     * sequence takes the place of the master plate.
      *
      * @return array{shot: self, keyframe: int, chosen: bool}|null
      */
     public function settingFrom(): ?array
     {
+        if ($this->rendersInSequence()) {
+            $master = $this->masterShot();
+
+            return $master === null ? null : ['shot' => $master, 'keyframe' => 1, 'chosen' => false];
+        }
+
         $chosen = $this->storyline['setting_from'] ?? null;
 
         if (is_array($chosen)) {
@@ -325,11 +366,206 @@ class Shot extends Model implements HasMedia
             return $source === null || $source->is($this) ? null : ['shot' => $source, 'keyframe' => max(self::LAST_KEYFRAME, (int) ($chosen['keyframe'] ?? 0)), 'chosen' => true];
         }
 
-        $previous = $this->kindOrScene() === ShotKind::CLOSE_UP && $this->group_key !== null ? $this->previousShot() : null;
+        $previous = $this->shotBeforeInSequence();
 
-        return $previous !== null && $previous->group_key === $this->group_key
-            ? ['shot' => $previous, 'keyframe' => self::LAST_KEYFRAME, 'chosen' => false]
-            : null;
+        return $previous === null ? null : ['shot' => $previous, 'keyframe' => self::LAST_KEYFRAME, 'chosen' => false];
+    }
+
+    /**
+     * The nearest shot before this one in its sequence whose frames hold
+     * people, which this shot continues from. A montage or a presenter
+     * starts on its own. The parts of a merged shot keep their place in the
+     * sequence; the merged shot itself has no frames.
+     */
+    private function shotBeforeInSequence(): ?self
+    {
+        if ($this->group_key === null || $this->isMontage() || $this->isPresenter()) {
+            return null;
+        }
+
+        return self::query()->where('project_id', $this->project_id)->whereNull('merge_transition')
+            ->where('group_key', $this->group_key)->where('position', '<', $this->position)->orderByDesc('position')->get()
+            ->first(fn(self $shot) => ! $shot->drawsStandalone());
+    }
+
+    /**
+     * The first shot of this shot's sequence with people in its frames, whose
+     * start frame is the master plate: every later shot of the sequence takes
+     * the place from it, so the place is never copied from a copy. Null for
+     * that first shot itself, a shot outside a sequence, a montage and a presenter.
+     */
+    public function masterShot(): ?self
+    {
+        if ($this->group_key === null || $this->isMontage() || $this->isPresenter()) {
+            return null;
+        }
+
+        return self::query()->where('project_id', $this->project_id)->whereNull('merge_transition')
+            ->where('group_key', $this->group_key)->where('position', '<', $this->position)->orderBy('position')->get()
+            ->first(fn(self $shot) => ! $shot->drawsStandalone());
+    }
+
+    /**
+     * The start frame of the master shot of the sequence, when it is drawn.
+     */
+    public function masterPlate(): ?Media
+    {
+        return $this->masterShot()?->keyframes()->with('media')->where('position', 1)->first()?->render();
+    }
+
+    /**
+     * The latest earlier shot of the sequence filmed from the camera this
+     * shot returns to: the same size of shot at the same aspect ratio. The
+     * start frame is then drawn on that shot's end frame, so the place stays
+     * exactly as it was. Only for a shot that continues the shot before.
+     * The shots of a sequence share a project, so the same override means
+     * the same aspect ratio.
+     */
+    public function returnShot(): ?self
+    {
+        if (! $this->continuesPose() || $this->group_key === null) {
+            return null;
+        }
+
+        return self::query()->where('project_id', $this->project_id)->whereNull('merge_transition')
+            ->where('group_key', $this->group_key)->where('position', '<', $this->position)->orderByDesc('position')->get()
+            ->first(fn(self $shot) => ! $shot->drawsStandalone() && $shot->kindOrScene()->size() === $this->kindOrScene()->size() && $shot->aspect_ratio_override === $this->aspect_ratio_override);
+    }
+
+    /**
+     * The end frame of the shot this one returns to the camera of, when it is drawn: the last view from that camera.
+     */
+    public function returnFrame(): ?Media
+    {
+        return $this->returnShot()?->endFrame()?->render();
+    }
+
+    /**
+     * The render of the frame or the place this shot takes its setting from, when it is drawn.
+     */
+    public function settingRender(): ?Media
+    {
+        $from = $this->settingFrom();
+
+        if ($from === null) {
+            return null;
+        }
+
+        $source = $from['shot'];
+        $position = $from['keyframe'] === self::LAST_KEYFRAME ? (int) $source->keyframes()->max('position') : $from['keyframe'];
+
+        return $source->keyframes()->with('media')->where('position', max(1, $position))->first()?->render();
+    }
+
+    /**
+     * The end frame: the last keyframe of the shot.
+     */
+    public function endFrame(): ?Keyframe
+    {
+        return $this->keyframes()->with('media')->reorder('position', 'desc')->first();
+    }
+
+    /**
+     * Whether the director confirmed the end frame as it is drawn now, so the
+     * shots that continue from it may be drawn. A changed end frame drops
+     * the confirmation.
+     */
+    public function endFrameConfirmed(): bool
+    {
+        $end = $this->endFrame();
+        $render = $end?->render();
+
+        return $render !== null && $end->confirmed_render_id === $render->id;
+    }
+
+    /**
+     * Whether the end frame can be confirmed: drawn and checked, and not confirmed yet.
+     */
+    public function canConfirmEndFrame(): bool
+    {
+        return in_array($this->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_PENDING, ShotStatus::VIDEO_READY], true)
+            && ! $this->reviewing
+            && ! $this->keyframes()->busy()->exists()
+            && $this->endFrame()?->render() !== null
+            && ! $this->endFrameConfirmed();
+    }
+
+    /**
+     * Confirms the end frame as it is drawn now, and draws the shots that waited for it.
+     */
+    public function confirmEndFrame(): void
+    {
+        $end = $this->endFrame();
+
+        $end->forceFill(['confirmed_render_id' => $end->render()?->id])->save();
+
+        self::drawWaitingShots($this->project_id);
+    }
+
+    /**
+     * The shots after this one that continue from its end frame.
+     *
+     * @return Collection<int, self>
+     */
+    public function continuedBy(): Collection
+    {
+        return self::query()->where('project_id', $this->project_id)->whereNull('merge_transition')->where('position', '>', $this->position)->orderBy('position')->get()
+            ->filter(function (self $shot) {
+                $from = $shot->settingFrom();
+
+                return $from !== null && $from['shot']->is($this) && $from['keyframe'] === self::LAST_KEYFRAME;
+            })
+            ->values();
+    }
+
+    /**
+     * The shots that continue from this one and were drawn from an earlier
+     * version of its end frame than the one drawn now.
+     *
+     * @return Collection<int, self>
+     */
+    public function staleFollowers(): Collection
+    {
+        $current = $this->endFrame()?->render()?->id;
+
+        return $this->continuedBy()->filter(function (self $shot) use ($current) {
+            $source = $shot->keyframes()->where('position', 1)->value('source_render_id');
+
+            return $source !== null && $source !== $current;
+        })->values();
+    }
+
+    /**
+     * Starts the shots that continue from this one over, and the shots that
+     * continue from those: they are drawn again once the end frame they
+     * start from is confirmed.
+     */
+    public function resetFollowers(): void
+    {
+        $this->continuedBy()->each->startOverWhenReady();
+    }
+
+    /**
+     * Keeps the shots that continue from this one as they are drawn, from the
+     * end frame as it is now.
+     */
+    public function acceptFollowers(): void
+    {
+        $current = $this->endFrame()?->render()?->id;
+
+        $this->staleFollowers()->each(fn(self $shot) => $shot->keyframes()->where('position', 1)->update(['source_render_id' => $current]));
+    }
+
+    /**
+     * Starts the plan over and has it drawn as soon as what it waits for is
+     * there, along with every shot that continues from this one.
+     */
+    public function startOverWhenReady(): void
+    {
+        $this->startPlanOver();
+        $this->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'draw_when_ready' => true]);
+
+        $this->continuedBy()->each->startOverWhenReady();
     }
 
     /**
@@ -349,9 +585,9 @@ class Shot extends Model implements HasMedia
 
         return match (true) {
             $from['keyframe'] === 0 => $source->keyframes()->where('position', 1)->whereNotNull('render_id')->exists() ? null : __('the place of :shot', ['shot' => $source->code()]),
-            $from['keyframe'] === self::LAST_KEYFRAME => in_array($source->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_PENDING, ShotStatus::VIDEO_READY], true) && ! $source->keyframes()->busy()->exists()
+            $from['keyframe'] === self::LAST_KEYFRAME => $source->endFrameConfirmed() && ! $source->keyframes()->busy()->exists()
                 ? null
-                : __('the keyframes of :shot', ['shot' => $source->code()]),
+                : __('your confirmation of the end frame of :shot', ['shot' => $source->code()]),
             default => $source->keyframes()->where('position', $from['keyframe'])->whereNotNull('render_id')->exists() ? null : __('keyframe :n of :shot', ['n' => $from['keyframe'], 'shot' => $source->code()]),
         };
     }
@@ -384,7 +620,8 @@ class Shot extends Model implements HasMedia
         }
 
         $this->updateStoredJson('storyline', fn(?array $storyline) => array_diff_key($storyline ?? [], ['draw_when_ready' => true]));
-        $this->forceFill(['status' => ShotStatus::FIRST_KEYFRAME_PENDING, 'storyline_error' => null])->save();
+        // A shot that continues the shot before has no start frame to choose: its keyframes are drawn in a row.
+        $this->forceFill(['status' => $this->continuesPose() ? ShotStatus::KEYFRAMES_PENDING : ShotStatus::FIRST_KEYFRAME_PENDING, 'storyline_error' => null])->save();
 
         GenerateKeyframes::dispatch($this);
     }
@@ -399,7 +636,7 @@ class Shot extends Model implements HasMedia
 
     /**
      * Draws the shots of the project that waited and have everything now: a
-     * place was chosen, keyframes were drawn or a picture of the cast is ready.
+     * place was chosen, an end frame was confirmed or a picture of the cast is ready.
      */
     public static function drawWaitingShots(int $projectId): void
     {
@@ -431,16 +668,37 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Whether this shot of a sequence is still as the split left it: nothing
-     * planned or drawn and no conversation beyond its opening message. Only
+     * Whether this shot of a sequence is still as the direction left it:
+     * nothing drawn and no conversation beyond its opening message. Only
      * such a shot may be changed or removed when the sequence is agreed anew.
      */
     public function isUntouchedInSequence(): bool
     {
         return in_array($this->status, [ShotStatus::DRAFT, ShotStatus::STORYLINE_READY], true)
-            && $this->storylineKeyframes() === []
             && count((array) ($this->plan_chat ?? [])) <= 1
             && ! $this->keyframes()->exists();
+    }
+
+    /**
+     * A new shot at a position of the film, in a group, with an empty plan;
+     * the shots from that position on move one place on.
+     *
+     * @param  array<model-property<self>, mixed>  $attributes
+     */
+    public static function insertInto(Project $project, int $position, string $group, self $like, array $attributes): self
+    {
+        $project->shots()->where('position', '>=', $position)->increment('position');
+
+        return $project->allShots()->create([
+            'position' => $position,
+            'group_key' => $group,
+            'purpose_override' => $like->purpose_override,
+            'aspect_ratio_override' => $like->aspect_ratio_override,
+            'status' => ShotStatus::STORYLINE_READY,
+            'chosen_storyline' => ['storyline' => ''],
+            'storyline' => ['framing' => ['spot' => '', 'seconds' => null], 'keyframes' => []],
+            ...$attributes,
+        ]);
     }
 
     /**
@@ -474,19 +732,6 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Add a planned keyframe at the end of the stored plan.
-     *
-     * @param  array<string, mixed>  $keyframe
-     */
-    public function appendPlannedKeyframe(array $keyframe): void
-    {
-        $this->updateStoredJson('storyline', fn(?array $storyline) => [
-            ...($storyline ?? []),
-            'keyframes' => [...array_values($storyline['keyframes'] ?? []), $keyframe],
-        ]);
-    }
-
-    /**
      * Change the planned keyframe at a position: merge `$changes` into it and
      * drop the `$forget` keys, such as a spatial fact that no longer fits.
      *
@@ -508,9 +753,9 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Whether keyframe 1 is an exact copy of a keyframe of another shot, made
-     * when this shot was added after it. It is never drawn, and the plan goes
-     * on from it.
+     * Whether the start frame is an exact copy of a keyframe of another shot,
+     * made when this shot was added after it. It is never drawn, and the plan
+     * goes on from it.
      */
     public function opensWithCopy(): bool
     {
@@ -526,120 +771,13 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Keyframes can be moved or deleted once the shot has its keyframes and
-     * none of them is being drawn.
-     *
-     * @param  iterable<Keyframe>  $keyframes
-     */
-    public function canArrangeKeyframes(iterable $keyframes): bool
-    {
-        if (! in_array($this->status, [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_READY], true)) {
-            return false;
-        }
-
-        foreach ($keyframes as $keyframe) {
-            if ($keyframe->isBusy()) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Number the given keyframes in their order and keep the planned keyframes
-     * in step, since the plan is read by position. Keyframes left out keep
-     * their row; the caller deletes them.
-     *
-     * @param  list<Keyframe>  $keyframes
-     */
-    public function arrangeKeyframes(array $keyframes): void
-    {
-        $plans = $this->storylineKeyframes();
-
-        $arranged = array_map(fn(Keyframe $keyframe) => $plans[$keyframe->position - 1] ?? array_filter([
-            'title' => $keyframe->title,
-            'staging' => $keyframe->staging,
-            'description' => $keyframe->description,
-            'spatial' => $keyframe->spatial,
-        ]), $keyframes);
-
-        // Old position => new one. A copy still has its original's position and comes after it, so the original keeps the mapping.
-        $moved = [];
-
-        foreach ($keyframes as $index => $keyframe) {
-            $moved[$keyframe->position] ??= $index + 1;
-        }
-
-        foreach ($keyframes as $index => $keyframe) {
-            $keyframe->forceFill(['position' => $index + 1])->save();
-        }
-
-        $this->unsetRelation('keyframes');
-        $this->updateStoredJson('keyframe_review', fn(?array $review) => self::renumberedReview($review, $moved));
-        $this->replacePlannedKeyframes($arranged);
-        $this->fitDurationTo(collect($keyframes));
-
-        // A keyframe deleted or copied: the shot is timed again for what its keyframes show now.
-        if (count($plans) !== count($arranged)) {
-            RetimeShot::dispatch($this);
-        }
-
-        // The order is what the review judges, so it looks again; the renumbered notes stand until then.
-        ReviewShot::after($this);
-    }
-
-    /**
-     * The review with its notes and resolved issues moved along with their
-     * keyframes. Notes about deleted keyframes go; older notes that only name
-     * keyframes in their text cannot be moved and go too.
-     *
-     * @param  array<string, mixed>|null  $review
-     * @param  array<int, int>  $moved  old position => new position
-     * @return array<string, mixed>|null
-     */
-    private static function renumberedReview(?array $review, array $moved): ?array
-    {
-        if ($review === null) {
-            return null;
-        }
-
-        // Position 0 marks an issue resolved for the whole shot.
-        $renumber = fn(array $positions) => array_values(array_filter(
-            array_map(fn(mixed $position) => (int) $position === 0 ? 0 : ($moved[(int) $position] ?? null), $positions),
-            fn(?int $position) => $position !== null,
-        ));
-
-        $notes = collect((array) ($review['notes'] ?? []))
-            ->filter(fn(mixed $note) => is_array($note))
-            ->map(fn(array $note) => [...$note, 'keyframes' => $renumber((array) ($note['keyframes'] ?? [])), 'named' => (array) ($note['keyframes'] ?? []) !== []])
-            ->reject(fn(array $note) => $note['named'] && $note['keyframes'] === [])
-            ->map(fn(array $note) => Arr::except($note, 'named'))
-            ->values()
-            ->all();
-
-        $resolved = collect((array) ($review['resolved'] ?? []))
-            ->map(fn(mixed $positions) => $renumber((array) $positions))
-            ->filter()
-            ->all();
-
-        return [
-            ...$review,
-            'clear' => $notes === [] ? true : (bool) ($review['clear'] ?? true),
-            'notes' => $notes,
-            'resolved' => $resolved,
-        ];
-    }
-
-    /**
      * Remove the rendered keyframes and their images, for example when the plan changes.
      */
     public function forgetKeyframes(): void
     {
-        // Keyframe 1 of a shot that opens with a copy stays: it is never drawn, only copied when the shot was added.
+        // The start frame of a shot that opens with a copy stays: it is never drawn, only copied when the shot was added.
         $this->keyframes()->when($this->opensWithCopy(), fn($keyframes) => $keyframes->where('position', '>', 1))->get()->each->delete();
         $this->unsetRelation('keyframes');
-        $this->clearMediaCollection(self::PLATE);
         $this->forceFill(['keyframe_review' => null]);
         $this->forgetVideo();
     }
@@ -696,7 +834,6 @@ class Shot extends Model implements HasMedia
         $this->addMediaCollection(self::VIDEO_ORIGINAL)->singleFile()->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::PRESENTER_VIDEOS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
         $this->addMediaCollection(self::MONTAGE_CLIPS)->acceptsMimeTypes(['video/mp4', 'video/webm', 'video/quicktime']);
-        $this->addMediaCollection(self::PLATE)->singleFile()->acceptsMimeTypes(['image/png', 'image/jpeg', 'image/webp']);
     }
 
     /** @return BelongsTo<Project, $this> */
@@ -721,11 +858,10 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * How long each keyframe lasts, in order, until the next one is reached;
-     * the last one is held to the end. For a close-up or an insert they are
-     * the seconds the director set, the others the average of those. Other
-     * shots are timed by the planner, as shares of the shot length; without
-     * a plan the length is shared evenly.
+     * How long each keyframe lasts, in order, as the planner timed them: for
+     * a scene or close-up how long the act takes to reach the end frame and
+     * how long that is held, for a montage how long each still shows, as
+     * shares of the shot length. Without a plan the length is shared evenly.
      *
      * @param  Collection<int, Keyframe>|null  $keyframes
      * @return list<float>
@@ -733,12 +869,6 @@ class Shot extends Model implements HasMedia
     public function keyframeSeconds(?Collection $keyframes = null): array
     {
         $keyframes = ($keyframes ?? $this->keyframes()->get())->sortBy('position')->values();
-        $set = $keyframes->pluck('seconds')->filter(fn(?float $seconds) => $seconds !== null);
-
-        if ($set->isNotEmpty()) {
-            return $keyframes->map(fn(Keyframe $keyframe) => $keyframe->seconds ?? (float) $set->avg())->all();
-        }
-
         $plans = $this->storylineKeyframes();
         $count = $keyframes->isEmpty() ? count($plans) : $keyframes->count();
         $planned = array_map(fn(int $index) => is_numeric($plans[$index]['seconds'] ?? null) ? max(0.0, (float) $plans[$index]['seconds']) : null, range(0, max($count - 1, 0)));
@@ -753,24 +883,10 @@ class Shot extends Model implements HasMedia
             return array_fill(0, $count, $length / $count);
         }
 
-        // A keyframe the planner did not time, such as a copied first keyframe, takes the average of the others.
+        // A keyframe the planner did not time, such as a copied start frame, takes the average of the others.
         $planned = array_map(fn(?float $seconds) => $seconds ?? array_sum($timed) / count($timed), $planned);
 
         return array_map(fn(float $seconds) => $seconds * $length / array_sum($planned), $planned);
-    }
-
-    /**
-     * Once the director timed a keyframe, the shot lasts as long as its keyframes together.
-     *
-     * @param  Collection<int, Keyframe>  $keyframes
-     */
-    public function fitDurationTo(Collection $keyframes): void
-    {
-        if ($keyframes->every(fn(Keyframe $keyframe) => $keyframe->seconds === null)) {
-            return;
-        }
-
-        $this->forceFill(['duration' => self::clampSeconds((int) ceil(array_sum($this->keyframeSeconds($keyframes)) - 0.001))])->save();
     }
 
     /**

@@ -26,7 +26,7 @@
       </button>
       <div class="min-w-0 space-y-2">
         <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {{ $t('Keyframe :n · :title', { n: String(index + 1), title: keyframe.title }) }}
+          {{ label }} · {{ keyframe.title }}
         </p>
         <p class="text-muted-foreground">{{ keyframe.staging.summary || keyframe.description }}</p>
         <div v-if="showPrompt" class="space-y-2 border-t border-border pt-3 text-sm">
@@ -83,10 +83,11 @@ import type { PanelKeyframe } from './KeyframesPanel.vue'
  */
 const props = defineProps<{
   keyframe: PanelKeyframe
-  index: number
+  /** What the keyframe is called, such as the start frame. */
+  label: string
   /** The one selected in the image; when they are of the cast, their fields replace what happens. */
   selectedMember: string | null
-  /** How many drawn keyframes come after this one; they may be drawn again to follow the change. */
+  /** Whether the end frame is drawn from this one; it may be drawn again to follow the change. */
   following: number
   /** The keyframe is being drawn: the fields wait. */
   disabled?: boolean
@@ -145,7 +146,7 @@ const editingMember = computed(() =>
   editable.value && form.cast.some((member) => member.name === props.selectedMember) ? props.selectedMember : null,
 )
 
-/** Asking whether the keyframes after this one should follow the change. */
+/** Asking whether the end frame should follow the change. */
 const asking = ref(false)
 
 /* A change made elsewhere, such as in the chat, restages the keyframe; follow it while the director has not edited anything. */

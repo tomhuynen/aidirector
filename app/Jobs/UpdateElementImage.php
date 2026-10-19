@@ -30,6 +30,8 @@ class UpdateElementImage implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly Element $element,
         public readonly ?string $instruction = null,

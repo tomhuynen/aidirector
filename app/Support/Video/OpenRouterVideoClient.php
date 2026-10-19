@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 
 /**
- * The OpenRouter video API, which the AI SDK does not cover: submit a job,
+ * The OpenRouter video API, which the AI SDK does not cover, for the
+ * presenter's lip-synced clips and the project's cover loop: submit a job,
  * poll its status and download the finished clip.
  *
  * @phpstan-type VideoStatus array{id: string, status: string, error?: string|null, usage?: array<string, mixed>|null, unsigned_urls?: list<string>}

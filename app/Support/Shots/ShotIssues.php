@@ -75,7 +75,7 @@ class ShotIssues
             ->values()
             ->all();
 
-        // A picture whose background moved is drawn again from the keyframe before it.
+        // A picture whose background moved is drawn again from the start frame.
         if ($keyframe->render()?->getCustomProperty(Keyframe::BACKGROUND_MOVED) === true) {
             $this->chain->redrawFrom($keyframe);
             $this->resolve($shot, $keyframes, $found);

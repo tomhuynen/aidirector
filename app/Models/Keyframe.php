@@ -60,6 +60,9 @@ class Keyframe extends Model implements HasMedia
     /** On a render: what the image model got, its prompt, the model and what each attached image was. */
     public const SENT = 'sent';
 
+    /** On a render drawn by the layout model: where everyone stands in it, which the keyframe takes when the render is chosen. */
+    public const LAYOUT = 'layout';
+
     protected $guarded = [];
 
     /** @var array<string, mixed> */
@@ -86,7 +89,6 @@ class Keyframe extends Model implements HasMedia
             'status' => KeyframeStatus::class,
             'layout' => 'array',
             'staging' => 'array',
-            'seconds' => 'float',
         ];
     }
 
@@ -107,8 +109,8 @@ class Keyframe extends Model implements HasMedia
     }
 
     /**
-     * The keyframe this one is drawn from: the one before it in the shot, or
-     * the keyframe of another shot this shot continues from.
+     * The keyframe this one is drawn from: the start frame for the end frame,
+     * or the keyframe of another shot this shot continues from.
      *
      * @return BelongsTo<self, $this>
      */
@@ -182,6 +184,19 @@ class Keyframe extends Model implements HasMedia
     public function fullDescription(): string
     {
         return self::joined((string) $this->description, $this->spatial);
+    }
+
+    /**
+     * What the keyframe shows for the layout model, which draws on an image
+     * with a box for everyone: where things are comes from the boxes, so the
+     * spot, positions and spatial fact are left out. Without staging fields,
+     * the full description.
+     */
+    public function boxedDescription(): string
+    {
+        $staging = $this->staged();
+
+        return $staging->summary !== '' || $staging->cast !== [] ? $staging->withinBoxes() : $this->fullDescription();
     }
 
     /**

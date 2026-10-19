@@ -23,10 +23,13 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Starts drawing a shot's keyframes once keyframe 1 is chosen: keyframe 1
- * is read first, so the others are drawn from where everyone stands in it. Cast and sets without a picture get one first, side by side in a
- * batch of {@see GenerateElementReference} jobs; then the keyframes are
- * drawn one after another by the {@see KeyframeChain}.
+ * Starts drawing the end frame once the start frame is chosen: the start
+ * frame is read first, so the end frame is drawn from where everyone stands
+ * in it. Cast and sets without a picture get one first, side by side in a
+ * batch of {@see GenerateElementReference} jobs; then the {@see KeyframeChain}
+ * draws. The stills of a montage are all drawn this way, side by side, and
+ * so are the start frame and the end frame of a shot that continues the
+ * shot before, one after the other.
  */
 #[DeleteWhenMissingModels]
 class GenerateRemainingKeyframes implements ShouldQueue
@@ -36,6 +39,8 @@ class GenerateRemainingKeyframes implements ShouldQueue
     use RetriesHiccups;
 
     public int $timeout = 900;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(
         public readonly Shot $shot,
@@ -55,17 +60,26 @@ class GenerateRemainingKeyframes implements ShouldQueue
         $shot = $this->shot->refresh()->load('project');
         $siblings = $shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $shot);
         $first = $siblings->first();
+        $continues = $shot->continuesPose();
 
-        if ($first === null || (! $shot->drawsStandalone() && $first->render() === null)) {
-            throw new RuntimeException('Choose the first keyframe before rendering the others.');
+        if ($first === null || (! $shot->drawsStandalone() && ! $continues && $first->render() === null)) {
+            throw new RuntimeException('Choose the start frame before drawing the end frame.');
+        }
+
+        // A shot with only its chosen start frame has nothing left to draw.
+        if ($siblings->count() === 1 && ! $shot->drawsStandalone() && ! $continues) {
+            $shot->forceFill(['status' => ShotStatus::KEYFRAMES_READY, 'storyline_error' => null, 'keyframe_review' => null])->save();
+            Shot::drawWaitingShots($shot->project_id);
+
+            return;
         }
 
         if (! $this->elementsDrawn && $this->drawMissingElements($shot, $siblings, $first)) {
             return;
         }
 
-        // The chosen version of keyframe 1 is read once, before the keyframes after it are drawn from it.
-        if (! $shot->drawsStandalone() && $first->layout === null && $painter->reads($first)) {
+        // The chosen version of the start frame is read once, before the end frame is drawn from it.
+        if (! $shot->drawsStandalone() && $first->render() !== null && $first->layout === null && $painter->reads($first)) {
             $first->forceFill(['status' => KeyframeStatus::CHECKING])->save();
             $painter->readFirst($first, $first->render());
             $first->forceFill(['status' => KeyframeStatus::READY])->save();
@@ -77,12 +91,28 @@ class GenerateRemainingKeyframes implements ShouldQueue
 
         $shot->forceFill(['status' => ShotStatus::KEYFRAMES_PENDING, 'storyline_error' => null])->save();
         $chain->link($shot);
-        // Every still of a montage or a presenter shot is drawn on its own; a scene from keyframe 2 on, in order.
-        $chain->draw($shot->drawsStandalone() ? $siblings : $siblings->skip(1)->values());
+        // Every still of a montage or a presenter shot is drawn on its own, and a match cut its start frame too; otherwise the end frame.
+        $chain->draw($shot->drawsStandalone() || $continues ? $siblings : $siblings->skip(1)->values());
     }
 
     /**
-     * Starts drawing every keyframe of a montage or a presenter shot; there is no place or keyframe 1 to choose first.
+     * Starts drawing the start frame and the end frame of a shot that continues the shot before: the start frame is
+     * drawn from that shot's end frame, with no options to choose from, and the end frame from the start frame.
+     */
+    public static function startContinuation(Shot $shot): void
+    {
+        $shot->keyframes()->update(['status' => KeyframeStatus::WAITING, 'render_error' => null]);
+
+        $shot->forceFill([
+            'status' => ShotStatus::KEYFRAMES_PENDING,
+            'storyline_error' => null,
+        ])->save();
+
+        self::dispatch($shot);
+    }
+
+    /**
+     * Starts drawing every keyframe of a montage or a presenter shot; there is no place or start frame to choose first.
      */
     public static function startStandalone(Shot $shot): void
     {
@@ -139,7 +169,7 @@ class GenerateRemainingKeyframes implements ShouldQueue
     }
 
     /**
-     * Starts drawing keyframes 2 to N, once keyframe 1 is chosen.
+     * Starts drawing the end frame, once the start frame is chosen.
      */
     public static function startFor(Shot $shot): void
     {
@@ -164,12 +194,19 @@ class GenerateRemainingKeyframes implements ShouldQueue
             'render_error' => $exception?->getMessage(),
         ]);
 
-        $this->shot->forceFill($this->shot->drawsStandalone() ? [
-            'storyline_error' => __('Not every still could be drawn. Draw the missing ones again.'),
-            'status' => ShotStatus::KEYFRAMES_READY,
-        ] : [
-            'storyline_error' => __('The other keyframes could not be rendered. Please try again.'),
-            'status' => ShotStatus::FIRST_KEYFRAME_READY,
-        ])->save();
+        $this->shot->forceFill(match (true) {
+            $this->shot->drawsStandalone() => [
+                'storyline_error' => __('Not every still could be drawn. Draw the missing ones again.'),
+                'status' => ShotStatus::KEYFRAMES_READY,
+            ],
+            $this->shot->continuesPose() => [
+                'storyline_error' => __('The keyframes could not be drawn. Please try again.'),
+                'status' => ShotStatus::STORYLINE_READY,
+            ],
+            default => [
+                'storyline_error' => __('The end frame could not be drawn. Please try again.'),
+                'status' => ShotStatus::FIRST_KEYFRAME_READY,
+            ],
+        })->save();
     }
 }

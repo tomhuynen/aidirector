@@ -46,6 +46,11 @@ class Element extends Model implements HasMedia
      */
     public const CHANGE_REQUEST = 'change_request';
 
+    /**
+     * On a version of a place's picture: the layout it shows, read by {@see \App\Jobs\ReadPlaceLayout}.
+     */
+    public const LAYOUT = 'layout';
+
     protected $guarded = [];
 
     /** @var array<string, class-string> */
@@ -127,6 +132,14 @@ class Element extends Model implements HasMedia
         $references = $this->references();
 
         return $references->firstWhere('id', $this->reference_id) ?? $references->last();
+    }
+
+    /**
+     * The layout the chosen picture of a place shows, once it is read.
+     */
+    public function layout(): ?string
+    {
+        return $this->type === ElementType::PLACE ? $this->reference()?->getCustomProperty(self::LAYOUT) : null;
     }
 
     /**

@@ -16,12 +16,9 @@ use Illuminate\Support\Str;
  * so the model knows which box is meant. Image 0 is the image that is kept;
  * the pictures of the cast follow in the order given.
  *
- * A later keyframe is drawn on the plate: the place of the shot without
- * people, from the same camera, so the background is the same in every
- * keyframe. The cast and what earlier keyframes changed are moved out of the
- * keyframe before, who is new is drawn from their picture. Without a plate
- * it is drawn on the keyframe before: the cast who stay are anchored, those
- * who move are moved out of it, and those who left are taken out.
+ * The end frame is drawn on the start frame: the cast who stay are
+ * anchored, those who move are moved out of that image, those who are new
+ * are drawn from their picture, and those who left are taken out.
  *
  * @phpstan-import-type Box from KeyframeLayout
  */
@@ -29,6 +26,8 @@ final class KeyframeLayoutBrief
 {
     /** The whole frame, on the 0 to 1000 grid. */
     private const array WHOLE = [0, 0, 1000, 1000];
+
+    private const int EDGE = 5;
 
     /**
      * @param  array<string, int>  $pictures  per name of the cast, the number of its attached picture
@@ -39,7 +38,7 @@ final class KeyframeLayoutBrief
     {
         $lines = [
             "Keyframe {$keyframe->position} of an animated e-learning film. " . self::keep(),
-            'What this keyframe shows: ' . $keyframe->fullDescription(),
+            'What this keyframe shows: ' . $keyframe->boxedDescription(),
         ];
 
         foreach ($layout->cast as $member) {
@@ -53,10 +52,17 @@ final class KeyframeLayoutBrief
 
             $lines[] = match (true) {
                 $old === null => "{$tag} comes into the frame in their box, {$member['facing']}; " . self::sentence($member['pose']) . $picture,
-                $old['box'] === $member['box'] => "{$tag} stays where they stand, {$member['facing']}; " . self::sentence($member['pose']) . $picture,
+                self::sameSpot($old['box'], $member['box']) => "{$tag} stays where they stand, {$member['facing']}; " . self::sentence($member['pose']) . $picture,
                 default => "{$tag} moves to their new box, {$member['facing']}; " . self::sentence($member['pose']) . " Where {$tag} stood before, the place shows as it is behind them, empty, with no shadow left on the floor." . $picture,
             };
-            $lines[] = self::feet($tag, $member['box'], 'with the same kind of contact shadow under them as the others in <ref_image_0> have');
+
+            if (self::cutOff($member['box'])) {
+                $lines[] = "{$tag} is cut off by the edge of the frame, as in <ref_image_0>: only the part of them inside the frame shows, at the same size. What is outside the frame there, such as their head, stays outside it.";
+            }
+
+            if ($member['box'][2] < 1000 - self::EDGE) {
+                $lines[] = self::feet($tag, $member['box'], 'with the same kind of contact shadow under them as the others in <ref_image_0> have');
+            }
         }
 
         array_push($lines, ...self::depth($layout));
@@ -101,22 +107,27 @@ final class KeyframeLayoutBrief
     public static function rows(KeyframeLayout $layout, KeyframeLayout $before, array $pictures): array
     {
         $rows = [self::frame('the image before this keyframe: the place and everything in it that does not change')];
+        $kept = array_values(array_map(fn(array $member) => $member['box'], array_filter($layout->cast, fn(array $member) => ! $member['changed'])));
+
+        // What stays comes first, so a change drawn over a part of it, such as a hand at a handle, wins.
+        foreach ($layout->cast as $member) {
+            if (! $member['changed']) {
+                $rows[] = ['id' => self::id($member['name']), 'from' => 'ref_image_0', 'src_bbox' => $member['box'], 'tgt_bbox' => $member['box'], 'desc' => "{$member['name']}, unchanged", 'kind' => 'anchor'];
+            }
+        }
 
         foreach ($layout->cast as $member) {
-            $id = self::id($member['name']);
-
             if (! $member['changed']) {
-                $rows[] = ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => $member['box'], 'tgt_bbox' => $member['box'], 'desc' => "{$member['name']}, unchanged", 'kind' => 'anchor'];
-
                 continue;
             }
 
+            $id = self::id($member['name']);
             $old = $before->member($member['name']);
             $picture = $pictures[$member['name']] ?? null;
             $desc = "{$member['name']}, {$member['facing']}, " . rtrim($member['pose'], '.');
 
             $rows[] = match (true) {
-                $old !== null => ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => self::pad($old['box']), 'tgt_bbox' => self::pad($member['box']), 'desc' => $desc, 'kind' => 'move'],
+                $old !== null => ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => self::clear(self::pad($old['box']), $old['box'], $kept), 'tgt_bbox' => self::clear(self::pad($member['box']), $member['box'], $kept), 'desc' => $desc, 'kind' => 'move'],
                 $picture !== null => ['id' => $id, 'from' => "ref_image_{$picture}", 'src_bbox' => self::WHOLE, 'tgt_bbox' => $member['box'], 'desc' => $desc, 'kind' => 'move'],
                 default => ['id' => $id, 'from' => null, 'src_bbox' => null, 'tgt_bbox' => $member['box'], 'desc' => $desc, 'kind' => 'new'],
             };
@@ -124,7 +135,7 @@ final class KeyframeLayoutBrief
 
         // Who left is taken out and the model fills in what was behind them.
         foreach (self::left($layout, $before) as $member) {
-            $rows[] = ['id' => self::id($member['name']), 'from' => 'ref_image_0', 'src_bbox' => self::pad($member['box']), 'tgt_bbox' => null, 'desc' => "{$member['name']}, removed", 'kind' => 'move'];
+            $rows[] = ['id' => self::id($member['name']), 'from' => 'ref_image_0', 'src_bbox' => self::clear(self::pad($member['box']), $member['box'], $kept), 'tgt_bbox' => null, 'desc' => "{$member['name']}, removed", 'kind' => 'move'];
         }
 
         foreach ($layout->changes as $change) {
@@ -135,144 +146,27 @@ final class KeyframeLayoutBrief
     }
 
     /**
-     * The prompt for a later keyframe drawn on the plate: the place without
-     * people is the image that is kept, so the background is the same in
-     * every keyframe. The people and the things that changed earlier in the
-     * shot are moved out of the keyframe before; who is new comes from their
-     * picture. An object of the plate that moved or is held is taken out of it.
+     * Whether a box changed only as much as two readings of the same pose differ.
      *
-     * @param  array<string, Box>  $onPlate  per name, where an object of the cast stands in the plate
-     * @param  list<array{thing: string, state: string, box: Box}>  $carried  things an earlier keyframe changed, as they are now
-     * @param  array<string, int>  $pictures  per name of the cast, the number of its attached picture
-     * @param  list<Element>  $props  objects the cast holds, each with its picture after the cast's
+     * @param  Box  $old
+     * @param  Box  $new
      */
-    public static function onPlate(Keyframe $keyframe, KeyframeLayout $layout, KeyframeLayout $before, array $onPlate, array $carried, array $pictures, array $props = [], string $extra = ''): string
+    private static function sameSpot(array $old, array $new): bool
     {
-        $lines = [
-            "Keyframe {$keyframe->position} of an animated e-learning film. <ref_image_0> is the place of this shot without people, from the fixed camera: keep it exactly as it is, including every sign, the camera, the framing, the light and the style. <ref_image_1> is the keyframe before this one: the people and the things that changed come from it, as the rows below say. Change only what the rows below change.",
-            'What this keyframe shows: ' . $keyframe->fullDescription(),
-        ];
+        $overlap = max(0, min($old[2], $new[2]) - max($old[0], $new[0])) * max(0, min($old[3], $new[3]) - max($old[1], $new[1]));
+        $union = ($old[2] - $old[0]) * ($old[3] - $old[1]) + ($new[2] - $new[0]) * ($new[3] - $new[1]) - $overlap;
 
-        foreach ($layout->cast as $member) {
-            $tag = '<' . self::id($member['name']) . '>';
-            $old = $before->member($member['name']);
-            $plated = self::platedAt($onPlate, $member['name']);
-
-            if (! $member['changed'] && $plated === $member['box']) {
-                $lines[] = "{$tag} stays exactly as it is.";
-
-                continue;
-            }
-
-            if ($plated !== null) {
-                $lines[] = "Where {$tag} stands in <ref_image_0>, the place shows as it is behind it, empty, with no shadow.";
-            }
-
-            if (! $member['changed'] && $old !== null) {
-                $lines[] = "{$tag} stays where they stand, exactly as in <ref_image_1>.";
-
-                continue;
-            }
-
-            $picture = isset($pictures[$member['name']]) ? " {$tag} looks exactly like <ref_image_{$pictures[$member['name']]}>." : '';
-            $lines[] = match (true) {
-                $old === null => "{$tag} comes into the frame in their box, {$member['facing']}; " . self::sentence($member['pose']) . $picture,
-                $old['box'] === $member['box'] => "{$tag} stays where they stand, {$member['facing']}; " . self::sentence($member['pose']) . $picture,
-                default => "{$tag} moves to their new box, {$member['facing']}; " . self::sentence($member['pose']) . $picture,
-            };
-            $lines[] = self::feet($tag, $member['box'], 'with a contact shadow under them that matches the light of <ref_image_0>');
-        }
-
-        array_push($lines, ...self::depth($layout));
-
-        foreach (self::offPlate($layout, $onPlate) as $name => $box) {
-            $lines[] = '<' . self::id($name) . '> is no longer there. Where it stands in <ref_image_0>, the place shows as it is behind it, empty, with no shadow.';
-        }
-
-        foreach ($props as $index => $prop) {
-            $lines[] = "{$prop->name} looks exactly like <ref_image_" . (count($pictures) + 2 + $index) . '>.';
-        }
-
-        foreach ($carried as $change) {
-            $lines[] = "The {$change['thing']} stays {$change['state']}, exactly as in <ref_image_1>.";
-        }
-
-        foreach ($layout->changes as $change) {
-            $lines[] = "The {$change['thing']} is now {$change['state']}.";
-        }
-
-        if (trim($extra) !== '') {
-            $lines[] = trim($extra);
-        }
-
-        $lines[] = self::noText($keyframe);
-        $lines[] = self::encode(self::plateRows($layout, $before, $onPlate, $carried, $pictures));
-
-        return implode("\n", $lines);
+        return $union > 0 && $overlap / $union >= 0.9;
     }
 
     /**
-     * The rows on the plate: the plate as the anchor, objects of the plate
-     * that moved or left taken out of it, the cast moved out of the keyframe
-     * before or drawn from their picture, what an earlier keyframe changed
-     * copied from the keyframe before, and what changes now drawn new.
+     * Whether a box touches the top or a side of the frame, so part of who is in it is outside the frame.
      *
-     * @param  array<string, Box>  $onPlate
-     * @param  list<array{thing: string, state: string, box: Box}>  $carried
-     * @param  array<string, int>  $pictures
-     * @return list<array{id: string, from: string|null, src_bbox: Box|null, tgt_bbox: Box|null, desc: string, kind: string}>
+     * @param  Box  $box
      */
-    public static function plateRows(KeyframeLayout $layout, KeyframeLayout $before, array $onPlate, array $carried, array $pictures): array
+    private static function cutOff(array $box): bool
     {
-        $rows = [self::frame('the place without people: everything that does not change')];
-
-        foreach ($onPlate as $name => $box) {
-            $member = $layout->member($name);
-
-            if ($member === null || $member['changed'] || $member['box'] !== $box) {
-                $rows[] = ['id' => self::id($name) . '_plate', 'from' => 'ref_image_0', 'src_bbox' => self::pad($box), 'tgt_bbox' => null, 'desc' => "{$name}, taken out of the place", 'kind' => 'move'];
-            }
-        }
-
-        foreach ($carried as $change) {
-            $rows[] = ['id' => self::id($change['thing']), 'from' => 'ref_image_1', 'src_bbox' => $change['box'], 'tgt_bbox' => $change['box'], 'desc' => "the {$change['thing']}, still {$change['state']}", 'kind' => 'move'];
-        }
-
-        // From back to front, so who is nearer is drawn over who is further away.
-        $cast = $layout->cast;
-        usort($cast, fn(array $a, array $b) => $a['box'][2] <=> $b['box'][2]);
-
-        foreach ($cast as $member) {
-            $id = self::id($member['name']);
-            $old = $before->member($member['name']);
-            $picture = $pictures[$member['name']] ?? null;
-
-            if (! $member['changed'] && self::platedAt($onPlate, $member['name']) === $member['box']) {
-                $rows[] = ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => $member['box'], 'tgt_bbox' => $member['box'], 'desc' => "{$member['name']}, unchanged", 'kind' => 'anchor'];
-
-                continue;
-            }
-
-            if (! $member['changed'] && $old !== null) {
-                $rows[] = ['id' => $id, 'from' => 'ref_image_1', 'src_bbox' => self::pad($old['box']), 'tgt_bbox' => self::pad($member['box']), 'desc' => "{$member['name']}, unchanged", 'kind' => 'move'];
-
-                continue;
-            }
-
-            $desc = "{$member['name']}, {$member['facing']}, " . rtrim($member['pose'], '.');
-
-            $rows[] = match (true) {
-                $old !== null => ['id' => $id, 'from' => 'ref_image_1', 'src_bbox' => self::pad($old['box']), 'tgt_bbox' => self::pad($member['box']), 'desc' => $desc, 'kind' => 'move'],
-                $picture !== null => ['id' => $id, 'from' => "ref_image_{$picture}", 'src_bbox' => self::WHOLE, 'tgt_bbox' => $member['box'], 'desc' => $desc, 'kind' => 'move'],
-                default => ['id' => $id, 'from' => null, 'src_bbox' => null, 'tgt_bbox' => $member['box'], 'desc' => $desc, 'kind' => 'new'],
-            };
-        }
-
-        foreach ($layout->changes as $change) {
-            $rows[] = ['id' => self::id($change['thing']), 'from' => null, 'src_bbox' => null, 'tgt_bbox' => $change['box'], 'desc' => "the {$change['thing']}, now {$change['state']}", 'kind' => 'new'];
-        }
-
-        return $rows;
+        return $box[0] <= self::EDGE || $box[1] <= self::EDGE || $box[3] >= 1000 - self::EDGE;
     }
 
     /**
@@ -310,65 +204,6 @@ final class KeyframeLayoutBrief
     }
 
     /**
-     * @param  array<string, Box>  $onPlate
-     * @return Box|null
-     */
-    private static function platedAt(array $onPlate, string $name): ?array
-    {
-        foreach ($onPlate as $plated => $box) {
-            if (mb_strtolower($plated) === mb_strtolower($name)) {
-                return $box;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * The objects of the plate that are no longer in the keyframe, such as one someone picked up.
-     *
-     * @param  array<string, Box>  $onPlate
-     * @return array<string, Box>
-     */
-    private static function offPlate(KeyframeLayout $layout, array $onPlate): array
-    {
-        return array_filter($onPlate, fn(array $box, string $name) => $layout->member($name) === null, ARRAY_FILTER_USE_BOTH);
-    }
-
-    /**
-     * The prompt for the plate: keyframe 1 with every person taken out, so
-     * the place shows as it is behind them, from the same camera. The
-     * place's picture, when there is one, says what is there.
-     *
-     * @param  list<string>  $people  the names of the people in keyframe 1
-     */
-    public static function plate(Keyframe $first, KeyframeLayout $layout, array $people): string
-    {
-        $people = array_map('mb_strtolower', $people);
-        $lines = ['The first keyframe of an animated e-learning film. ' . self::keep(), 'Take every person out of the image, so it shows the place on its own, with nobody in it.'];
-        $rows = [self::frame('the keyframe, unchanged wherever no person stands')];
-
-        foreach ($layout->cast as $member) {
-            $id = self::id($member['name']);
-
-            if (! in_array(mb_strtolower($member['name']), $people, true)) {
-                $lines[] = "<{$id}> stays exactly as it is.";
-                $rows[] = ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => $member['box'], 'tgt_bbox' => $member['box'], 'desc' => "{$member['name']}, unchanged", 'kind' => 'anchor'];
-
-                continue;
-            }
-
-            $lines[] = "<{$id}> is taken out. Where <{$id}> stood, the place shows as it is behind them, empty, with no shadow.";
-            $rows[] = ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => self::pad($member['box']), 'tgt_bbox' => null, 'desc' => "{$member['name']}, removed", 'kind' => 'move'];
-        }
-
-        $lines[] = self::noText($first);
-        $lines[] = self::encode($rows);
-
-        return implode("\n", $lines);
-    }
-
-    /**
      * The prompt for moving one of the cast in a keyframe to the box the
      * director dragged them to, with everyone else staying. Without a box
      * they leave the frame. With a picture they are drawn from it, for
@@ -378,17 +213,12 @@ final class KeyframeLayoutBrief
      *
      * @param  Box|null  $box
      */
-    public static function moved(Keyframe $keyframe, KeyframeLayout $layout, string $name, ?array $box, ?int $picture = null, bool $cutOff = false, ?int $plate = null): string
+    public static function moved(Keyframe $keyframe, KeyframeLayout $layout, string $name, ?array $box, ?int $picture = null, bool $cutOff = false): string
     {
-        $lines = ["Keyframe {$keyframe->position} of an animated e-learning film. " . self::keep(), 'What this keyframe shows: ' . $keyframe->fullDescription()];
+        $lines = ["Keyframe {$keyframe->position} of an animated e-learning film. " . self::keep(), 'What this keyframe shows: ' . $keyframe->boxedDescription()];
         $rows = [self::frame('the keyframe as it is drawn, unchanged where no row changes it')];
-        $moving = $layout->member($name);
 
-        // Where they stood, the plate first; they are drawn over it where they stand now.
-        if ($plate !== null && $moving !== null) {
-            $lines[] = self::behindLine($moving['name'], $plate);
-            $rows[] = self::behindRow($moving, $plate);
-        }
+        $kept = array_values(array_map(fn(array $member) => $member['box'], array_filter($layout->cast, fn(array $member) => mb_strtolower($member['name']) !== mb_strtolower($name))));
 
         foreach ($layout->cast as $member) {
             $id = self::id($member['name']);
@@ -403,10 +233,7 @@ final class KeyframeLayoutBrief
 
             if ($box === null) {
                 $lines[] = "<{$id}> leaves the frame and is no longer in this keyframe. Where <{$id}> stood, the place shows as it is behind them, empty, with no shadow.";
-
-                if ($plate === null) {
-                    $rows[] = ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => self::pad($member['box']), 'tgt_bbox' => null, 'desc' => "{$member['name']}, removed", 'kind' => 'move'];
-                }
+                $rows[] = ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => self::clear(self::pad($member['box']), $member['box'], $kept), 'tgt_bbox' => null, 'desc' => "{$member['name']}, removed", 'kind' => 'move'];
 
                 continue;
             }
@@ -416,7 +243,7 @@ final class KeyframeLayoutBrief
                 . ($cutOff ? " <{$id}> stands at the edge of the frame: only the part of them inside the box shows, the rest is cut off by the edge." : '');
             $rows[] = $picture !== null
                 ? ['id' => $id, 'from' => "ref_image_{$picture}", 'src_bbox' => self::WHOLE, 'tgt_bbox' => $box, 'desc' => $desc, 'kind' => 'move']
-                : ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => self::pad($member['box']), 'tgt_bbox' => self::pad($box), 'desc' => $desc, 'kind' => 'move'];
+                : ['id' => $id, 'from' => 'ref_image_0', 'src_bbox' => self::clear(self::pad($member['box']), $member['box'], $kept), 'tgt_bbox' => self::clear(self::pad($box), $box, $kept), 'desc' => $desc, 'kind' => 'move'];
         }
 
         $lines[] = self::noText($keyframe);
@@ -436,7 +263,7 @@ final class KeyframeLayoutBrief
      */
     public static function changed(Keyframe $keyframe, KeyframeLayout $layout, array $changes, array $pictures = []): string
     {
-        $lines = ["Keyframe {$keyframe->position} of an animated e-learning film. " . self::keep(), 'What this keyframe shows: ' . $keyframe->fullDescription()];
+        $lines = ["Keyframe {$keyframe->position} of an animated e-learning film. " . self::keep(), 'What this keyframe shows: ' . $keyframe->boxedDescription()];
         $rows = [self::frame('the keyframe as it is drawn, unchanged where no row changes it')];
         $changes = array_change_key_case($changes, CASE_LOWER);
         $pictures = array_change_key_case($pictures, CASE_LOWER);
@@ -484,7 +311,7 @@ final class KeyframeLayoutBrief
      */
     public static function repaired(Keyframe $keyframe, KeyframeLayout $layout, array $fixes, array $pictures): string
     {
-        $lines = ["Keyframe {$keyframe->position} of an animated e-learning film. " . self::keep(), 'What this keyframe shows: ' . $keyframe->fullDescription()];
+        $lines = ["Keyframe {$keyframe->position} of an animated e-learning film. " . self::keep(), 'What this keyframe shows: ' . $keyframe->boxedDescription()];
         $rows = [self::frame('the keyframe as it is drawn, unchanged where no row changes it')];
         $fixed = array_filter(array_map(fn(array $fix) => $fix['member'] === null ? null : mb_strtolower($fix['member']), $fixes));
 
@@ -525,7 +352,7 @@ final class KeyframeLayoutBrief
     }
 
     /**
-     * Who was in the keyframe before and is not in this one: they left.
+     * Who was in the start frame and is not in this one: they left.
      *
      * @return list<array{name: string, box: Box, facing: string, pose: string, changed: bool}>
      */
@@ -534,23 +361,9 @@ final class KeyframeLayoutBrief
         return array_values(array_filter($before->cast, fn(array $member) => $layout->member($member['name']) === null));
     }
 
-    private static function behindLine(string $name, int $plate): string
-    {
-        return '<' . self::id($name) . "_behind> is copied from <ref_image_{$plate}>, the same place from this camera without people: where {$name} stood, the place shows as it is there, empty, with no shadow.";
-    }
-
-    /**
-     * @param  array{name: string, box: Box, facing: string, pose: string, changed: bool}  $member
-     * @return array{id: string, from: string, src_bbox: Box, tgt_bbox: Box, desc: string, kind: string}
-     */
-    private static function behindRow(array $member, int $plate): array
-    {
-        return ['id' => self::id($member['name']) . '_behind', 'from' => "ref_image_{$plate}", 'src_bbox' => self::pad($member['box']), 'tgt_bbox' => self::pad($member['box']), 'desc' => "the empty place where {$member['name']} stood", 'kind' => 'move'];
-    }
-
     private static function keep(): string
     {
-        return 'In <ref_image_0>, keep everything exactly as it is, including every sign, the camera, the framing, the light and the style. Change only what the rows below change.';
+        return 'In <ref_image_0>, keep everything exactly as it is, including every sign, the camera, the framing, the light and the style. The framing is the same crop at the same distance: never zoom in or out, and never show more or less of the place or the people than <ref_image_0> does. Change only what the rows below change.';
     }
 
     private static function noText(Keyframe $keyframe): string
@@ -562,8 +375,9 @@ final class KeyframeLayoutBrief
      * A box with room around someone drawn again out of the image, so the
      * edge where the new part blends in falls on plain floor and wall, not
      * along their legs and feet, and their shadow is inside it: taken from
-     * where they stood, it moves along with them. Wider at the sides and
-     * below, the same on both spots, so they keep their size.
+     * where they stood, it moves along with them. Wider at the sides and a
+     * little below, the same on both spots, so they keep their size; the
+     * feet stay near the bottom of the box.
      *
      * @param  Box  $box
      * @return Box
@@ -577,9 +391,42 @@ final class KeyframeLayoutBrief
         return [
             max(0, (int) round($top - $height * 0.03)),
             max(0, (int) round($left - $width * 0.15)),
-            min(1000, (int) round($bottom + $height * 0.12)),
+            min(1000, (int) round($bottom + $height * 0.04)),
             min(1000, (int) round($right + $width * 0.15)),
         ];
+    }
+
+    /**
+     * A padded box kept clear of the boxes that stay as they are, so no part
+     * of the image is kept and drawn again at once. It never shrinks into the
+     * box it pads: where that box itself overlaps one that stays, it is left.
+     *
+     * @param  Box  $padded
+     * @param  Box  $own
+     * @param  list<Box>  $kept
+     * @return Box
+     */
+    private static function clear(array $padded, array $own, array $kept): array
+    {
+        [$top, $left, $bottom, $right] = $padded;
+
+        foreach ($kept as [$keptTop, $keptLeft, $keptBottom, $keptRight]) {
+            if ($top >= $keptBottom || $keptTop >= $bottom || $left >= $keptRight || $keptLeft >= $right) {
+                continue;
+            }
+
+            if ($own[1] >= $keptRight) {
+                $left = $keptRight;
+            } elseif ($own[3] <= $keptLeft) {
+                $right = $keptLeft;
+            } elseif ($own[0] >= $keptBottom) {
+                $top = $keptBottom;
+            } elseif ($own[2] <= $keptTop) {
+                $bottom = $keptTop;
+            }
+        }
+
+        return [$top, $left, $bottom, $right];
     }
 
     private static function sentence(string $text): string
@@ -600,6 +447,7 @@ final class KeyframeLayoutBrief
      */
     private static function encode(array $rows): string
     {
-        return json_encode(['rows' => $rows], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        // The layout model reads a bare array of rows; whether a row keeps, moves, adds or removes follows from its boxes.
+        return json_encode(array_map(fn(array $row) => array_diff_key($row, ['kind' => true]), $rows), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 }

@@ -204,13 +204,13 @@ class Project extends Model implements HasMedia
      */
     public function elementsBrief(): string
     {
-        $elements = $this->elements()->get();
+        $elements = $this->elements()->with('media')->get();
 
         if ($elements->isEmpty()) {
             return 'None yet.';
         }
 
-        return $elements->map(fn(Element $element) => '- ' . $element->promptLine())->join("\n");
+        return $elements->map(fn(Element $element) => '- ' . $element->promptLine() . (($layout = $element->layout()) === null ? '' : "\n  Layout, as its picture shows it: {$layout}"))->join("\n");
     }
 
     /** @return MorphMany<Generation, $this> */

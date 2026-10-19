@@ -6,6 +6,7 @@ namespace App\Ai;
 
 use App\Ai\Briefs\TextRules;
 use App\Enums\ElementType;
+use App\Jobs\ReadPlaceLayout;
 use App\Models\Element;
 use App\Models\ElementSuggestion;
 use App\Models\Keyframe;
@@ -269,6 +270,10 @@ class ElementPainter
             ->toMediaCollection(Element::REFERENCE);
 
         $element->forceFill(['reference_id' => $version->id])->save();
+
+        if ($element->type === ElementType::PLACE) {
+            ReadPlaceLayout::dispatch($version)->afterCommit();
+        }
     }
 
     /**

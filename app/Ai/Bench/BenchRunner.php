@@ -12,7 +12,7 @@ use Throwable;
 
 /**
  * Runs one case of a benchmark with one variant and has the judges score
- * the answer. Nothing is saved: the agents only read the tenant's data.
+ * the answer. Nothing is saved in the tenant: the steps only read its data.
  */
 class BenchRunner
 {
@@ -44,7 +44,7 @@ class BenchRunner
 
     /**
      * @param  list<string>  $judges
-     * @return array{case: string, label: string, model: string, effort: string|null, seconds: float|null, usage: array<string, int>|null, output: array<string, mixed>|null, judgements: array<string, array<string, mixed>>, error: string|null}
+     * @return array{case: string, label: string, model: string, effort: string|null, seconds: float|null, usage: array<string, mixed>|null, output: array<string, mixed>|null, measures: array<string, float>, judgements: array<string, array<string, mixed>>, error: string|null}
      */
     public function run(string $benchmark, string $case, BenchVariant $variant, array $judges): array
     {
@@ -59,43 +59,41 @@ class BenchRunner
             'seconds' => null,
             'usage' => null,
             'output' => null,
+            'measures' => [],
             'judgements' => [],
             'error' => null,
         ];
 
-        $agent = $benchmark->agent($case)->withReasoningEffort($variant->effort);
-        $prompt = $benchmark->prompt($case);
         $started = hrtime(true);
 
         try {
-            /** @var StructuredAgentResponse $response */
-            $response = $agent->prompt($prompt, attachments: $benchmark->attachments($case), provider: 'openrouter', model: $variant->model, timeout: self::TIMEOUT);
+            $answer = $benchmark->answer($case, $variant);
         } catch (Throwable $exception) {
             return [...$result, 'seconds' => $this->secondsSince($started), 'error' => $exception->getMessage()];
         }
 
         $result['seconds'] = $this->secondsSince($started);
-        $result['usage'] = $response->usage->toArray();
-        $result['output'] = $response->toArray();
+        $result['usage'] = $answer->usage;
+        $result['output'] = $answer->output;
+        $result['measures'] = $answer->measures;
 
         foreach ($judges as $judge) {
-            $result['judgements'][$judge] = $this->judge($benchmark, $case, (string) $agent->instructions(), $prompt, $result['output'], $judge);
+            $result['judgements'][$judge] = $this->judge($benchmark, $answer, $judge);
         }
 
         return $result;
     }
 
     /**
-     * @param  array<string, mixed>  $output
      * @return array<string, mixed>
      */
-    private function judge(Benchmark $benchmark, BenchCase $case, string $instructions, string $prompt, array $output, string $model): array
+    private function judge(Benchmark $benchmark, BenchAnswer $answer, string $model): array
     {
         $judge = new BenchJudge($benchmark->criteria());
 
         try {
             /** @var StructuredAgentResponse $response */
-            $response = $judge->prompt($judge->promptFor($instructions, $prompt, $output), attachments: $benchmark->attachments($case), provider: 'openrouter', model: $model, timeout: self::TIMEOUT);
+            $response = $judge->prompt($judge->promptFor($answer->instructions, $answer->prompt, $answer->output), attachments: $answer->images, provider: 'openrouter', model: $model, timeout: self::TIMEOUT);
 
             return $response->toArray();
         } catch (Throwable $exception) {

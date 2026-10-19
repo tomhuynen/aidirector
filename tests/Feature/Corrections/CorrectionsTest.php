@@ -9,7 +9,6 @@ use App\Ai\KeyframeReferences;
 use App\Enums\CorrectionKind;
 use App\Enums\CorrectionSource;
 use App\Enums\Disk;
-use App\Enums\KeyframeStatus;
 use App\Enums\ProjectRuleStatus;
 use App\Enums\ShotStatus;
 use App\Models\Correction;
@@ -51,20 +50,16 @@ function readyShot(Project $project, int $position = 1): Shot
 }
 
 describe('recording', function () {
-    it('keeps a deleted keyframe and a rewritten description', function () {
+    it('keeps a rewritten description', function () {
         Queue::fake();
         $shot = readyShot($this->project);
-        [$first, $second] = $shot->keyframes()->get();
-        Keyframe::factory()->for($shot)->create(['position' => 3]);
+        $first = $shot->keyframes()->firstOrFail();
 
         actingAs($this->director, 'director')
-            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $first]), ['summary' => 'She walks up close to the crane.', 'cast' => []]);
-        $shot->keyframes()->update(['status' => KeyframeStatus::READY]);
-        actingAs($this->director, 'director')
-            ->delete(route('public.shots.keyframes.destroy', [$this->project, $shot, $second]))
+            ->post(route('public.shots.keyframes.update', [$this->project, $shot, $first]), ['summary' => 'She walks up close to the crane.', 'cast' => []])
             ->assertSessionHasNoErrors();
 
-        expect(Correction::query()->pluck('source')->all())->toBe([CorrectionSource::DESCRIPTION, CorrectionSource::DELETE])
+        expect(Correction::query()->pluck('source')->all())->toBe([CorrectionSource::DESCRIPTION])
             ->and(Correction::query()->first()->request)->toContain('to "She walks up close to the crane."');
     });
 

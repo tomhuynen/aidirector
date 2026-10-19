@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Ai\Bench\Benchmarks;
 
 use App\Ai\Agents\PhotoAnalyst;
+use App\Ai\Bench\AgentBenchmark;
 use App\Ai\Bench\BenchCase;
-use App\Ai\Bench\Benchmark;
 use App\Models\Project;
 use Illuminate\Support\Collection;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -15,7 +15,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
  * Captioning an uploaded photo and listing the cast and sets in it, on
  * every content photo of every project.
  */
-class PhotoAnalysisBenchmark extends Benchmark
+class PhotoAnalysisBenchmark extends AgentBenchmark
 {
     public function name(): string
     {

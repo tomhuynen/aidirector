@@ -7,6 +7,7 @@ namespace App\Support\Shots;
 use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
 use App\Jobs\MergeShotVideos;
+use App\Jobs\RenderSequenceVideo;
 use App\Models\Project;
 use App\Models\Shot;
 use Illuminate\Support\Collection;
@@ -44,7 +45,11 @@ class MergeShots
             throw ValidationException::withMessages(['shots' => __('A merged shot cannot be merged again. Unmerge it first.')]);
         }
 
-        if ($parts->contains(fn(Shot $shot) => $shot->video() === null)) {
+        $sequence = $parts->every(fn(Shot $shot) => $shot->rendersInSequence());
+
+        if ($sequence) {
+            $this->ensureRenderable($parts);
+        } elseif ($parts->contains(fn(Shot $shot) => $shot->video() === null)) {
             throw ValidationException::withMessages(['shots' => __('Every shot needs a video before it can be merged.')]);
         }
 
@@ -68,7 +73,7 @@ class MergeShots
             return $merged;
         });
 
-        MergeShotVideos::dispatch($merged);
+        $sequence ? RenderSequenceVideo::dispatch($merged) : MergeShotVideos::dispatch($merged);
 
         return $merged;
     }
@@ -101,7 +106,7 @@ class MergeShots
     }
 
     /**
-     * Joins the clips again with another transition.
+     * Joins the clips again with another transition; a sequence is rendered again.
      */
     public function rejoin(Shot $merged, ShotTransition $transition): void
     {
@@ -111,7 +116,26 @@ class MergeShots
             'video_error' => null,
         ])->save();
 
-        MergeShotVideos::dispatch($merged);
+        $merged->loadMissing('parts');
+        $merged->parts->every(fn(Shot $part) => $part->rendersInSequence()) ? RenderSequenceVideo::dispatch($merged) : MergeShotVideos::dispatch($merged);
+    }
+
+    /**
+     * A sequence is rendered as one clip from the start frame of each shot, with at most as many shots as the video model cuts between.
+     *
+     * @param  Collection<int, Shot>  $parts
+     *
+     * @throws ValidationException when it cannot be rendered
+     */
+    private function ensureRenderable(Collection $parts): void
+    {
+        if ($parts->count() > RenderSequenceVideo::SHOTS) {
+            throw ValidationException::withMessages(['shots' => __('A sequence renders at most :count shots in one clip.', ['count' => RenderSequenceVideo::SHOTS])]);
+        }
+
+        if ($parts->contains(fn(Shot $shot) => $shot->keyframes()->where('position', 1)->whereNotNull('render_id')->doesntExist())) {
+            throw ValidationException::withMessages(['shots' => __('Every shot needs its start frame before the sequence can be rendered.')]);
+        }
     }
 
     private function renumber(Project $project): void

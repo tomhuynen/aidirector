@@ -32,14 +32,18 @@ class ShotListItemResource extends JsonResource
             'statusLabel' => $this->status->description(),
             /** @var int */
             'duration' => $this->durationInSeconds(),
-            /** @var int */
-            'keyframesCount' => $this->keyframes_count ?? 0,
             /**
              * How many shots this one was merged from; 0 for an ordinary shot.
              *
              * @var int
              */
             'partsCount' => $this->parts_count ?? 0,
+            /**
+             * Whether the shot renders with its whole sequence in one clip, from its start frame, so it merges once that is drawn.
+             *
+             * @var bool
+             */
+            'rendersInSequence' => $this->resource->rendersInSequence(),
             /**
              * Whether storylines, keyframes or the video are being generated right now.
              *

@@ -17,6 +17,7 @@ use App\Jobs\GenerateCoverLoop;
 use App\Jobs\GenerateElementSuggestions;
 use App\Jobs\GenerateProjectCover;
 use App\Jobs\GenerateStoryline;
+use App\Jobs\ReadPlaceLayout;
 use App\Jobs\RenderElementSuggestion;
 use App\Models\Director;
 use App\Models\Element;
@@ -614,6 +615,21 @@ describe('picking', function () {
             ->and(ElementSuggestion::query()->whereKey($other->id)->exists())->toBeFalse();
 
         Storage::disk(Disk::TENANT->value)->assertMissing($otherFile);
+    });
+
+    it('reads the layout of a picked place', function () {
+        Queue::fake([ReadPlaceLayout::class]);
+        $round = ElementRound::factory()->for($this->project)->type(ElementType::PLACE)->create();
+        $picked = ElementSuggestion::factory()->for($round, 'round')->ready()->create(['name' => 'Corridor', 'position' => 1]);
+        $picked->addMedia(UploadedFile::fake()->image('corridor.png'))->toMediaCollection(ElementSuggestion::RENDER);
+
+        actingAs($this->director, 'director')
+            ->postJson(route('public.projects.elements.rounds.pick', [$this->project, $round]), ['suggestions' => [$picked->sqid]])
+            ->assertSuccessful();
+
+        $place = $this->project->elements()->firstOrFail();
+
+        Queue::assertPushed(ReadPlaceLayout::class, fn(ReadPlaceLayout $job) => $job->picture->is($place->reference()));
     });
 
     it('refuses suggestions that are still rendering and rounds that are settled', function () {

@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Support\Video;
 
 /**
- * Where the clips of scenes and close-ups render: their status and the
- * finished clip, from the provider set in `pipeline.video.provider`.
+ * A provider that renders clips: the status of its jobs and the finished
+ * clip. Luma renders scenes, close-ups and the stills of a montage;
+ * OpenRouter the presenter's lip-synced clips.
  *
  * @phpstan-type VideoStatus array{id: string, status: string, error?: string|null, usage?: array<string, mixed>|null}
  */

@@ -31,6 +31,8 @@ class GenerateStoryline implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly Shot $shot,
         /** Keep the kind the shot already has, such as the one the project setup chose; otherwise the planner chooses. */

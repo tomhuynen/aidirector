@@ -29,6 +29,8 @@ class RetimeShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public int $timeout = 120;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly Shot $shot,
     ) {

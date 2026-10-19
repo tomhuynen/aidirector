@@ -41,7 +41,9 @@ class RenderController
             ]);
         }
 
-        $keyframe->forceFill(['render_id' => $render->id])->save();
+        // A version drawn on the keyframe before brings where everyone stands in it.
+        $layout = $render->getCustomProperty(Keyframe::LAYOUT);
+        $keyframe->forceFill(['render_id' => $render->id, ...(is_array($layout) ? ['layout' => $layout] : [])])->save();
         ReviewShot::after($shot);
 
         return redirect()->route('public.shots.view', [$project, $shot]);

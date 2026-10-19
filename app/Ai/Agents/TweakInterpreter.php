@@ -31,7 +31,7 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
     use SetsReasoningEffort;
 
     /**
-     * @param  list<Image>  $images  the current render, then the keyframe before it if there is one
+     * @param  list<Image>  $images  the current render, then the start frame when the end frame is edited
      */
     public function __construct(
         private readonly Keyframe $keyframe,
@@ -41,7 +41,7 @@ class TweakInterpreter implements Agent, HasReasoningEffort, HasStructuredOutput
     public function instructions(): Stringable|string
     {
         $context = count($this->images) > 1
-            ? 'You get two images: first the keyframe to edit, then the keyframe directly before it in the same shot, for reference only.'
+            ? 'You get two images: first the keyframe to edit, the end frame, then the start frame of the same shot, for reference only.'
             : 'You get one image: the keyframe to edit.';
 
         $cast = $this->keyframe->elements->pluck('name')->join(', ') ?: 'none';

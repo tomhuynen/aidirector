@@ -99,19 +99,17 @@ it('always draws a keyframe after a changed one that was never drawn', function 
     expect(statuses($this->shot))->toBe(['ready', 'ready', 'drawing']);
 });
 
-it('also draws keyframe 1 of the shot that continues from a changed keyframe, when asked', function () {
+it('leaves keyframe 1 of the shot that continues from a changed keyframe to the director, also when the end frame follows', function () {
     $this->keyframes->each(fn(Keyframe $keyframe) => $keyframe->forceFill(['status' => KeyframeStatus::READY, 'render_id' => 1])->save());
     $next = Shot::factory()->for($this->shot->project)->create(['position' => $this->shot->position + 1, 'status' => ShotStatus::KEYFRAMES_READY, 'storyline' => ['setting_from' => ['shot_id' => $this->shot->id, 'keyframe' => Shot::LAST_KEYFRAME]]]);
     $continued = Keyframe::factory()->for($next)->create(['position' => 1, 'status' => KeyframeStatus::READY, 'render_id' => 1]);
     $this->chain->link($next);
 
     $this->chain->changed($this->keyframes[2]->fresh());
-
-    expect($continued->fresh()->status)->toBe(KeyframeStatus::READY);
-
     $this->chain->changed($this->keyframes[2]->fresh(), following: true);
 
-    expect($continued->fresh()->status)->toBe(KeyframeStatus::DRAWING);
+    expect($continued->fresh()->status)->toBe(KeyframeStatus::READY)
+        ->and($continued->fresh()->depends_on_id)->toBe($this->keyframes[2]->id);
 });
 
 it('ignores a draw that was asked for again meanwhile', function () {

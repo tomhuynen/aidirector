@@ -123,14 +123,10 @@ it('draws the move on the keyframe itself, sized by the depth, and the keyframes
         ->and(KeyframeLayout::fromArray($first->layout)->member('Security guard')['box'])->toBe([588, 234, 900, 456])
         ->and(KeyframeLayout::fromArray($first->layout)->member('Visitor car')['box'])->toBe([650, 330, 920, 800])
         ->and($this->second->fresh()->status)->toBe(KeyframeStatus::DRAWING);
-    // Keyframe 1 has a person, so the plate is made first: the guard taken out.
+    Http::assertSentCount(2);
     Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
-        && str_contains($request['input']['prompt'], 'Take every person out of the image')
-        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":null'));
-    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
-        && count($request['input']['images']) === 2
-        && str_contains($request['input']['prompt'], '"id":"security_guard_behind","from":"ref_image_1","src_bbox":[550,122,730,267],"tgt_bbox":[550,122,730,267]')
-        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[579,201,937,489]')
+        && count($request['input']['images']) === 1
+        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,717,267],"tgt_bbox":[579,201,912,489]')
         && ! str_contains($request['input']['prompt'], 'soft shadow')
         && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.'));
     Queue::assertPushed(DrawKeyframe::class, fn(DrawKeyframe $job) => $job->keyframe->is($this->second));
@@ -151,8 +147,8 @@ describe('past the edge of the frame', function () {
 
         expect(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Security guard'))->toBeNull()
             ->and(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Visitor car'))->not->toBeNull();
-        // Where he stood is copied from the plate, keyframe 1 with him taken out.
-        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"id":"security_guard_behind","from":"ref_image_1","src_bbox":[550,122,730,267],"tgt_bbox":[550,122,730,267]')
+        // He is taken out, and the layout model fills in where he stood.
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,717,267],"tgt_bbox":null')
             && str_contains($request['input']['prompt'], '<security_guard> leaves the frame'));
     });
 
@@ -160,7 +156,7 @@ describe('past the edge of the frame', function () {
         (new MoveCastMember($this->first->fresh(), 1, 'Security guard', [555, -50, 711, 61]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
 
         expect(KeyframeLayout::fromArray($this->first->fresh()->layout)->member('Security guard')['box'])->toBe([555, 0, 711, 61]);
-        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[550,0,730,70]')
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], '"from":"ref_image_0","src_bbox":[550,122,717,267],"tgt_bbox":[550,0,717,70]')
             && str_contains($request['input']['prompt'], 'only the part of them inside the box shows'));
     });
 
@@ -170,7 +166,7 @@ describe('past the edge of the frame', function () {
 
         (new MoveCastMember($this->first->fresh(), 1, 'Security guard', [555, 139, 711, 250]))->handle(app(App\Ai\KeyframePainter::class), app(KeyframeChain::class));
 
-        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && count($request['input']['images']) === 3
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions') && count($request['input']['images']) === 2
             && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_1","src_bbox":[0,0,1000,1000],"tgt_bbox":[555,139,711,250]')
             && str_contains($request['input']['prompt'], 'looks exactly like <ref_image_1>, the whole of them'));
     });
@@ -192,7 +188,7 @@ it('changes one of the cast where they stand, keeping everyone else', function (
         ->and($first->renders())->toHaveCount(2)
         ->and($first->render()->getCustomProperty(Keyframe::TWEAK_REQUEST))->toBe('He raises his left hand.');
     Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'predictions')
-        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":[550,122,730,267],"desc":"Security guard, He raises his left hand","kind":"move"')
+        && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,717,267],"tgt_bbox":[550,122,717,267],"desc":"Security guard, He raises his left hand"')
         && str_contains($request['input']['prompt'], '<visitor_car> stays exactly as it is.'));
 });
 

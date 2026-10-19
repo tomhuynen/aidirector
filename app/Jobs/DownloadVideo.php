@@ -6,9 +6,9 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Models\Shot;
+use App\Support\Video\ActEnd;
 use App\Support\Video\LumaVideoClient;
 use App\Support\Video\SilentVideo;
-use App\Support\Video\VideoJobs;
 use App\Support\Video\VideoTrimmer;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -19,9 +19,8 @@ use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * Downloads a finished clip onto its shot, without sound, logs the
- * generation with its usage and tells the director. A part of a merged
- * shot joins the merged video again.
+ * Downloads a finished Luma clip onto its shot, without sound and cut where
+ * the act ends, logs the generation with its cost and tells the director.
  */
 #[DeleteWhenMissingModels]
 class DownloadVideo implements ShouldQueue
@@ -32,18 +31,16 @@ class DownloadVideo implements ShouldQueue
 
     public int $timeout = 360;
 
-    /**
-     * @param  array<string, mixed>  $usage
-     */
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly Shot $shot,
         public readonly string $jobId,
-        public readonly array $usage = [],
     ) {
         $this->onQueue(Config::get('pipeline.queue'));
     }
 
-    public function handle(VideoJobs $videos): void
+    public function handle(LumaVideoClient $videos): void
     {
         $shot = $this->shot->load('project');
 
@@ -52,29 +49,21 @@ class DownloadVideo implements ShouldQueue
             return;
         }
 
-        $clip = $videos->download($this->jobId);
-
-        // Luma renders 5 or 10 seconds; the last keyframe is held past the shot's end, which is cut off.
-        if (GenerateVideo::rendersOnLuma() && LumaVideoClient::lengthFor(GenerateVideo::duration($shot)) > GenerateVideo::duration($shot)) {
-            $clip = $this->cut($clip, GenerateVideo::duration($shot));
-        }
+        [$clip, $seconds] = $this->cut($shot, $videos->download($this->jobId));
 
         $shot->addMediaFromString(app(SilentVideo::class)->strip($clip))
             ->usingFileName("shot-{$shot->position}.mp4")
-            ->withCustomProperties([Shot::VIDEO_SECONDS => GenerateVideo::duration($shot)])
+            ->withCustomProperties([Shot::VIDEO_SECONDS => $seconds])
             ->toMediaCollection(Shot::VIDEO);
 
         $shot->generations()->create([
             'director_id' => $shot->project->director_id,
             'kind' => 'video',
-            'provider' => GenerateVideo::provider(),
+            'provider' => GenerateVideo::PROVIDER,
             'model' => GenerateVideo::model(),
             'prompt' => $shot->video_prompt,
-            'cost' => GenerateVideo::rendersOnLuma()
-                ? LumaVideoClient::cost(LumaVideoClient::lengthFor(GenerateVideo::duration($shot)), $shot->videoResolution())
-                : (is_numeric($this->usage['cost'] ?? null) ? $this->usage['cost'] : null),
+            'cost' => LumaVideoClient::cost(LumaVideoClient::lengthFor(GenerateVideo::duration($shot)), $shot->videoResolution()),
             'duration_ms' => self::waitedMs($shot),
-            'usage' => $this->usage ?: null,
         ]);
 
         $shot->forceFill([
@@ -98,7 +87,7 @@ class DownloadVideo implements ShouldQueue
         $shot->generations()->create([
             'director_id' => $shot->project->director_id,
             'kind' => 'video',
-            'provider' => GenerateVideo::provider(),
+            'provider' => GenerateVideo::PROVIDER,
             'model' => GenerateVideo::model(),
             'prompt' => $shot->video_prompt,
             'duration_ms' => self::waitedMs($shot),
@@ -111,16 +100,29 @@ class DownloadVideo implements ShouldQueue
         ])->save();
     }
 
-    private function cut(string $clip, int $seconds): string
+    /**
+     * The clip cut to the shot, and its length: with an end frame, where
+     * the act ends, as Ray timed it; with one frame, or when the act end
+     * cannot be read, at the shot's planned length.
+     *
+     * @return array{string, float|int}
+     */
+    private function cut(Shot $shot, string $clip): array
     {
         $directory = storage_path('tmp/cut-' . Str::uuid());
         File::ensureDirectoryExists($directory);
 
         try {
             File::put("{$directory}/clip.mp4", $clip);
+            $seconds = ($shot->keyframes()->count() > 1 ? app(ActEnd::class)->seconds("{$directory}/clip.mp4") : null) ?? GenerateVideo::duration($shot);
+
+            if ($seconds >= LumaVideoClient::lengthFor(GenerateVideo::duration($shot))) {
+                return [$clip, $seconds];
+            }
+
             app(VideoTrimmer::class)->trim("{$directory}/clip.mp4", "{$directory}/cut.mp4", 0.0, (float) $seconds);
 
-            return File::get("{$directory}/cut.mp4");
+            return [File::get("{$directory}/cut.mp4"), $seconds];
         } finally {
             File::deleteDirectory($directory);
         }

@@ -9,8 +9,11 @@ use App\Enums\ShotTransition;
 use App\Jobs\Concerns\FollowsPlan;
 use App\Models\Shot;
 use App\Support\Video\ClipJoiner;
+use App\Support\Video\LumaVideoClient;
 use App\Support\Video\OpenRouterVideoClient;
 use App\Support\Video\SilentVideo;
+use App\Support\Video\VideoJobs;
+use App\Support\Video\VideoTrimmer;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -24,12 +27,12 @@ use Spatie\Multitenancy\Models\Tenant;
 use Throwable;
 
 /**
- * Follows the clips of a montage, one per still, or of a presenter shot, one
- * per language. A montage's clips are cut to their share of the shot length
- * and joined with crossfades into the shot's video once all are in; a
- * presenter's clips keep their sound and are stored per language, the first
- * one also as the shot's video. While clips still render, the job queues
- * itself for the next round.
+ * Follows the clips of a montage, one per still on Luma, or of a presenter
+ * shot, one per language on OpenRouter. A montage's clips are cut to their
+ * share of the shot length and joined with crossfades into the shot's video
+ * once all are in; a presenter's clips keep their sound and are stored per
+ * language, the first one also as the shot's video. While clips still
+ * render, the job queues itself for the next round.
  */
 #[DeleteWhenMissingModels]
 class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
@@ -41,7 +44,9 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public int $timeout = 600;
 
-    private const RUNNING = ['pending', 'queued', 'in_progress', 'processing', 'running'];
+    public bool $failOnTimeout = true;
+
+    private const RUNNING = ['pending', 'queued', 'dreaming', 'in_progress', 'processing', 'running'];
 
     public function __construct(
         public readonly Shot $shot,
@@ -55,7 +60,7 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
         return 'poll-clips-' . (Tenant::current()?->getKey() ?? 'landlord') . '-' . $this->shot->getKey();
     }
 
-    public function handle(OpenRouterVideoClient $videos, ClipJoiner $joiner): void
+    public function handle(LumaVideoClient $luma, OpenRouterVideoClient $openRouter, ClipJoiner $joiner): void
     {
         $shot = $this->shot->load(['project', 'media']);
         $clips = (array) ($shot->montage_clips ?? []);
@@ -63,6 +68,8 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
         if ($shot->status !== ShotStatus::VIDEO_PENDING || $clips === []) {
             return;
         }
+
+        $videos = $this->provider($shot, $luma, $openRouter);
 
         $pending = array_values(array_filter($clips, fn(array $clip) => $clip['status'] === 'pending'));
         $statuses = $videos->statuses(array_column($pending, 'job_id'));
@@ -99,7 +106,7 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
                 ->withCustomProperties(isset($clip['locale']) ? ['locale' => $clip['locale']] : ['position' => $clip['position']])
                 ->toMediaCollection(Shot::MONTAGE_CLIPS);
 
-            $clips[$index] = [...$clip, 'status' => 'done', 'cost' => is_numeric($status['usage']['cost'] ?? null) ? (float) $status['usage']['cost'] : null];
+            $clips[$index] = [...$clip, 'status' => 'done', 'cost' => $this->cost($shot, $clip, $status)];
         }
 
         $shot->forceFill(['montage_clips' => $clips])->save();
@@ -113,6 +120,29 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $shot->isPresenter()
             ? $this->storeLanguages($shot->load('media'), $clips)
             : $this->join($shot->load('media'), $clips, $joiner);
+    }
+
+    /**
+     * Who renders the clips of this shot: Luma a montage's stills, OpenRouter a presenter's languages.
+     */
+    private function provider(Shot $shot, LumaVideoClient $luma, OpenRouterVideoClient $openRouter): VideoJobs
+    {
+        return $shot->isPresenter() ? $openRouter : $luma;
+    }
+
+    /**
+     * What a finished clip cost: as OpenRouter reports it for a presenter, from the price list for a Luma clip of a still.
+     *
+     * @param  array{seconds?: int}  $clip
+     * @param  array{usage?: array<string, mixed>|null}  $status
+     */
+    private function cost(Shot $shot, array $clip, array $status): ?float
+    {
+        if ($shot->isPresenter()) {
+            return is_numeric($status['usage']['cost'] ?? null) ? (float) $status['usage']['cost'] : null;
+        }
+
+        return isset($clip['seconds']) ? LumaVideoClient::cost((int) $clip['seconds'], $shot->videoResolution()) : null;
     }
 
     /**
@@ -145,7 +175,7 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
     /**
      * Cuts each clip to its share of the shot length and joins them with crossfades into the shot's video.
      *
-     * @param  list<array{position: int, job_id: string, status: string, cost?: float|null}>  $clips
+     * @param  list<array{position: int, job_id: string, seconds: int, status: string, cost?: float|null}>  $clips
      */
     private function join(Shot $shot, array $clips, ClipJoiner $joiner): void
     {
@@ -163,11 +193,16 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
             $output = "{$directory}/montage.mp4";
             $lengths = self::clipLengths($shot->keyframeSeconds());
-            $timeline = count($paths) > 1
-                ? $joiner->join($paths, ShotTransition::CROSSFADE, $output, $lengths)
-                : ['starts' => [0.0], 'duration' => $lengths[0]];
 
-            $shot->addMedia(count($paths) > 1 ? $output : $paths[0])
+            // One still: its clip is cut to how long it shows, as the join would cut it.
+            if (count($paths) > 1) {
+                $timeline = $joiner->join($paths, ShotTransition::CROSSFADE, $output, $lengths);
+            } else {
+                app(VideoTrimmer::class)->trim($paths[0], $output, 0.0, $lengths[0]);
+                $timeline = ['starts' => [0.0], 'duration' => $lengths[0]];
+            }
+
+            $shot->addMedia($output)
                 ->usingFileName("shot-{$shot->position}.mp4")
                 ->withCustomProperties([Shot::PART_STARTS => $timeline['starts'], Shot::VIDEO_SECONDS => $timeline['duration']])
                 ->toMediaCollection(Shot::VIDEO);
@@ -190,7 +225,7 @@ class PollShotClips implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $shot->generations()->create([
             'director_id' => $shot->project->director_id,
             'kind' => 'video',
-            'provider' => 'openrouter',
+            'provider' => $shot->isPresenter() ? 'openrouter' : GenerateVideo::PROVIDER,
             'model' => Config::get($shot->isPresenter() ? 'pipeline.models.presenter' : 'pipeline.models.video'),
             'prompt' => $shot->video_prompt,
             'cost' => $costs === [] ? null : array_sum($costs),

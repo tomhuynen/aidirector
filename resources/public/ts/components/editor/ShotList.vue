@@ -35,7 +35,11 @@
     </div>
 
     <p v-if="editing" class="px-5 pb-2 text-xs leading-relaxed text-muted-foreground">
-      {{ $t('Tick shots to delete them, or to merge shots that follow each other and have a video.') }}
+      {{
+        $t(
+          'Tick shots to delete them, or to merge shots that follow each other and have a video, or their start frame when they render as a sequence.',
+        )
+      }}
     </p>
 
     <p v-if="shots.length === 0" class="px-4 py-6 text-xs leading-relaxed text-muted-foreground">
@@ -85,7 +89,7 @@
           type="button"
           :class="tabClass"
           :disabled="!groupShots(i).every(canMerge)"
-          :title="groupShots(i).every(canMerge) ? $t('Merge these shots') : $t('Every shot needs a video first.')"
+          :title="groupShots(i).every(canMerge) ? $t('Merge these shots') : mergeNeeds(groupShots(i))"
           @click="mergeGroup(i)"
         >
           <Combine class="size-3.5" />
@@ -201,10 +205,6 @@
                 {{ $t(':count shots merged', { count: String(shot.partsCount) }) }} ·
                 {{ $t(':count s', { count: String(shot.duration) }) }}
               </template>
-              <template v-else-if="shot.keyframesCount > 0">
-                {{ $t(':count keyframes', { count: String(shot.keyframesCount) }) }} ·
-                {{ $t(':count s', { count: String(shot.duration) }) }}
-              </template>
               <template v-else
                 >{{ shot.statusLabel }} · {{ $t(':count s', { count: String(shot.duration) }) }}</template
               >
@@ -278,13 +278,14 @@ export type ShotListItem = {
   title: string
   statusLabel: string
   duration: number
-  keyframesCount: number
   /** Shots planned together in one conversation share this key. */
   groupKey?: string | null
   /** What the keyframes wait for, such as "the place of SH100". */
   waitingFor?: string | null
   /** How many shots this one was merged from; 0 for an ordinary shot. */
   partsCount: number
+  /** The shot renders with its whole sequence in one clip, so it merges once its start frame is drawn. */
+  rendersInSequence?: boolean
   status: string
   /** Storylines, keyframes or the video are being generated right now. */
   busy: boolean
@@ -429,8 +430,17 @@ const stopEditing = () => {
   selected.value = []
 }
 
-/** A shot can be merged when it has a video and is not a merged shot itself. */
-const canMerge = (shot: ShotListItem) => shot.partsCount === 0 && shot.status === 'video-ready'
+/** A shot can be merged when it has a video, or its start frame when it renders with its sequence, and is not a merged shot itself. */
+const canMerge = (shot: ShotListItem) =>
+  shot.partsCount === 0 &&
+  (shot.status === 'video-ready' ||
+    (shot.rendersInSequence && ['keyframes-ready', 'video-pending'].includes(shot.status)))
+
+/** What the shots of a group still need before they can be merged. */
+const mergeNeeds = (shots: ShotListItem[]) =>
+  shots.every((shot) => shot.rendersInSequence)
+    ? $t('Every shot needs its start frame first.')
+    : $t('Every shot needs a video first.')
 
 const toggle = (shot: ShotListItem) => {
   selected.value = selected.value.includes(shot.id)

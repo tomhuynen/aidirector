@@ -78,11 +78,11 @@ it('puts the action in the centre and allows no text anywhere, also not on the p
         ->not->toContain('lettering');
 });
 
-it('draws later keyframes as an edit of keyframe 1, so every fixed part of the place stays', function () {
+it('draws the end frame as an edit of the start frame, so every fixed part of the place stays', function () {
     $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('first.png'))))
-        ->toStartWith('Edit the first attached image. It is keyframe 1 of this shot')
+        ->toStartWith('Edit the first attached image. It is the start frame of this shot')
         ->toContain('The place itself stays exactly as it is in the first image')
         ->toContain('The state of things follows the story: open or closed')
         ->toContain('a handset lifted off its hook leaves the cradle empty')
@@ -110,7 +110,7 @@ it('always keeps the style\'s light, also when an older plan named one', functio
     'missing' => [null],
 ]);
 
-it('adds the people that keyframe 1 does not show yet', function () {
+it('adds the people that the start frame does not show yet', function () {
     $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
 
     expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(first: new StoredImage('first.png'), firstShowsCast: false, castNames: ['Female engineer'])))
@@ -118,17 +118,18 @@ it('adds the people that keyframe 1 does not show yet', function () {
         ->not->toContain('never add a second copy of anyone');
 });
 
-it('takes the people from their pictures and the state of things from the keyframe before', function () {
+it('takes the people from their pictures and the state of things from the start frame', function () {
     $shot = framedShot(['size' => 'full', 'spot' => 'At the side door of the hall.']);
     $engineer = Element::factory()->for($shot->project)->create(['type' => 'person', 'name' => 'Female engineer']);
-
-    expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], new KeyframeReferences(
+    $references = new KeyframeReferences(
         elementImages: [['element' => $engineer, 'image' => new StoredImage('engineer.png')]],
         first: new StoredImage('first.png'),
-        previous: new StoredImage('previous.png'),
-    )))
+    );
+
+    expect(KeyframeImageBrief::for($shot, $shot->storylineKeyframes()[0], $references))
         ->toContain('The second attached image is the picture of Female engineer (person). Draw Female engineer exactly like it')
-        ->toContain('The third attached image is the keyframe directly before this one. Carry over the state and position of every object from it');
+        ->not->toContain('third attached image')
+        ->and($references->labels())->toBe(['The start frame, the image that is edited', 'Picture of Female engineer']);
 });
 
 it('never lets the image model write text, also not on cards, badges or permits', function () {
@@ -143,8 +144,9 @@ it('plans around what the video model cannot do, and has the plan director expla
         ->and((string) (new App\Ai\Agents\StorylineWriter($shot->load('project')))->instructions())
         ->toContain('What the video model cannot do in one shot')
         ->toContain('The place changes within the shot, such as driving through a gate')
-        ->toContain('Something appears, disappears or changes hands, place or state between two keyframes without a keyframe that shows it')
-        ->toContain('everything the shot uses, people and things, is in the frame from keyframe 1, or visibly comes in')
+        ->toContain('Something appears, disappears or changes hands, place or state between the start frame and the end frame without being seen to do so')
+        ->toContain('everything the shot uses, people and things, is in the start frame, or visibly comes in')
+        ->toContain('A scene or a close-up has exactly two keyframes: the start frame, the state before the act, and the end frame, the result.')
         ->toContain('putting on or taking off clothing or gear, such as a vest, a jacket or a helmet: 3 to 4 seconds')
         ->and((string) (new App\Ai\Agents\PlanDirector($shot, []))->instructions())
         ->toContain('tell the director in plain words why it will not work')

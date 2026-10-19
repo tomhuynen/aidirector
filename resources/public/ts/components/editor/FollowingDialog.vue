@@ -3,15 +3,13 @@
     <DialogContent>
       <DialogHeader class="space-y-3">
         <DialogTitle class="font-display text-2xl font-medium">{{
-          count === 1 ? $t('Also update the keyframe after it?') : $t('Also update the keyframes after it?')
+          count === 1 ? $t('Also update the end frame?') : $t('Also update the frames drawn from it?')
         }}</DialogTitle>
         <DialogDescription>{{
           count === 1
-            ? $t(
-                'The next keyframe is drawn from this one. Draw it again so it follows the change, or keep it as it is.',
-              )
+            ? $t('The end frame is drawn from this one. Draw it again so it follows the change, or keep it as it is.')
             : $t(
-                ':count keyframes are drawn from this one. Draw them again so they follow the change, or keep them as they are.',
+                ':count frames are drawn from this one. Draw them again so they follow the change, or keep them as they are.',
                 { count: String(count) },
               )
         }}</DialogDescription>
@@ -32,9 +30,9 @@ import { $t } from '@public/ts/shared/i18n'
 import { Button } from '@shared:ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@shared:ui/dialog'
 
-/** Asks, before a change to a keyframe is drawn, whether the keyframes drawn from it follow it. */
+/** Asks, before a change to a keyframe is drawn, whether the frames drawn from it follow it. */
 defineProps<{
-  /** How many drawn keyframes come after it. */
+  /** How many drawn frames of this shot come after it: the end frame. */
   count: number
   processing?: boolean
 }>()

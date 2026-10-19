@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Ai\Bench\Benchmarks;
 
 use App\Ai\Agents\StyleOptionsWriter;
+use App\Ai\Bench\AgentBenchmark;
 use App\Ai\Bench\BenchCase;
-use App\Ai\Bench\Benchmark;
 use App\Models\Project;
 use App\Models\StyleOption;
 use Illuminate\Support\Collection;
@@ -15,7 +15,7 @@ use Illuminate\Support\Collection;
  * Proposing a round of styles: the first round of every project, then a
  * "more like this" round from each style sheet the director could pick.
  */
-class StyleOptionsBenchmark extends Benchmark
+class StyleOptionsBenchmark extends AgentBenchmark
 {
     public function name(): string
     {

@@ -47,13 +47,18 @@ class CostEstimate
 
     /**
      * The cost of one variant answering one case, and of every judge
-     * scoring that answer; null when OpenRouter does not list a model.
+     * scoring that answer; null when OpenRouter lists no price for a model,
+     * as for the image models of its images endpoint.
      *
      * @param  list<string>  $judges
      * @return array{call: float|null, judging: float|null}
      */
     public function forCase(Benchmark $benchmark, BenchCase $case, BenchVariant $variant, array $judges): array
     {
+        if (! $benchmark instanceof AgentBenchmark) {
+            return ['call' => null, 'judging' => null];
+        }
+
         $agent = $benchmark->agent($case)->withReasoningEffort($variant->effort);
         $instructions = (string) $agent->instructions();
         $prompt = $benchmark->prompt($case);

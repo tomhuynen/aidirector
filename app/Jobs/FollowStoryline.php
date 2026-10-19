@@ -26,6 +26,8 @@ class FollowStoryline implements ShouldQueue
 
     public int $timeout = 120;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly Keyframe $keyframe,
         public readonly string $before,

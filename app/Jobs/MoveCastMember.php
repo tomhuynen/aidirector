@@ -30,6 +30,8 @@ class MoveCastMember implements ShouldQueue
 
     public int $timeout = 600;
 
+    public bool $failOnTimeout = true;
+
     /**
      * @param  array{0: int, 1: int, 2: int, 3: int}  $box  where they were dragged to; it may reach past the frame
      */

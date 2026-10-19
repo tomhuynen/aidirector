@@ -12,8 +12,9 @@ use Illuminate\Support\Str;
 /**
  * Puts the plan agreed in the plan chat into the shot: the title, the kind,
  * the storyline, the keyframes with the cast and sets they show, the length
- * and where the setting comes from. A plan that changes what happens, or how
- * long it takes, has its voice-over written again.
+ * and where the setting comes from. A scene or close-up keeps its start frame
+ * and its end frame, whatever lies between them in the proposal. A plan that
+ * changes what happens, or how long it takes, has its voice-over written again.
  */
 class ShotPlan
 {
@@ -38,7 +39,14 @@ class ShotPlan
             ...(is_numeric($keyframe['seconds'] ?? null) ? ['seconds' => max(0.0, (float) $keyframe['seconds'])] : []),
         ])->all();
 
-        // Keyframe 1 of a shot that opens with a copy is that image: its plan stays as it was copied.
+        $kind = ShotKind::tryFrom((string) ($proposal['kind'] ?? '')) ?? $shot->kindOrScene();
+
+        // A scene or close-up is its start frame and its end frame; a step proposed in between is not drawn.
+        if (count($keyframes) > 2 && ! (new Shot(['kind' => $kind]))->drawsStandalone()) {
+            $keyframes = [$keyframes[0], $keyframes[count($keyframes) - 1]];
+        }
+
+        // The start frame of a shot that opens with a copy is that image: its plan stays as it was copied.
         if ($shot->opensWithCopy() && isset($shot->storylineKeyframes()[0])) {
             $keyframes[0] = $shot->storylineKeyframes()[0];
         }
@@ -55,7 +63,7 @@ class ShotPlan
 
         $shot->forceFill([
             ...($title !== '' ? ['title' => Str::limit($title, 80)] : []),
-            'kind' => ShotKind::tryFrom((string) ($proposal['kind'] ?? '')) ?? $shot->kind,
+            'kind' => $kind,
             // A length timed in the chat replaces one set in the brief.
             'duration' => null,
             'chosen_storyline' => ['storyline' => $storyline],

@@ -45,7 +45,7 @@ class KeyframeResource extends JsonResource
             /** @var string|null */
             'prompt' => $this->prompt,
             /**
-             * Where the keyframe is in being drawn: it waits for the keyframe it is drawn from, is drawn, is checked, or is ready.
+             * Where the keyframe is in being drawn: it waits for the frame it is drawn from, is drawn, is checked, or is ready.
              *
              * @var 'planned'|'waiting'|'drawing'|'checking'|'ready'|'failed'
              */
@@ -89,10 +89,6 @@ class KeyframeResource extends JsonResource
                 /** @var string|null Moving one of them to a new box; only for a drawn keyframe of a scene. */
                 'move' => $this->movable($rendered) ? route('public.shots.keyframes.move', [$this->shot->project, $this->shot, $this->resource]) : null,
                 'chooseRender' => route('public.shots.keyframes.render', [$this->shot->project, $this->shot, $this->resource]),
-                'destroy' => route('public.shots.keyframes.destroy', [$this->shot->project, $this->shot, $this->resource]),
-                'copy' => route('public.shots.keyframes.copy', [$this->shot->project, $this->shot, $this->resource]),
-                /** @var string|null Setting how long it lasts; only in a close-up or an insert, other shots are timed by the planner. */
-                'seconds' => $this->shot->kindOrScene()->timedByHand() ? route('public.shots.keyframes.seconds', [$this->shot->project, $this->shot, $this->resource]) : null,
             ],
         ];
     }

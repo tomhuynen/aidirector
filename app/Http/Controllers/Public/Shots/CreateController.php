@@ -31,7 +31,7 @@ class CreateController
         return Inertia::render('shots/create', [
             'project' => fn() => ProjectResource::make($project),
             'siblings' => fn() => ShotListItemResource::collection(
-                $project->shots()->with(['project', 'media', 'keyframes.media', 'parts.keyframes.media'])->withCount(['keyframes', 'parts'])->get()
+                $project->shots()->with(['project', 'media', 'keyframes.media', 'parts.keyframes.media'])->withCount('parts')->get()
             ),
         ]);
     }

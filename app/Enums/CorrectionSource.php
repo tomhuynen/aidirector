@@ -18,8 +18,6 @@ enum CorrectionSource: string
 
     case DESCRIPTION = 'description';
 
-    case DELETE = 'delete';
-
     case FEEDBACK = 'feedback';
 
     case CHECK = 'check';

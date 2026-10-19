@@ -28,28 +28,26 @@ use App\Http\Controllers\Public\Projects\Style\PinController as StylePinControll
 use App\Http\Controllers\Public\Projects\Style\RoundController as StyleRoundController;
 use App\Http\Controllers\Public\Projects\ViewController as ProjectViewController;
 use App\Http\Controllers\Public\Projects\VoiceOverController as ProjectVoiceOverController;
+use App\Http\Controllers\Public\Shots\ContinuationController as ShotContinuationController;
 use App\Http\Controllers\Public\Shots\CreateController as ShotCreateController;
 use App\Http\Controllers\Public\Shots\DestroyController as ShotDestroyController;
 use App\Http\Controllers\Public\Shots\IssueController as ShotIssueController;
-use App\Http\Controllers\Public\Shots\Keyframes\CopyController as KeyframeCopyController;
-use App\Http\Controllers\Public\Shots\Keyframes\DestroyController as KeyframeDestroyController;
 use App\Http\Controllers\Public\Shots\Keyframes\FirstController as FirstKeyframeController;
 use App\Http\Controllers\Public\Shots\Keyframes\GenerateController as KeyframesGenerateController;
 use App\Http\Controllers\Public\Shots\Keyframes\ImageController as KeyframeImageController;
 use App\Http\Controllers\Public\Shots\Keyframes\LayoutController as KeyframeLayoutController;
 use App\Http\Controllers\Public\Shots\Keyframes\MoveController as KeyframeMoveController;
 use App\Http\Controllers\Public\Shots\Keyframes\RenderController as KeyframeRenderController;
-use App\Http\Controllers\Public\Shots\Keyframes\ReorderController as KeyframeReorderController;
-use App\Http\Controllers\Public\Shots\Keyframes\SecondsController as KeyframeSecondsController;
-use App\Http\Controllers\Public\Shots\Keyframes\StoreController as KeyframeStoreController;
 use App\Http\Controllers\Public\Shots\Keyframes\TweakController as KeyframeTweakController;
 use App\Http\Controllers\Public\Shots\Keyframes\UpdateController as KeyframeUpdateController;
 use App\Http\Controllers\Public\Shots\MergeController as ShotMergeController;
 use App\Http\Controllers\Public\Shots\Plan\ChangeController as ShotPlanChangeController;
 use App\Http\Controllers\Public\Shots\Plan\DirectorController as ShotPlanDirectorController;
 use App\Http\Controllers\Public\Shots\Plan\ElementsController as ShotPlanElementsController;
+use App\Http\Controllers\Public\Shots\Plan\SequenceController as ShotPlanSequenceController;
 use App\Http\Controllers\Public\Shots\Plan\VoiceOverController as ShotPlanVoiceOverController;
 use App\Http\Controllers\Public\Shots\ReorderController as ShotReorderController;
+use App\Http\Controllers\Public\Shots\RepairController as ShotRepairController;
 use App\Http\Controllers\Public\Shots\RetryController as ShotRetryController;
 use App\Http\Controllers\Public\Shots\Video\GenerateController as VideoGenerateController;
 use App\Http\Controllers\Public\Shots\Video\TrimController as VideoTrimController;
@@ -138,16 +136,14 @@ Route::middleware('auth:director')->group(function () {
             Route::post('merge', [ShotMergeController::class, 'store'])->name('merge');
             Route::post('{shot}/merge', [ShotMergeController::class, 'update'])->name('merge.update');
             Route::delete('{shot}/merge', [ShotMergeController::class, 'destroy'])->name('unmerge');
+            Route::post('{shot}/parts/{part}/repair', [ShotRepairController::class, 'store'])->name('merge.repair');
             Route::get('{shot}', [ShotViewController::class, 'view'])->name('view');
             Route::post('{shot}/plan/chat', [ShotPlanDirectorController::class, 'store'])->name('plan.chat');
             Route::post('{shot}/plan/change', [ShotPlanChangeController::class, 'store'])->name('plan.change');
             Route::post('{shot}/plan/voice-over', [ShotPlanVoiceOverController::class, 'store'])->name('plan.voice-over');
+            Route::post('{shot}/plan/sequence', [ShotPlanSequenceController::class, 'store'])->name('plan.sequence');
             Route::post('{shot}/plan/elements', [ShotPlanElementsController::class, 'store'])->name('plan.elements');
             Route::delete('{shot}/plan/elements', [ShotPlanElementsController::class, 'destroy'])->name('plan.elements.skip');
-            Route::post('{shot}/keyframes', [KeyframeStoreController::class, 'store'])->name('keyframes.store');
-            Route::post('{shot}/keyframes/reorder', [KeyframeReorderController::class, 'store'])->name('keyframes.reorder');
-            Route::delete('{shot}/keyframes/{keyframe}', [KeyframeDestroyController::class, 'destroy'])->name('keyframes.destroy');
-            Route::post('{shot}/keyframes/{keyframe}/copy', [KeyframeCopyController::class, 'store'])->name('keyframes.copy');
             Route::post('{shot}/keyframes/generate', [KeyframesGenerateController::class, 'store'])->name('keyframes.generate');
             Route::post('{shot}/keyframes/first/choose', [FirstKeyframeController::class, 'choose'])->name('keyframes.first.choose');
             Route::post('{shot}/keyframes/first/more', [FirstKeyframeController::class, 'more'])->name('keyframes.first.more');
@@ -157,7 +153,6 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/keyframes/{keyframe}/layout', [KeyframeLayoutController::class, 'store'])->name('keyframes.layout');
             Route::post('{shot}/keyframes/{keyframe}/move', [KeyframeMoveController::class, 'store'])->name('keyframes.move');
             Route::post('{shot}/keyframes/{keyframe}/render', [KeyframeRenderController::class, 'store'])->name('keyframes.render');
-            Route::post('{shot}/keyframes/{keyframe}/seconds', [KeyframeSecondsController::class, 'store'])->name('keyframes.seconds');
             Route::get('{shot}/keyframes/{keyframe}/image/{conversion?}', [KeyframeImageController::class, 'view'])
                 ->whereIn('conversion', [Keyframe::THUMBNAIL])
                 ->name('keyframes.image');
@@ -167,6 +162,9 @@ Route::middleware('auth:director')->group(function () {
             Route::post('{shot}/issues/{group}/redraw', [ShotIssueController::class, 'redraw'])->name('issues.redraw');
             Route::post('{shot}/issues/{group}/dismiss', [ShotIssueController::class, 'dismiss'])->name('issues.dismiss');
             Route::post('{shot}/retry', [ShotRetryController::class, 'store'])->name('retry');
+            Route::post('{shot}/end-frame/confirm', [ShotContinuationController::class, 'confirm'])->name('end-frame.confirm');
+            Route::post('{shot}/followers/reset', [ShotContinuationController::class, 'reset'])->name('followers.reset');
+            Route::post('{shot}/followers/keep', [ShotContinuationController::class, 'keep'])->name('followers.keep');
             Route::post('{shot}/video/generate', [VideoGenerateController::class, 'store'])->name('video.generate');
             Route::post('{shot}/video/trim', [VideoTrimController::class, 'store'])->name('video.trim');
             Route::post('{shot}/voice-over', [ShotVoiceOverController::class, 'store'])->name('voice-over');
@@ -184,4 +182,11 @@ Route::middleware('auth:director')->group(function () {
             Route::post('/', [UploadStoreController::class, 'store'])->name('store');
             Route::get('{upload}', [UploadViewController::class, 'view'])->middleware('signed')->name('view');
         });
+});
+
+Route::get('/_timeout_probe', function () {
+    $limit = ini_get('max_execution_time');
+    sleep(35);
+
+    return response()->json(['max_execution_time' => $limit]);
 });

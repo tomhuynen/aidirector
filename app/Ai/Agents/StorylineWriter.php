@@ -21,9 +21,11 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 /**
- * Plans a shot from the director's idea: the storyline and the keyframes, an ordered
- * list of clearly readable moments the image and video models can work from.
- * The plan director writes its plans by these same rules.
+ * Plans a shot from the director's idea: the storyline, and the keyframes
+ * the image and video models work from. A scene or close-up has two: the
+ * start frame, the state before, and the end frame, the result; the video
+ * plays the act between them. A montage has one still per part. The plan
+ * director writes its plans by these same rules.
  */
 class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 {
@@ -38,16 +40,15 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     {
         $project = $this->shot->project;
         $style = $project->style;
-        $min = Config::get('pipeline.keyframes.min');
         $max = Config::get('pipeline.keyframes.max');
         $limits = VideoLimitsBrief::brief();
         $staging = StagingRules::rules();
 
         return <<<INSTRUCTIONS
             You are an experienced film director planning a single shot for an animated production.
-            Your job is to write the storyline of the shot from the director's idea, and to break it into keyframes.
+            Your job is to write the storyline of the shot from the director's idea, and to give its keyframes: for a scene or a close-up the start frame and the end frame, for a montage one still per part.
             Each keyframe is one clearly readable moment: a pose, a position, an object state.
-            The video model will interpolate the motion between keyframes, so keyframes must describe states, not motion.
+            The video model plays the act from the start frame to the end frame, so keyframes describe states, not motion.
 
             {$this->purposeBrief()}
 
@@ -71,18 +72,18 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
 
             The silent story, the most important rule: the shot plays without words, voice-over, sound or text, so the pictures alone must tell the storyline.
             - Talking, explaining, welcoming, smiling, nodding, listening, agreeing, signalling or acknowledging never carry the story; they may only go with the act.
-            - Test every keyframe: someone who sees only this image, with the sound off, can say what happens in it. Test the row: someone who sees only the images in order can tell the storyline. When they cannot, change the act or add a keyframe for the missing step.
+            - Test every keyframe: someone who sees only this image, with the sound off, can say what happens in it. Test the pair: someone who sees only the start frame and the end frame can tell the storyline. When they cannot, change the act, or tell the story in more shots.
 
             Rules for every shot:
             - Shot title: two to four words naming the scene, such as the place, the person or the moment.
             - Storyline: two to four sentences, in present tense, from beginning to end, that tell the idea with one clear, visible action a viewer can follow in the shot length, not a still moment; a montage and an insert have their own rule below. Refer to the cast and sets by their names, used as a noun with "the". When the director names people, places or objects they want in the shot, use all of them.
-            - Produce between {$min} and {$max} keyframes, except for a presenter shot or an insert. Use as many as the silent story above needs and no more: every step a viewer must see to understand it without words gets its own keyframe.
+            - A scene or a close-up has exactly two keyframes: the start frame, the state before the act, and the end frame, the result. One act per shot: when the story needs a second act, or a step in between that a viewer must see, it is told in more shots. A montage has one still per part, at most {$max}. A presenter shot or an insert has one keyframe.
             - Title: two to four words naming the moment.
-            - Seconds of a keyframe: how long the animation takes from this keyframe to the next, timed with the rules of thumb for the shot length, in halves of a second; for the last keyframe, how long it is held at the end, 0 when the shot ends as it reaches it. A shot of one keyframe holds it for the whole shot. Together they make the shot's seconds.
+            - Seconds of a keyframe: for the start frame, how long the act takes to reach the end frame, timed with the rules of thumb for the shot length, in halves of a second; for the end frame, how long it is held at the end, 0 when the shot ends as it reaches it. For a montage, how long each still shows. A shot of one keyframe holds it for the whole shot. Together they make the shot's seconds.
             {$staging}
             - Spatial fact: for a scene, as its rule below says; leave it empty for a montage, a presenter shot or an insert.
             - Elements: the exact names of the cast and sets listed above that are visible in this keyframe. Leave the list empty when none of them appear.
-            - Continuity, because the video model cannot make anything appear or change by itself, except between the separate stills of a montage: everything the shot uses, people and things, is in the frame from keyframe 1, or visibly comes in, such as walking in or being taken out of a bag or pocket that is in view; nothing appears or disappears between two keyframes. Every keyframe says where each thing the story uses is and in what state: in whose hand, where it lies or hangs, worn or not, open or closed, such as "the Damen host holds the Visitor safety vest folded in his right hand; the blue helmet lies on the bench beside him". A thing that changes hands, place or state gets a keyframe that shows it happening; a change that is hard to animate, such as putting on or taking off clothing or gear, or opening a box, also gets a keyframe halfway, such as one arm in the vest.
+            - Continuity, because the video model cannot make anything appear or change by itself, except between the separate stills of a montage: everything the shot uses, people and things, is in the start frame, or visibly comes in, such as walking in or being taken out of a bag or pocket that is in view; nothing appears or disappears between the start frame and the end frame. Both say where each thing the story uses is and in what state: in whose hand, where it lies or hangs, worn or not, open or closed, such as "the Damen host holds the Visitor safety vest folded in his right hand; the blue helmet lies on the bench beside him". The video model plays one change between the two frames: one thing that changes hands, place or state, or one movement. A change that is hard to animate, such as putting on or taking off clothing or gear, or opening a box, is its own shot of at least 3 seconds, and a step a viewer must see halfway, such as one arm in the vest, is a shot of its own too.
             - Props: use as few hand-held objects as the story needs, ideally one per character. Leave out anything that does not change what the viewer learns, such as a lighter when the point is putting the cigarette away.
             - Readable props, because the video model can only animate what it can read and turns an unclear object into a copy of the main one: every object the story needs is large enough to recognise at a glance and has a colour that stands out from the clothing and the surface behind it. Hold it away from the body, clear of other objects. When a character holds two objects, keep the hands apart and make the objects clearly different in shape and colour. Give in the cast which hand holds which object.
             {$this->sceneRules()}{$this->closeUpRules()}{$this->montageRules()}{$this->presenterRules()}{$this->insertRules()}
@@ -117,7 +118,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
                     'elements' => $schema->array()->items($schema->string())->required(),
                     'seconds' => $schema->number()->min(0)->required(),
                 ]))
-                // A presenter shot has one keyframe; the rules set the count for the other kinds.
+                // A presenter shot or an insert has one keyframe, a scene or close-up two, a montage one per part.
                 ->min(1)
                 ->max(Config::get('pipeline.keyframes.max'))
                 ->required(),
@@ -131,7 +132,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     {
         $brief = (filled($this->shot->title) ? "Shot title: {$this->shot->title}\n" : '') . $this->shot->brief();
 
-        return "Write the storyline of this shot and break it into keyframes.\n\n{$brief}";
+        return "Write the storyline of this shot and give its keyframes.\n\n{$brief}";
     }
 
     /**
@@ -167,36 +168,38 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
     private static function kindLine(ShotKind $kind): string
     {
         return match ($kind) {
-            ShotKind::SCENE => 'A scene plays at one place with a camera that does not move: every keyframe is drawn on the same empty place and the video moves through the keyframes.',
+            ShotKind::SCENE => 'A scene plays at one place with a camera that does not move: the start frame is drawn on the empty place, the end frame on the start frame, and the video plays the act between them.',
             ShotKind::MONTAGE => 'A montage is a row of separate stills, each its own place and moment: every still is drawn on its own, animated with a small movement and joined to the next with a crossfade.',
             ShotKind::PRESENTER => 'A presenter shot is one person from the cast who speaks the voice-over straight to the camera, lip-synced, from the chest up in front of a softly blurred place.',
-            ShotKind::CLOSE_UP => 'A close-up is one small hand action with one object, with the camera close and still: the hands and the object fill the frame, on a person such as a badge on the chest, or on a thing such as a permit on a dashboard. Keyframe 1 is drawn first with them and the other keyframes are drawn on it.',
+            ShotKind::CLOSE_UP => 'A close-up is one small hand action with one object, with the camera close and still: the hands and the object fill the frame, on a person such as a badge on the chest, or on a thing such as a permit on a dashboard. The start frame is drawn first with them and the end frame is drawn on it.',
+            ShotKind::MEDIUM => 'A medium shot is a scene framed from the waist up: one person with their face and both hands in frame and the object they act on in the lower half, with the camera still. It follows the rules of a scene.',
             ShotKind::INSERT => 'An insert is one still of one thing the viewer must see on its own, such as a sign, a label or a warning, with no people and nothing happening; the camera pushes in slowly while it shows.',
         };
     }
 
     /**
-     * The rules for a scene, unless the shot is a montage.
+     * The rules for a scene and a medium shot, unless the shot is another kind.
      */
     private function sceneRules(): string
     {
-        if ($this->shot->kind !== null && $this->shot->kind !== ShotKind::SCENE) {
+        if ($this->shot->kind !== null && ! in_array($this->shot->kind, [ShotKind::SCENE, ShotKind::MEDIUM], true)) {
             return '';
         }
 
-        $heading = $this->shot->kind === null ? "\nFor a scene:\n" : "\n";
+        $heading = $this->shot->kind === null ? "\nFor a scene or a medium shot:\n" : "\n";
 
         return $heading . <<<'RULES'
             - Before writing, turn the idea into one concrete act a viewer can see: a person does something to an object, a place or another person that changes its state, such as putting on a helmet, closing a gate, stopping behind a line or handing over safety glasses. An abstract idea still becomes such an act; "safety is our first priority" becomes, for example, the host checking the visitor's helmet strap and handing over safety glasses before the barrier opens.
-            - The keyframes go from before, through the act, to after: the first shows the state before, the last shows the result, and the two differ at a glance, such as an object in other hands, a gate open, a person on the other side of a line. Two keyframes that differ only by a gesture or an expression tell nothing new.
+            - The start frame shows the state before the act and the end frame the result, and the two differ at a glance, such as an object in other hands, a gate open, a person on the other side of a line. An end frame that differs from the start frame only by a gesture or an expression tells nothing new.
             - Spatial fact: the one spatial fact the story depends on in this keyframe, in one concrete sentence a viewer could check at a glance, kept apart from the place and the cast and never repeated there: where the person is relative to the hazard, the line, the door or the object, with a sense of distance, such as "Both feet are clearly behind the yellow line, the container hanging just beyond it, about an arm's length from her."
             - When the story is about a danger, stage the person and the danger close together in the same frame, seen from the side, with the line, gap or route between them clearly visible, so the distance can be read. Never leave the danger small and far behind the person.
-            - Keep the same subject, environment and objects across all keyframes. Do not introduce new characters or props that the storyline does not imply.
+            - Keep the same subject, environment and objects in both frames. Do not introduce new characters or props that the storyline does not imply.
             - Framing in a scene: the camera does not move. Frame the action: the people and the object they act on, such as a door, a bin or a sign, sit together in the centre of the frame and take most of it. Choose the spot so that object is right beside the person, and keep the rest of the place a simple, subdued background.
-            - Keyframe 1 sets the camera for the whole shot: every later keyframe is drawn on top of it. When keyframe 1 shows the place before the people arrive, frame it for them anyway: the spot where they will stand is in the middle foreground, at a scale where an adult standing there fills about two thirds of the frame height, and the object they act on is beside that spot, large enough to read. Say so in its place, such as "the empty spot in front of the bin, framed so a person standing there fills two thirds of the frame height". Never frame an empty keyframe 1 as a wide view of the building.
-            - Every step the storyline names gets its own keyframe; nothing important happens between two keyframes. When someone enters a place that lies behind the doorway, show it: a keyframe that says literally "seen from behind, back to the camera, walking away from the camera through the doorway", before a keyframe without them. Someone who leaves towards the camera walks towards it, face to the camera.
+            - The start frame sets the camera for the whole shot: the end frame is drawn on top of it. When the start frame shows the place before the people arrive, frame it for them anyway: the spot where they will stand is in the middle foreground, at a scale where an adult standing there fills about two thirds of the frame height, and the object they act on is beside that spot, large enough to read. Say so in its place, such as "the empty spot in front of the bin, framed so a person standing there fills two thirds of the frame height". Never frame an empty start frame as a wide view of the building.
+            - The storyline names one act, and it happens between the start frame and the end frame; a storyline with two acts, such as noticing something and then leaving, is two shots. When someone enters a place that lies behind the doorway, the end frame says literally "seen from behind, back to the camera, walking away from the camera through the doorway". Someone who leaves towards the camera walks towards it, face to the camera.
             - Spot: the shot plays at one spot inside the place, seen from where a person would stand there, unless the shot is wide. Pick a calm part of the place that already exists in it, such as the lower part of one hall facade, the side of a container or the quay edge, and describe only what the story needs there, such as the door or the sign the people act on. Do not list background extras such as vehicles, containers, cranes or people just because the place has them. Never invent a separate wall, panel or backdrop in front of the place. Describe the spot with the same wording in every keyframe.
-            - Staging, because the video model animates cleanest this way: nothing crosses or touches a figure, so no railings, pillars, poles, barriers or machines directly behind or in front of the people. Context the story needs, such as a sign, sits on the surface at the spot to one side of the people, clearly readable and not touching them; use at most two such objects. The ground near the feet is plain. The spot, the context objects and the camera stay identical in every keyframe, and nobody walks behind anything.
+            - In a medium shot the person is framed from the waist up: the object they act on is in their hands or just below them, in the lower half of the frame, and their face and both hands stay in frame in both keyframes.
+            - Staging, because the video model animates cleanest this way: nothing crosses or touches a figure, so no railings, pillars, poles, barriers or machines directly behind or in front of the people. Context the story needs, such as a sign, sits on the surface at the spot to one side of the people, clearly readable and not touching them; use at most two such objects. The ground near the feet is plain. The spot, the context objects and the camera stay identical in both frames, and nobody walks behind anything.
             RULES;
     }
 
@@ -236,7 +239,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         $heading = $this->shot->kind === null ? "\nFor a close-up:\n" : "\n";
 
         return $heading . <<<'RULES'
-            - Two or three keyframes of one hand action with one small object, before and after: a badge not yet clipped and then clipped high on the chest, an open padlock and then closed, a cracked badge laid on the counter and then a new one handed over.
+            - The start frame and the end frame of one hand action with one small object, before and after: a badge not yet clipped and then clipped high on the chest, an open padlock and then closed, a cracked badge laid on the counter and then a new one handed over.
             - The object is large, clear and in a colour that stands out; when it is damaged, show it unmistakably, such as snapped in two, never a hairline crack.
             - The before state comes from the object itself: turned the wrong way round, hanging low, open, unclipped or broken. Never hide it behind or inside clothing, such as tucked under a jacket: the image model then invents extra layers of clothing.
             - A person handles their own object, such as their own badge or buckle; nobody else touches their body or clothing.
@@ -244,7 +247,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
             - Spatial fact: where the object is relative to the hand, the surface or the body, such as "The badge clip is fastened on the vest pocket, high and centred on the chest."
             - Spot: where the close-up is, such as "her chest, the vest pocket in the middle of the frame" or "the top of the reception counter, beside the badge tray"; the same in every keyframe.
             - Elements: the object, the person or people whose hands show, and the place the surface belongs to.
-            - Seconds: about 2 seconds per step, between the shortest and the longest length allowed.
+            - Seconds: about 2 seconds for the hand action, between the shortest and the longest length allowed.
             RULES;
     }
 
@@ -311,7 +314,7 @@ class StorylineWriter implements Agent, HasReasoningEffort, HasStructuredOutput
         $max = (int) Config::get('pipeline.video.max_duration');
 
         return <<<RULE
-            The animation acts fast, so keep it short: time each step from one keyframe to the next with these rules of thumb and add them up, with no extra time to hold the last pose:
+            The animation acts fast, so keep it short: time the act from the start frame to the end frame with these rules of thumb, with no extra time to hold the end pose:
               - a glance, a nod, a turn of the head or a hand gesture such as pointing or waving: 1 second
               - picking up, handing over or putting down an object: 1 second
               - opening or closing a door, a lid or a buckle: 1 to 2 seconds

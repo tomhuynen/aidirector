@@ -40,6 +40,7 @@
               :elements-url="shot.links?.planElements"
               :waiting-for="shot.waitingFor"
               :voice-over-url="shot.links?.planVoiceOver"
+              :sequence-url="shot.links?.planSequence"
             />
           </div>
           <PlanSkeleton v-else-if="planning" />
@@ -54,8 +55,10 @@
               elementsUrl: shot.links?.planElements,
               changeUrl: shot.links?.planChange,
               voiceOverUrl: shot.links?.planVoiceOver,
+              sequenceUrl: shot.links?.planSequence,
             }"
             :keyframes="panelKeyframes"
+            :kind="shot.kind"
             :aspect-ratio="aspectRatio"
             :duration="duration"
             :keyframe-seconds="shot.keyframeSeconds"
@@ -67,9 +70,8 @@
             :error="shot.storylineError"
             :retry-url="shot.links?.retry ?? '#'"
             :choosing="{
-              // A montage draws every still straight away: no place or keyframe 1 to choose first.
               active:
-                (shot.kind === 'scene' || shot.kind === 'close-up') &&
+                shot.choosesStartFrame &&
                 (shot.status === 'first-keyframe-pending' || shot.status === 'first-keyframe-ready'),
               pending: shot.status === 'first-keyframe-pending',
               optionCount: shot.firstKeyframeOptions,
@@ -78,15 +80,10 @@
               adjustUrl: shot.links?.firstKeyframeAdjust,
               adjusting: shot.status === 'first-keyframe-ready' && isBusy(keyframes[0]?.status),
             }"
+            :sequence="sequence"
             :presenter="shot.kind === 'presenter'"
-            :one-keyframe="shot.oneKeyframe"
             :render-seconds="shot.renderSeconds"
             :voice-over="shot.voiceOver"
-            :reorder-url="shot.links?.keyframesReorder ?? '#'"
-            :new-keyframe="{
-              storeUrl: shot.links?.keyframesStore ?? '#',
-              max: shot.maxKeyframes,
-            }"
             :video="{
               url: shot.videoUrl,
               downloadUrl: shot.videoDownloadUrl,
@@ -134,6 +131,18 @@ const duration = computed(() => props.shot.seconds)
 /** The draft plan of a shot from the project setup is being written. */
 const planning = computed(() => props.shot.status === 'storyline-pending')
 
+/** The shot's place in its sequence, with what the director can do about it. */
+const sequence = computed(() =>
+  props.shot.sequence
+    ? {
+        ...props.shot.sequence,
+        confirmUrl: props.shot.links?.endFrameConfirm ?? '#',
+        resetUrl: props.shot.links?.followersReset ?? '#',
+        keepUrl: props.shot.links?.followersKeep ?? '#',
+      }
+    : null,
+)
+
 /** Nothing drawn yet: the plan is worked out in the plan chat. */
 const planEditable = computed(
   () => (props.shot.status === 'storyline-ready' || props.shot.status === 'draft') && props.keyframes.length === 0,
@@ -160,9 +169,6 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         updateUrl: keyframe.links.update,
         tweakUrl: keyframe.links.tweak,
         chooseRenderUrl: keyframe.links.chooseRender,
-        destroyUrl: keyframe.links.destroy,
-        copyUrl: keyframe.links.copy,
-        secondsUrl: keyframe.links.seconds,
       }))
     : (props.shot.storyline?.keyframes ?? []).map((keyframe, i) => ({
         id: String(i),
@@ -178,7 +184,6 @@ const panelKeyframes = computed<PanelKeyframe[]>(() =>
         updateUrl: null,
         tweakUrl: null,
         chooseRenderUrl: null,
-        destroyUrl: null,
       })),
 )
 
@@ -241,7 +246,6 @@ const shotList = computed(() =>
     title: sibling.title,
     statusLabel: sibling.statusLabel,
     duration: sibling.duration,
-    keyframesCount: sibling.keyframesCount,
     partsCount: sibling.partsCount,
     status: sibling.status,
     busy: sibling.busy,

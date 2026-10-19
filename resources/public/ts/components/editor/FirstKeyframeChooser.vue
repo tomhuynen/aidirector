@@ -45,7 +45,7 @@
         >
           <Button type="button" class="shadow-lg" :disabled="choice.processing" @click="choose">
             <LoaderCircle v-if="choice.processing" class="size-4 animate-spin" />
-            {{ $t('Use this keyframe') }}
+            {{ $t('Use this start frame') }}
             <ArrowRight v-if="!choice.processing" class="size-4" />
           </Button>
           <InputError class="rounded bg-background/90 px-2 py-1" :message="choice.errors.render" />

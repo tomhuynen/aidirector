@@ -26,6 +26,7 @@ use App\Models\Shot;
 use App\Support\Projects\ProjectSettings;
 use App\Support\Shots\KeyframeChain;
 use App\Support\Video\ClipJoiner;
+use App\Support\Video\LumaVideoClient;
 use App\Support\Video\OpenRouterVideoClient;
 use App\Support\Video\StillVideo;
 use Illuminate\Http\Client\Request;
@@ -140,7 +141,7 @@ it('renders a lip-synced clip per language with the voice of that language', fun
     $still->addMediaFromString(presenterPng())->usingFileName('still.png')->toMediaCollection(Keyframe::RENDERS);
     $still->elements()->attach($host);
 
-    (new GenerateVideo($shot))->handle(app(OpenRouterVideoClient::class), app(KeyframePainter::class), app(StillVideo::class));
+    (new GenerateVideo($shot))->handle(app(LumaVideoClient::class), app(OpenRouterVideoClient::class), app(KeyframePainter::class), app(StillVideo::class));
 
     // The person's own voice, kept per language so they sound the same in every shot.
     expect($host->fresh()->settings->voices)->toEqual(['nl' => Config::get('pipeline.presenter.voices.female.*'), 'en' => Config::get('pipeline.presenter.voices.female.en')]);
@@ -173,7 +174,7 @@ it('keeps every language with its sound and shows them on the shot', function ()
         ['locale' => 'nl-NL', 'job_id' => 'avatar_nl', 'status' => 'pending'],
     ]]);
 
-    (new PollShotClips($shot))->handle(app(OpenRouterVideoClient::class), app(ClipJoiner::class));
+    (new PollShotClips($shot))->handle(app(LumaVideoClient::class), app(OpenRouterVideoClient::class), app(ClipJoiner::class));
 
     $shot->refresh();
     $languages = $shot->getMedia(Shot::PRESENTER_VIDEOS);
@@ -193,7 +194,7 @@ it('keeps every language with its sound and shows them on the shot', function ()
 it('switches to a presenter when the plan agreed in the chat says so', function () {
     Queue::fake();
     App\Ai\Agents\PlanDirector::fake([[
-        'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
+        'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'direct' => '',
         'proposal' => ['title' => '', 'kind' => 'presenter', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => presenterPlan()],
     ]]);
     $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'kind' => ShotKind::SCENE, 'storyline' => ['keyframes' => presenterPlan()]]);
@@ -220,7 +221,4 @@ it('offers no extra keyframes and no separate audio tracks on a presenter', func
     actingAs($this->director, 'director')
         ->get(route('public.shots.view', [$this->project, $shot]))
         ->assertInertia(fn($page) => $page->where('shot.voiceOverTracks', []));
-    actingAs($this->director, 'director')
-        ->post(route('public.shots.keyframes.store', [$this->project, $shot]), ['title' => 'Second', 'summary' => 'Another still.'])
-        ->assertSessionHasErrors('summary');
 });

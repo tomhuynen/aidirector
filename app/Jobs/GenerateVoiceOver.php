@@ -26,6 +26,8 @@ class GenerateVoiceOver implements ShouldQueue
 
     public int $timeout = 120;
 
+    public bool $failOnTimeout = true;
+
     /** Words per second at a calm narration pace. */
     public const WORDS_PER_SECOND = 2.2;
 

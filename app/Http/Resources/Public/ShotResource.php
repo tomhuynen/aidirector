@@ -46,8 +46,6 @@ class ShotResource extends JsonResource
             'status' => $this->status,
             /** A scene at one place, or a montage of separate stills; scene until planned. */
             'kind' => $this->kind ?? ShotKind::SCENE,
-            /** A presenter or an insert: its one keyframe is all it has, so no keyframe is added. */
-            'oneKeyframe' => $this->kindOrScene()->keepsOneKeyframe(),
             'statusLabel' => $this->status->description(),
             /** @var string|null */
             'purposeOverride' => $this->purpose_override,
@@ -109,8 +107,18 @@ class ShotResource extends JsonResource
             'voiceOverSeconds' => $this->voice_over === null ? null : round(GenerateVoiceOver::words($this->voice_over) / GenerateVoiceOver::WORDS_PER_SECOND, 1),
             /** @var int */
             'firstKeyframeOptions' => GenerateKeyframes::optionCount(),
-            /** @var int */
-            'maxKeyframes' => (int) config('pipeline.keyframes.max_manual'),
+            /**
+             * Whether the director picks the start frame from options; a montage, a presenter, an insert and a shot that continues the shot before have none.
+             *
+             * @var bool
+             */
+            'choosesStartFrame' => ! $this->resource->exists || $this->resource->choosesStartFrame(),
+            /**
+             * How the shot hangs together with the shots that continue from its end frame, and the one it continues from; null outside a sequence.
+             *
+             * @var array{continuesFrom: string|null, continuedBy: array<int, string>, endFrameConfirmed: bool, confirmable: bool, openIssues: bool, staleFollowers: array<int, string>}|null
+             */
+            'sequence' => $this->sequence(),
             /** @var string|null */
             'videoError' => $this->video_error,
             /** @var string|null */
@@ -130,11 +138,11 @@ class ShotResource extends JsonResource
                 'summary' => $this->video_summary,
             ],
             /**
-             * How long each keyframe lasts, in order; none for a scene, which the video model paces, or a presenter.
+             * How long each still of a montage shows, in order; none for the other kinds, timed as a whole.
              *
              * @var list<float>|null
              */
-            'keyframeSeconds' => $this->resource->exists && $this->kindOrScene()->showsKeyframeTimes() ? $this->keyframeSeconds() : null,
+            'keyframeSeconds' => $this->resource->exists && $this->resource->isMontage() ? $this->keyframeSeconds() : null,
             /** @var string|null */
             'videoDownloadUrl' => $this->downloadUrl($this->video()),
             /**
@@ -164,7 +172,7 @@ class ShotResource extends JsonResource
             /**
              * The conversation about the plan: the director's messages and the plan director's replies, some with the plan they wrote into the shot.
              *
-             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}, about?: string, changes?: array<int, string>, proposed?: array{keyframe: string, name: string, change: string, fields?: array<int, array{field: string, from: string, to: string}>, state?: string}, storylines?: array<int, array{title: string, kind: string, storyline: string, needs?: string}>, confirm?: bool, pickPlace?: bool, places?: array<int, string>, voiceOver?: array{text: string, seconds?: int, state?: string}}>
+             * @var array<int, array{role: string, text: string, stage?: string, made?: array<int, string>, adjusted?: array<int, string>, cast?: array<int, string>, proposal?: array{kind: string, settingFrom?: string|null}, about?: string, changes?: array<int, string>, proposed?: array{keyframe: string, name: string, change: string, fields?: array<int, array{field: string, from: string, to: string}>, state?: string}, storylines?: array<int, array{title: string, kind: string, storyline: string, needs?: string}>, confirm?: bool, pickPlace?: bool, places?: array<int, string>, voiceOver?: array{text: string, seconds?: int, state?: string}, sequence?: array{title: string, change: string, facts: array<int, string>, context: array<int, string>, shots: array<int, array{title: string, kind: string, purpose: string, notice: string, action: string, seconds: int, cut: string}>, state?: string}}>
              */
             'planChat' => array_values((array) ($this->plan_chat ?? [])),
             /**
@@ -178,8 +186,9 @@ class ShotResource extends JsonResource
                 'view' => route('public.shots.view', [$this->project, $this->resource]),
                 'destroy' => route('public.shots.destroy', [$this->project, $this->resource]),
                 'retry' => route('public.shots.retry', [$this->project, $this->resource]),
-                'keyframesStore' => route('public.shots.keyframes.store', [$this->project, $this->resource]),
-                'keyframesReorder' => route('public.shots.keyframes.reorder', [$this->project, $this->resource]),
+                'endFrameConfirm' => route('public.shots.end-frame.confirm', [$this->project, $this->resource]),
+                'followersReset' => route('public.shots.followers.reset', [$this->project, $this->resource]),
+                'followersKeep' => route('public.shots.followers.keep', [$this->project, $this->resource]),
                 'firstKeyframeChoose' => route('public.shots.keyframes.first.choose', [$this->project, $this->resource]),
                 'firstKeyframeMore' => route('public.shots.keyframes.first.more', [$this->project, $this->resource]),
                 'firstKeyframeAdjust' => route('public.shots.keyframes.first.adjust', [$this->project, $this->resource]),
@@ -188,12 +197,42 @@ class ShotResource extends JsonResource
                 'planChat' => route('public.shots.plan.chat', [$this->project, $this->resource]),
                 'planChange' => route('public.shots.plan.change', [$this->project, $this->resource]),
                 'planVoiceOver' => route('public.shots.plan.voice-over', [$this->project, $this->resource]),
+                'planSequence' => route('public.shots.plan.sequence', [$this->project, $this->resource]),
                 'planElements' => route('public.shots.plan.elements', [$this->project, $this->resource]),
                 'issuesFixAll' => route('public.shots.issues.fix-all', [$this->project, $this->resource]),
                 'issuesDismissAll' => route('public.shots.issues.dismiss-all', [$this->project, $this->resource]),
                 'voiceOver' => route('public.shots.voice-over', [$this->project, $this->resource]),
                 'voiceOverAudio' => route('public.shots.voice-over.audio', [$this->project, $this->resource]),
             ]),
+        ];
+    }
+
+    /**
+     * The shot's place in its sequence: which shots continue from its end
+     * frame and wait for its confirmation, and which shot it continues from.
+     *
+     * @return array{continuesFrom: string|null, continuedBy: list<string>, endFrameConfirmed: bool, confirmable: bool, openIssues: bool, staleFollowers: list<string>}|null
+     */
+    private function sequence(): ?array
+    {
+        if (! $this->resource->exists) {
+            return null;
+        }
+
+        $from = $this->resource->settingFrom();
+        $continuedBy = $this->resource->continuedBy();
+
+        if ($continuedBy->isEmpty() && ($from === null || $from['keyframe'] !== Shot::LAST_KEYFRAME)) {
+            return null;
+        }
+
+        return [
+            'continuesFrom' => $from !== null && $from['keyframe'] === Shot::LAST_KEYFRAME ? $from['shot']->code() : null,
+            'continuedBy' => $continuedBy->map(fn(Shot $shot) => $shot->code())->all(),
+            'endFrameConfirmed' => $this->resource->endFrameConfirmed(),
+            'confirmable' => $this->resource->canConfirmEndFrame(),
+            'openIssues' => $this->checkedGroups() !== [],
+            'staleFollowers' => $this->resource->staleFollowers()->map(fn(Shot $shot) => $shot->code())->all(),
         ];
     }
 

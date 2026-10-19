@@ -55,6 +55,16 @@ class BackgroundDrift
      */
     public function measure(Media $base, Media $render, float $still = 0.85): array
     {
+        return $this->measureImages($this->contents($base), $this->contents($render), $still);
+    }
+
+    /**
+     * As `measure()`, for images that are not stored.
+     *
+     * @return array{stillness: float, aligned: float, moved: bool}
+     */
+    public function measureImages(string $base, string $render, float $still = 0.85): array
+    {
         $basePixels = $this->pixels($base);
         $renderPixels = $this->pixels($render);
         $tiles = $this->structuredTiles($basePixels);
@@ -147,10 +157,10 @@ class BackgroundDrift
      *
      * @return list<float>
      */
-    private function pixels(Media $media): array
+    private function pixels(string $contents): array
     {
         $image = new Imagick();
-        $image->readImageBlob((string) Storage::disk($media->disk)->get($media->getPathRelativeToRoot()));
+        $image->readImageBlob($contents);
         $image->transformImageColorspace(Imagick::COLORSPACE_GRAY);
         $image->resizeImage(self::WIDTH, self::HEIGHT, Imagick::FILTER_TRIANGLE, 1);
         $image->blurImage(0, 0.7);
@@ -160,5 +170,10 @@ class BackgroundDrift
         $image->clear();
 
         return $pixels;
+    }
+
+    private function contents(Media $media): string
+    {
+        return (string) Storage::disk($media->disk)->get($media->getPathRelativeToRoot());
     }
 }

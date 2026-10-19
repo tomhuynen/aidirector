@@ -42,12 +42,52 @@
                   {{ $t('Part :n', { n: String(i + 1) }) }} · {{ $t(':count s', { count: String(part.duration) }) }}
                 </span>
                 <span class="block truncate text-sm font-medium">{{ part.title }}</span>
+                <span
+                  v-if="merge.sequence && part.start !== null"
+                  class="block text-xs text-muted-foreground tabular-nums"
+                >
+                  {{ $t('From :seconds s in the clip', { seconds: part.start.toFixed(1) }) }}
+                </span>
               </span>
+            </div>
+            <div v-if="part.repairUrl" class="mt-2 space-y-2">
+              <Button
+                v-if="repairing !== part.id"
+                type="button"
+                variant="outline"
+                size="sm"
+                :disabled="pending"
+                @click="openRepair(part.id)"
+              >
+                <Wrench class="size-4" />
+                {{ $t('Render this part again') }}
+              </Button>
+              <form v-else class="space-y-2" @submit.prevent="submitRepair(part.repairUrl)">
+                <Textarea
+                  v-model="repair.instruction"
+                  rows="3"
+                  :placeholder="$t('What must be right, for example: her hand never touches the handle')"
+                />
+                <p v-if="repair.errors.instruction" class="text-xs text-destructive">{{ repair.errors.instruction }}</p>
+                <div class="flex gap-2">
+                  <Button type="submit" size="sm" :disabled="repair.processing">
+                    <Wrench class="size-4" />
+                    {{ $t('Render again') }}
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" @click="repairing = null">{{ $t('Cancel') }}</Button>
+                </div>
+              </form>
             </div>
           </li>
         </ol>
         <p class="text-xs leading-relaxed text-muted-foreground">
-          {{ $t('To change a part, unmerge the shot, change it and merge again.') }}
+          {{
+            merge.sequence
+              ? $t(
+                  'The sequence is rendered in one clip. A part that plays wrong is rendered again between its own first and last frame. To change a start frame, unmerge the shot, change it and merge again.',
+                )
+              : $t('To change a part, unmerge the shot, change it and merge again.')
+          }}
         </p>
       </section>
 
@@ -98,12 +138,18 @@
             class="flex items-center gap-2 rounded-lg border border-border bg-background/90 px-4 py-3 text-sm text-signal"
           >
             <LoaderCircle class="size-4 animate-spin" />
-            {{ $t('Joining the clips…') }}
+            {{ merge.sequence ? $t('Rendering the sequence…') : $t('Joining the clips…') }}
           </p>
         </Placeholder>
       </div>
 
-      <div class="flex shrink-0 flex-wrap items-end justify-between gap-4 border-t border-border pt-4">
+      <div v-if="merge.sequence" class="flex shrink-0 justify-end border-t border-border pt-4">
+        <Button type="button" :disabled="pending || join.processing" @click="joinAgain">
+          <RefreshCw class="size-4" />
+          {{ $t('Render the sequence again') }}
+        </Button>
+      </div>
+      <div v-else class="flex shrink-0 flex-wrap items-end justify-between gap-4 border-t border-border pt-4">
         <div class="min-w-0 flex-1 space-y-2">
           <p class="text-sm font-medium">{{ $t('Between the clips') }}</p>
           <TransitionPicker v-model="join.transition" :transitions="merge.transitions" class="grid-cols-3" />
@@ -125,8 +171,9 @@ import { useForm } from '@inertiajs/vue3'
 import { $t } from '@public/ts/shared/i18n'
 import ConfirmDelete from '@public:components/ConfirmDelete.vue'
 import { Button } from '@shared:ui/button'
-import { AudioLines, Combine, LoaderCircle, RefreshCw, Split } from 'lucide-vue-next'
-import { computed, watch } from 'vue'
+import { Textarea } from '@shared:ui/textarea'
+import { AudioLines, Combine, LoaderCircle, RefreshCw, Split, Wrench } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
 
 import AudioTracks, { type AudioTrack } from './AudioTracks.vue'
 import Placeholder from './Placeholder.vue'
@@ -136,13 +183,18 @@ import VideoActions from './VideoActions.vue'
 export type ShotMerge = {
   transition: string
   transitions: ShotTransitionOption[]
+  /** Rendered in one clip by the sequence model: a part can be rendered again in place. */
+  sequence: boolean
   parts: {
     id: string
     title: string
     storyline: string | null
     duration: number
+    /** Where the part starts in the sequence clip, in seconds. */
+    start: number | null
     thumbnailUrl: string | null
     videoUrl: string | null
+    repairUrl: string | null
   }[]
   links: { update: string; unmerge: string }
 }
@@ -168,6 +220,23 @@ watch(
 )
 
 const joinAgain = () => join.post(props.merge.links.update, { preserveScroll: true })
+
+const repairing = ref<string | null>(null)
+const repair = useForm({ instruction: '' })
+
+const openRepair = (id: string) => {
+  repair.reset()
+  repair.clearErrors()
+  repairing.value = id
+}
+
+const submitRepair = (url: string) =>
+  repair.post(url, {
+    preserveScroll: true,
+    onSuccess: () => {
+      repairing.value = null
+    },
+  })
 
 /**
  * One side fills the stage and the ratio sets the other, so the frame hugs the video.

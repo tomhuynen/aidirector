@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Public\Shots;
 
 use App\Enums\ShotKind;
+use App\Enums\ShotStatus;
 use App\Enums\ShotTransition;
 use App\Http\Resources\Public\ElementResource;
 use App\Http\Resources\Public\KeyframeResource;
@@ -50,19 +51,19 @@ class ViewController
              */
             'shotTransitions' => fn() => $this->transitions(),
             /**
-             * For a merged shot: its parts and how their clips are joined.
+             * For a merged shot: its parts and how their clips are joined, or whether it is a sequence rendered in one clip.
              *
-             * @var array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null}>, links: array{update: string, unmerge: string}}|null
+             * @var array{transition: string, transitions: array<int, array{value: string, label: string}>, sequence: bool, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, start: float|null, thumbnailUrl: string|null, videoUrl: string|null, repairUrl: string|null}>, links: array{update: string, unmerge: string}}|null
              */
             'merge' => fn() => $this->merge($project, $shot),
             'siblings' => fn() => ShotListItemResource::collection(
-                $project->shots()->with(['project', 'media', 'keyframes.media', 'parts.keyframes.media'])->withCount(['keyframes', 'parts'])->get()
+                $project->shots()->with(['project', 'media', 'keyframes.media', 'parts.keyframes.media'])->withCount('parts')->get()
             ),
         ]);
     }
 
     /**
-     * @return array{transition: string, transitions: array<int, array{value: string, label: string}>, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, thumbnailUrl: string|null, videoUrl: string|null}>, links: array{update: string, unmerge: string}}|null
+     * @return array{transition: string, transitions: array<int, array{value: string, label: string}>, sequence: bool, parts: array<int, array{id: string, title: string, storyline: string|null, duration: int, start: float|null, thumbnailUrl: string|null, videoUrl: string|null, repairUrl: string|null}>, links: array{update: string, unmerge: string}}|null
      */
     private function merge(Project $project, Shot $shot): ?array
     {
@@ -71,18 +72,25 @@ class ViewController
         }
 
         $parts = $shot->parts()->with(['media', 'keyframes.media'])->get()->each->setRelation('project', $project);
+        // A sequence rendered in one clip: each part can be rendered again in place once the clip is there.
+        $sequence = $parts->every(fn(Shot $part) => $part->rendersInSequence());
+        $starts = (array) $shot->video()?->getCustomProperty(Shot::PART_STARTS, []);
+        $repairable = $sequence && $shot->status === ShotStatus::VIDEO_READY && $shot->video() !== null;
 
         return [
             'transition' => $shot->merge_transition->value,
             'transitions' => $this->transitions(),
-            'parts' => $parts->map(fn(Shot $part) => [
+            'sequence' => $sequence,
+            'parts' => $parts->values()->map(fn(Shot $part, int $index) => [
                 'id' => $part->sqid,
                 'title' => $part->title,
                 'storyline' => $part->chosen_storyline['storyline'] ?? null,
                 'duration' => $part->durationInSeconds(),
+                'start' => isset($starts[$index]) ? (float) $starts[$index] : null,
                 'thumbnailUrl' => ShotListItemResource::make($part)->resolve()['thumbnailUrl'],
                 'videoUrl' => ($video = $part->video()) === null ? null : URL::temporarySignedRoute('public.media.view', now()->addHours(2), ['media' => $video]),
-            ])->values()->all(),
+                'repairUrl' => $repairable ? route('public.shots.merge.repair', [$project, $shot, $part]) : null,
+            ])->all(),
             'links' => [
                 'update' => route('public.shots.merge.update', [$project, $shot]),
                 'unmerge' => route('public.shots.unmerge', [$project, $shot]),

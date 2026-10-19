@@ -204,6 +204,7 @@ class AiBench extends Command
                     'seconds' => null,
                     'usage' => null,
                     'output' => null,
+                    'measures' => [],
                     'judgements' => [],
                     'error' => $exception->getMessage(),
                 ])->all();
@@ -248,7 +249,7 @@ class AiBench extends Command
         $this->table(
             ['Variant', 'Calls', 'Answers', 'Judging', 'Total'],
             $rows->map(fn(array $row) => [
-                $row['variant'] . ($row['unknown'] ? ' <fg=red>(model not on OpenRouter)</>' : ''),
+                $row['variant'] . ($row['unknown'] ? ' <fg=red>(no price on OpenRouter)</>' : ''),
                 $row['calls'],
                 '$' . number_format($row['answers'], 4),
                 $judges === [] ? '–' : '$' . number_format($row['judging'], 4),
@@ -262,10 +263,11 @@ class AiBench extends Command
     private function summaryTable(BenchReport $report): void
     {
         $criteria = array_keys($report->benchmark->criteria());
+        $measures = $report->measureKeys();
         $judged = $report->judges !== [];
 
         $this->table(
-            ['Variant', 'OK', 'Median', 'Slowest', 'Output tok', 'Thinking tok', 'Cost', ...($judged ? ['Quality', ...$criteria] : [])],
+            ['Variant', 'OK', 'Median', 'Slowest', 'Output tok', 'Thinking tok', 'Cost', ...$measures, ...($judged ? ['Quality', ...$criteria] : [])],
             collect($report->summary())->map(fn(array $row) => [
                 $row['variant'],
                 $row['ok'],
@@ -274,6 +276,7 @@ class AiBench extends Command
                 $row['output_tokens'] ?? '–',
                 $row['reasoning_tokens'] ?? '–',
                 $row['cost'] === null ? '–' : '$' . number_format($row['cost'], 4),
+                ...array_map(fn(string $measure) => $row['measures'][$measure] ?? '–', $measures),
                 ...($judged ? [$row['quality'] ?? '–', ...array_map(fn(?float $score) => $score ?? '–', array_values($row['scores']))] : []),
             ])->all(),
         );

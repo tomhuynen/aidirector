@@ -31,7 +31,7 @@ use Throwable;
  * render and rewrites the director's request as a precise edit instruction,
  * then the image model gets the render itself plus that instruction, so only
  * the requested detail changes.
- * The keyframe before it is attached as context, so a missing object can be
+ * For the end frame the start frame is attached as context, so a missing object can be
  * copied from where it last appeared. Tweaks use the edit model, which follows
  * pose and gaze corrections better than the model that creates keyframes.
  */
@@ -45,8 +45,10 @@ class TweakKeyframeImage implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     /**
-     * With an option id the job adjusts that option for keyframe 1 and adds
+     * With an option id the job adjusts that option for the start frame and adds
      * the result as a new option instead of making it the chosen render.
      */
     public function __construct(
@@ -71,7 +73,7 @@ class TweakKeyframeImage implements ShouldQueue
         $intent = RecordCorrection::keyframeContext($keyframe);
         $current = ($this->option !== null ? $keyframe->renders()->firstWhere('id', $this->option) : $keyframe->render())
             ?? throw new RuntimeException('The keyframe has no render to tweak.');
-        // A still of a montage has its own place, so the keyframe before is no reference for it.
+        // A still of a montage has its own place, so the start frame is no reference for it.
         $previous = $keyframe->position > 1 && ! $keyframe->shot->drawsStandalone()
             ? $keyframe->shot->keyframes()->with('media')->where('position', $keyframe->position - 1)->first()?->render()
             : null;
@@ -92,7 +94,7 @@ class TweakKeyframeImage implements ShouldQueue
         $base = $painter->baseFor($keyframe, $keyframe->shot->keyframes()->with('media')->get()->each->setRelation('shot', $keyframe->shot));
         // A logo the change asks for is drawn from its picture in the branding, never from its name.
         $logos = $keyframe->shot->project->logosFor("{$this->instruction} {$instruction}");
-        $labels = [...($previous !== null ? ['This version, the image that is edited', 'The keyframe before'] : ['This version, the image that is edited']), ...$logos->map(fn($logo) => "The {$logo->name} logo")->all()];
+        $labels = [...($previous !== null ? ['This version, the image that is edited', 'The start frame'] : ['This version, the image that is edited']), ...$logos->map(fn($logo) => "The {$logo->name} logo")->all()];
 
         $render = match (true) {
             $approach === 'redraw' => $this->redraw($painter, $keyframe, $instruction),
@@ -107,7 +109,7 @@ class TweakKeyframeImage implements ShouldQueue
             ),
         };
 
-        // An option of keyframe 1 still waits for the director's choice; a keyframe that changed has what is drawn from it drawn again.
+        // An option of the start frame still waits for the director's choice; a keyframe that changed has what is drawn from it drawn again.
         if ($this->option !== null) {
             $keyframe->forceFill(['status' => KeyframeStatus::PLANNED, 'render_error' => null])->save();
         } else {

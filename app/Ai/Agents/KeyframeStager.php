@@ -42,7 +42,7 @@ class KeyframeStager implements Agent, HasReasoningEffort, HasStructuredOutput
     public function instructions(): Stringable|string
     {
         return <<<'TEXT'
-            You block one keyframe of an animated e-learning film. The attached image is the frame it is drawn on: the keyframe directly before it, or for the first keyframe the empty place. The camera does not move, so the new keyframe is this image with only the changes the description asks for.
+            You block one keyframe of an animated e-learning film. The attached image is the start frame it is drawn on. The camera does not move, so the new keyframe is this image with only the changes the description asks for.
 
             For each of the cast in the keyframe, give:
             - box: where they are in the new keyframe, as top, left, bottom and right on a 0 to 1000 grid of the frame, from the top left. The box holds the whole person or vehicle tightly. Its bottom is where the feet or wheels touch the floor, on a floor that is really there in the image, never on a wall, a counter or the sky.
@@ -55,7 +55,8 @@ class KeyframeStager implements Agent, HasReasoningEffort, HasStructuredOutput
             Also list the things of the place, not the cast, whose state changes in this keyframe compared with the image, such as a door that closes or a barrier arm that opens, each with its box and its new state. Leave the list empty when nothing changes.
 
             An object someone holds or carries belongs to their box; leave it out of the list. Leave out the cast that the keyframe does not show.
-            TEXT . "\n\nIn the pose: " . BodyRules::NATURAL_POSE . ' ' . HandRules::RECEIVING;
+            TEXT . "\n\nIn the pose: " . BodyRules::NATURAL_POSE . ' ' . HandRules::RECEIVING . ' ' . HandRules::AT_THE_INSTANT
+                . "\n\nIn the box: " . BodyRules::WALK_DISTANCE;
     }
 
     /**

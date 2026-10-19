@@ -62,8 +62,10 @@ it('lists the benchmarks with the cases this tenant has for them', function () {
             ['photo-analysis', 'Caption an uploaded photo and list the people, places and objects in it.', 0],
             ['style-options', 'Propose a round of styles, the first one or "more like this" from a style sheet.', 1],
             ['cast-suggestions', 'Suggest recurring people, places or objects from the brief confirmed in the chat.', 0],
+            ['scene-direction', 'Direct a story into shots: the decisive moment, the fewest shots, intent made visible.', 0],
             ['keyframe-plan', 'Plan a shot from its idea: storyline and keyframe descriptions.', 0],
             ['keyframe-check', 'Check a drawn keyframe: unnatural poses and what a viewer would see change.', 0],
+            ['keyframe-edit', 'Edit a drawn keyframe: make one change and keep the rest of the image identical.', 0],
         ])
         ->assertSuccessful();
 });
@@ -92,6 +94,18 @@ it('runs every model on every case and saves the answers, scores and costs', fun
 
     StyleOptionsWriter::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'span the whole range from photoreal to flat cartoon'));
     BenchJudge::assertPrompted(fn($prompt) => str_contains($prompt->prompt, 'ANSWER TO REVIEW:') && str_contains($prompt->prompt, 'Style 4'));
+});
+
+it('averages the scores of every judge over every answer', function () {
+    StyleOptionsWriter::fake(fn() => ['styles' => benchStyles()]);
+    $scores = [2, 4, 3, 5];
+    BenchJudge::fake(function () use (&$scores) {
+        return [...benchScores(), 'fit' => array_shift($scores)];
+    });
+
+    $this->artisan('ai:bench', ['benchmarks' => ['style-options'], '--runs' => 2, '--concurrency' => 1])->assertSuccessful();
+
+    expect(benchReport()['summary'][0]['scores']['fit'])->toBe(3.5);
 });
 
 it('sends the model and reasoning effort of every variant to OpenRouter', function () {
@@ -145,7 +159,7 @@ it('estimates the cost in a dry run without calling any model', function () {
 
 it('flags a model OpenRouter does not list in a dry run', function () {
     $this->artisan('ai:bench', ['benchmarks' => ['style-options'], '--model' => ['acme/unknown-model'], '--no-judge' => true, '--dry-run' => true])
-        ->expectsOutputToContain('model not on OpenRouter')
+        ->expectsOutputToContain('no price on OpenRouter')
         ->assertSuccessful();
 });
 
@@ -186,6 +200,57 @@ it('checks every drawn keyframe with the images and model the app uses, judged o
         && $prompt->attachments->count() >= 2
         && str_contains((string) $prompt->agent->instructions(), App\Ai\Briefs\BodyRules::NATURAL_POSE));
     expect(app(App\Ai\Bench\Benchmarks::class)->find('keyframe-check')->criteria())->toHaveKey('natural_pose');
+});
+
+it('edits keyframes with a person, one kind of edit each, and measures how much of the image stayed', function () {
+    Storage::fake(App\Enums\Disk::TENANT->value);
+    $shot = Shot::factory()->for($this->project)->create(['status' => App\Enums\ShotStatus::KEYFRAMES_READY]);
+    $visitor = App\Models\Element::factory()->for($this->project)->create(['name' => 'Helmeted visitor']);
+    $striped = function (): string {
+        $image = imagecreatetruecolor(72, 128);
+        foreach (range(0, 127, 8) as $y) {
+            imagefilledrectangle($image, 0, $y, 71, $y + 3, imagecolorallocate($image, 250, 250, 250));
+        }
+        ob_start();
+        imagepng($image);
+
+        return (string) ob_get_clean();
+    };
+
+    foreach ([1, 2, 3] as $position) {
+        $keyframe = App\Models\Keyframe::factory()->for($shot)->create(['position' => $position]);
+        $render = $keyframe->addMediaFromString($striped())->usingFileName("k{$position}.png")->toMediaCollection(App\Models\Keyframe::RENDERS);
+        $keyframe->forceFill(['render_id' => $render->id])->save();
+
+        if ($position < 3) {
+            $keyframe->elements()->attach($visitor);
+        }
+    }
+
+    // The edited image is the render itself: nothing moved.
+    Http::fake(['openrouter.ai/api/v1/images' => Http::response(['data' => [['b64_json' => base64_encode($striped()), 'media_type' => 'image/png']], 'usage' => ['cost' => 0.02]])]);
+    BenchJudge::fake(fn() => ['edit_done' => 2, 'rest_identical' => 5, 'note' => 'Nothing changed.']);
+
+    $this->artisan('ai:bench', ['benchmarks' => ['keyframe-edit'], '--model' => ['krea/k3-edit']])
+        ->expectsOutputToContain('2 cases × 1 variants × 1 runs = 2 calls, each scored by 2 judges.')
+        ->assertSuccessful();
+
+    $report = collect(Storage::disk('local')->files('bench'))->map(fn(string $file) => json_decode(Storage::disk('local')->get($file), true))->first();
+
+    expect(collect($report['results'])->pluck('case')->sort()->values()->all())->toBe(collect(App\Models\Keyframe::query()->orderBy('id')->take(2)->pluck('id'))->map(fn(int $id, int $index) => "keyframe-{$id}-" . ['head', 'step'][$index])->sort()->values()->all())
+        ->and($report['summary'][0])->toMatchArray([
+            'ok' => '2/2',
+            'cost' => 0.02,
+            'measures' => ['kept' => 1.0, 'moved' => 0.0],
+            'scores' => ['edit_done' => 2, 'rest_identical' => 5],
+        ])
+        ->and(Storage::disk('local')->files('bench/images'))->toHaveCount(2);
+
+    Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'images')
+        && $request['model'] === 'krea/k3-edit'
+        && str_contains($request['prompt'], 'Change only this: Helmeted visitor turns their head to look straight at the camera.')
+        && count($request['input_references']) === 1);
+    BenchJudge::assertPrompted(fn($prompt) => $prompt->attachments->count() === 2);
 });
 
 it('skips a benchmark this tenant has no data for', function () {

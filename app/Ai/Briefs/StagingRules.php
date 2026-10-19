@@ -15,8 +15,9 @@ final class StagingRules
 {
     public static function rules(): string
     {
-        $hands = HandRules::RECEIVING;
+        $hands = HandRules::RECEIVING . ' ' . HandRules::AT_THE_INSTANT;
         $natural = BodyRules::NATURAL_POSE;
+        $walk = BodyRules::WALK_DISTANCE;
 
         return <<<RULES
             - Summary: what happens in this keyframe in one short plain line of at most twelve words, who does what, such as "The guard checks the permit at the barrier". The director reads it; the fields below are what the image model gets.
@@ -28,6 +29,7 @@ final class StagingRules
               - holds: what they hold, with "the", such as "the permit"; empty when the hands are empty. hand: the hand that holds it, left, right or both. Keep it in that hand in every keyframe unless the story moves it.
               - doing: their pose, gesture and expression as a short verb phrase in the present tense, without their name, such as "raises it to chest height, aimed at the vessel". {$hands}
             - Pose: {$natural}
+            - Distance: {$walk}
             - Never write "forward", "looking forward", "ahead" or "angled into": the image model then draws them facing the viewer. Concrete nouns, no style words: the visual style is added separately.
             - Every fact goes in one field only: the spatial fact is never repeated in the place or the cast, and the place never says what a person does.
             RULES;

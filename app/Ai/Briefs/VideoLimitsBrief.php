@@ -20,12 +20,12 @@ class VideoLimitsBrief
         return [
             [
                 'risk' => 'The place changes within the shot, such as driving through a gate to the area behind it, or walking into another room',
-                'why' => 'every keyframe is drawn on one image of the place, so the model has to invent a whole new view and the change is too big',
+                'why' => 'the end frame is drawn on the start frame, one image of the place, so the model has to invent a whole new view and the change is too big',
                 'instead' => 'end the shot on the moment before, such as the barrier opening, and show the new place in a second shot',
             ],
             [
                 'risk' => 'The camera moves: it follows someone, pans, zooms or drives along',
-                'why' => 'the camera stands still in every keyframe, drawn on the same image',
+                'why' => 'the camera stands still: the end frame is drawn on the start frame',
                 'instead' => 'a cut to a second shot from another camera position',
             ],
             [
@@ -44,9 +44,9 @@ class VideoLimitsBrief
                 'instead' => 'a close-up of the hands and the object',
             ],
             [
-                'risk' => 'Something appears, disappears or changes hands, place or state between two keyframes without a keyframe that shows it, such as gear that is suddenly there or a vest that is suddenly worn',
+                'risk' => 'Something appears, disappears or changes hands, place or state between the start frame and the end frame without being seen to do so, such as gear that is suddenly there or a vest that is suddenly worn',
                 'why' => 'the model cannot invent where a thing comes from or how it changes, so it pops in, out or on at once',
-                'instead' => 'everything in the frame from keyframe 1 or visibly coming in, every keyframe saying where each thing is and in what state, a keyframe for each change, and one halfway for a change that is hard to animate, such as one arm in the vest when putting on clothing, with at least 3 seconds for it',
+                'instead' => 'everything in the start frame or visibly coming in, both frames saying where each thing is and in what state, one change per shot, and its own shot of at least 3 seconds for a change that is hard to animate, such as putting on clothing, with the step halfway, such as one arm in the vest, as a shot of its own when a viewer must see it',
             ],
             [
                 'risk' => 'The action is hidden, behind a counter, a vehicle, a back or another person',
@@ -64,9 +64,9 @@ class VideoLimitsBrief
                 'instead' => 'a cut to a second shot',
             ],
             [
-                'risk' => 'More than about three steps, or several people doing different things at the same time',
+                'risk' => 'More than one change between the start frame and the end frame, or several people doing different things at the same time',
                 'why' => 'it is too much for one short clip and the model mixes it up',
-                'instead' => 'split it into shots, one action each',
+                'instead' => 'split it into shots, one change each',
             ],
             [
                 'risk' => 'Text, numbers, screens or lettering carry the message',

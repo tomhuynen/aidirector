@@ -6,7 +6,7 @@ namespace App\Jobs;
 
 use App\Enums\ShotStatus;
 use App\Models\Shot;
-use App\Support\Video\VideoJobs;
+use App\Support\Video\LumaVideoClient;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Collection;
@@ -16,8 +16,8 @@ use Illuminate\Support\Facades\Config;
 use Spatie\Multitenancy\Models\Tenant;
 
 /**
- * Checks every video that is rendering in the tenant in one round, the
- * status requests sent in parallel. A finished clip is handed to
+ * Checks every video that is rendering on Luma in the tenant in one round,
+ * the status requests sent in parallel. A finished clip is handed to
  * {@see DownloadVideo}; a failed or timed-out one is marked failed. While
  * any video still renders, the job queues itself for the next round. Only
  * one round is ever queued per tenant.
@@ -30,7 +30,9 @@ class PollVideos implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public int $timeout = 120;
 
-    private const RUNNING = ['pending', 'queued', 'in_progress', 'processing', 'running'];
+    public bool $failOnTimeout = true;
+
+    private const RUNNING = ['pending', 'queued', 'dreaming', 'in_progress', 'processing', 'running'];
 
     public function __construct()
     {
@@ -54,7 +56,7 @@ class PollVideos implements ShouldBeUniqueUntilProcessing, ShouldQueue
         return 'poll-videos-' . (Tenant::current()?->getKey() ?? 'landlord');
     }
 
-    public function handle(VideoJobs $videos): void
+    public function handle(LumaVideoClient $videos): void
     {
         $due = self::pending()->filter(fn(Shot $shot) => self::dueAt($shot) <= now()->getTimestamp());
         $statuses = $videos->statuses($due->pluck('video_job_id')->all());
@@ -84,7 +86,7 @@ class PollVideos implements ShouldBeUniqueUntilProcessing, ShouldQueue
             }
 
             if (Cache::add("video-download:{$shot->video_job_id}", true, now()->addMinutes(15))) {
-                DownloadVideo::dispatch($shot, (string) $shot->video_job_id, $status['usage'] ?? []);
+                DownloadVideo::dispatch($shot, (string) $shot->video_job_id);
             }
         }
 
@@ -111,6 +113,7 @@ class PollVideos implements ShouldBeUniqueUntilProcessing, ShouldQueue
     {
         return Shot::query()
             ->where('status', ShotStatus::VIDEO_PENDING)
+            ->whereNull('merge_transition')
             ->whereNotNull('video_job_id')
             ->get();
     }

@@ -31,6 +31,8 @@ class MergeShotAudio implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     /**
      * @param  list<string>  $locales
      */

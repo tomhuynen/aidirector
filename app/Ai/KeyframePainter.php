@@ -52,9 +52,7 @@ class KeyframePainter
         $started = hrtime(true);
 
         try {
-            $result = OpenRouterImageClient::serves($model)
-                ? $this->viaImagesEndpoint($model, $prompt, $attachments, $shot->aspectRatio()->value)
-                : $this->viaChat($model, $prompt, $attachments, $shot->aspectRatio()->value);
+            $result = $this->draw($model, $prompt, $attachments, $shot->aspectRatio()->value);
         } catch (Throwable $exception) {
             $keyframe->generations()->create([
                 'director_id' => $shot->project->director_id,
@@ -97,6 +95,19 @@ class KeyframePainter
         }
 
         return $render;
+    }
+
+    /**
+     * One image from the model, through the endpoint that serves it; nothing is stored.
+     *
+     * @param  array<int, StoredImage>  $attachments
+     * @return array{content: string, mime: string, provider: string, model: string, usage: array<string, mixed>}
+     */
+    public function draw(string $model, string $prompt, array $attachments, string $aspectRatio): array
+    {
+        return OpenRouterImageClient::serves($model)
+            ? $this->viaImagesEndpoint($model, $prompt, $attachments, $aspectRatio)
+            : $this->viaChat($model, $prompt, $attachments, $aspectRatio);
     }
 
     /**
@@ -167,7 +178,7 @@ class KeyframePainter
     /**
      * Renders a keyframe from its planned brief with its references: builds
      * the prompt, stores it on the keyframe and paints. `$extra` is appended
-     * to this render only, like the variation of an option for keyframe 1.
+     * to this render only, like the variation of an option for the start frame.
      *
      * @param  Collection<int, Keyframe>  $siblings  the shot's keyframes, with media and elements loaded
      */
@@ -185,9 +196,12 @@ class KeyframePainter
 
         $base = $this->baseFor($keyframe, $siblings);
 
-        // Keyframe 1 of a scene or close-up is drawn whole and read; every later keyframe whole by the
-        // keyframe model from the one before it, or on it by the layout model when set; a still from its brief.
-        if ($keyframe->position === 1 && $this->layouts->reads($keyframe)) {
+        // The start frame of a shot that returns to an earlier camera is drawn on that camera's last frame; another
+        // start frame of a scene or close-up is drawn whole and read; the end frame whole by the keyframe model
+        // from it, or on it by the layout model when set; a still from its brief.
+        if ($keyframe->position === 1 && ($view = $this->viewFor($keyframe)) !== null) {
+            $render = $this->paintReturn($keyframe, $view, $prompt, $references, $choose, $extra);
+        } elseif ($keyframe->position === 1 && $this->layouts->reads($keyframe)) {
             $render = $this->paintFirst($keyframe, $plan, $choose, $extra);
         } elseif (Config::get('pipeline.keyframes.layout.draws_keyframes') && $this->layouts->draws($keyframe, $base)) {
             $render = $this->paintLayout($keyframe, $base, $siblings, $choose, $extra);
@@ -202,7 +216,12 @@ class KeyframePainter
 
         $keyframe->load('media');
 
-        // Options for keyframe 1 are judged by the director; every keyframe that is used straight away is checked once.
+        // The start frame of a shot that continues another remembers the end frame it was drawn from.
+        if ($choose && $keyframe->position === 1 && ($source = $shot->settingRender()) !== null) {
+            $keyframe->forceFill(['source_render_id' => $source->id])->save();
+        }
+
+        // Options for the start frame are judged by the director; every keyframe that is used straight away is checked once.
         // A copy the director has not described yet repeats another keyframe's plan, so there is nothing of its own to check it against.
         if (! $choose || ! Config::get('pipeline.keyframe_check') || $shot->plannedKeyframeIsCopy($keyframe->position)) {
             return $render;
@@ -233,10 +252,12 @@ class KeyframePainter
      */
     private function paintLayout(Keyframe $keyframe, Media $base, Collection $siblings, bool $choose, string $extra): Media
     {
-        // The depth of the place is measured on keyframe 1, where the camera of the shot was set.
+        // The depth of the place is measured on the start frame, where the camera of the shot was set.
         $result = $this->logged($keyframe, fn() => $this->layouts->draw($keyframe, $base, $siblings, $siblings->firstWhere('position', 1)?->render(), $extra));
         $render = $this->keep($keyframe, $result, $choose);
-        $keyframe->forceFill(['prompt' => $result['prompt'], 'layout' => $result['layout']->toArray()])->save();
+        $render->setCustomProperty(Keyframe::LAYOUT, $result['layout']->toArray())->save();
+        // An option that is not chosen keeps its layout to itself, so the next keyframe starts from the chosen one.
+        $keyframe->forceFill(['prompt' => $result['prompt'], ...($choose ? ['layout' => $result['layout']->toArray()] : [])])->save();
 
         return $render;
     }
@@ -339,7 +360,7 @@ class KeyframePainter
     }
 
     /**
-     * Draws keyframe 1 whole with the keyframe model, so the image model
+     * Draws the start frame whole with the keyframe model, so the image model
      * composes it: the place from its picture, for how it looks, with the
      * camera chosen for the action, and the cast from theirs. Drawn to be
      * used straight away, it is read at once; an option is read once the
@@ -351,6 +372,7 @@ class KeyframePainter
     {
         $shot = $keyframe->shot;
         $setting = $this->settingFor($shot);
+        $master = $this->masterFor($shot, $setting);
         $place = $keyframe->elements->first(fn(Element $element) => $element->type === ElementType::PLACE && $element->reference() !== null);
         $references = new KeyframeReferences(
             style: $this->styleReferenceFor($shot->project),
@@ -363,7 +385,10 @@ class KeyframePainter
                 ->all(),
             setting: $setting['image'] ?? null,
             settingLabel: $setting['label'] ?? '',
+            settingIsMoment: $setting['moment'] ?? false,
             place: $setting === null && $place !== null ? $this->referenceFor($place->reference()) : null,
+            master: $master !== null ? $this->referenceFor($master) : null,
+            masterLabel: $this->masterLabel($shot),
         );
         $prompt = KeyframeImageBrief::for($shot, $plan, $references);
         $keyframe->forceFill(['prompt' => $prompt])->save();
@@ -378,7 +403,52 @@ class KeyframePainter
     }
 
     /**
-     * Whether keyframe 1 is read, so the keyframes after it are drawn from where everyone stands.
+     * Draws the start frame of a shot that returns to an earlier camera on
+     * that camera's last frame: the place stays exactly as it was, measured
+     * in code like an end frame, and the people take the poses of the end
+     * frame of the shot before.
+     */
+    private function paintReturn(Keyframe $keyframe, Media $view, string $prompt, KeyframeReferences $references, bool $choose, string $extra): Media
+    {
+        $keyframe->forceFill(['prompt' => $prompt])->save();
+        $render = $this->paintOn($view, $keyframe, $extra === '' ? $prompt : $prompt . "\n" . $extra, $references->images(), $choose, labels: $references->labels());
+
+        if ($choose && $this->layouts->reads($keyframe)) {
+            $this->readFirst($keyframe, $render);
+        }
+
+        return $render;
+    }
+
+    /**
+     * The earlier frame from the camera the start frame of this keyframe's shot returns to, when it has one.
+     */
+    private function viewFor(Keyframe $keyframe): ?Media
+    {
+        return $keyframe->position === 1 && $keyframe->shot->continuesPose() ? $keyframe->shot->returnFrame() : null;
+    }
+
+    /**
+     * The master plate a start frame takes the place from, unless it is the setting image itself.
+     *
+     * @param  array{render: Media}|null  $setting
+     */
+    private function masterFor(Shot $shot, ?array $setting): ?Media
+    {
+        $master = $shot->masterPlate();
+
+        return $master === null || $master->is($setting['render'] ?? null) ? null : $master;
+    }
+
+    private function masterLabel(Shot $shot): string
+    {
+        $master = $shot->masterShot();
+
+        return $master === null ? '' : "the start frame of {$master->code()}, the first shot of this sequence";
+    }
+
+    /**
+     * Whether the start frame is read, so the end frame is drawn from where everyone stands.
      */
     public function reads(Keyframe $keyframe): bool
     {
@@ -386,7 +456,7 @@ class KeyframePainter
     }
 
     /**
-     * Reads keyframe 1: where everyone stands is kept as the layout the next
+     * Reads the start frame: where everyone stands is kept as the layout the end
      * keyframe is drawn from. Whoever stands in the wrong spot or does not
      * look like their picture becomes a note the director can have fixed or
      * dismiss; the image itself stays as it is.
@@ -513,7 +583,7 @@ class KeyframePainter
 
     /**
      * The image a keyframe is drawn on and keeps everything of that it does
-     * not change: the keyframe before it, or for keyframe 1 the chosen place.
+     * not change: the start frame for the end frame, or for the start frame the chosen place.
      *
      * @param  Collection<int, Keyframe>  $siblings
      */
@@ -603,20 +673,36 @@ class KeyframePainter
      */
     public function checkInput(Keyframe $keyframe, Media $render, KeyframeReferences $references): ?array
     {
-        if ($references->first === null && ! $keyframe->shot->drawsStandalone()) {
+        $shot = $keyframe->shot;
+
+        if ($references->first !== null) {
+            [$images, $roles] = $this->checkImages($references->first, $references);
+        } elseif ($references->view !== null) {
+            [$images, $roles] = $this->returnCheckImages($references);
+        } elseif ($shot->drawsStandalone()) {
+            [$images, $roles] = $this->stillCheckImages($references);
+        } elseif ($references->setting !== null && $this->matchCut($keyframe, $references)) {
+            [$images, $roles] = $this->matchCutCheckImages($references);
+        } else {
             return null;
         }
-
-        [$images, $roles] = $references->first === null ? $this->stillCheckImages($references) : $this->checkImages($references->first, $references);
 
         return [[...$images, $this->referenceFor($render)], [...$roles, 'the keyframe to check']];
     }
 
     /**
+     * Whether the render is the start frame of a shot that continues another: the same instant as that shot's end frame, from a new camera.
+     */
+    private function matchCut(Keyframe $keyframe, KeyframeReferences $references): bool
+    {
+        return $references->first === null && $references->view === null && $references->settingIsMoment && $keyframe->position === 1 && $keyframe->shot->continuesPose();
+    }
+
+    /**
      * Has the checker compare a render with its references, each for its own
-     * part: keyframe 1 for the place, the keyframe the people first appear in
-     * (or their picture) for how they look, and the keyframe before for the
-     * state of objects. High issues count against the render. Returns null
+     * part: the start frame for the place and the people who are in it, and
+     * their picture for how the people look. High issues count against the
+     * render. Returns null
      * when the check itself fails, so a broken check never holds up the shot.
      *
      * @return array{passes: bool, problems: list<string>, fix: string}|null
@@ -630,7 +716,7 @@ class KeyframePainter
         }
 
         [$images, $roles] = $input;
-        $checker = new KeyframeChecker($keyframe, $roles);
+        $checker = new KeyframeChecker($keyframe, $roles, matchCut: $this->matchCut($keyframe, $references), returnsToView: $references->view !== null);
         $result = $this->runChecker($keyframe, $checker, $images, (string) Config::get('pipeline.models.keyframe_check'));
 
         if ($result === null) {
@@ -649,9 +735,9 @@ class KeyframePainter
 
     /**
      * The references a render is checked against, each with what it is the
-     * reference for: keyframe 1 for the place and the camera, the pictures of
-     * the people for who they are, and the keyframe before for the state of
-     * objects and how the people look in this shot. The same images it was drawn from.
+     * reference for: the start frame for the place, the camera and the state
+     * of objects, and the pictures of the people for who they are. The same
+     * images it was drawn from.
      *
      * @return array{0: list<StoredImage>, 1: list<string>}
      */
@@ -659,8 +745,8 @@ class KeyframePainter
     {
         $images = [$first];
         $roles = [match (true) {
-            $references->firstShowsCast => 'keyframe 1 of the shot: the reference for the place and the camera, and for how the people look',
-            default => 'keyframe 1 of the shot: the reference for the place and the camera; ' . implode(' and ', $references->castNames) . (count($references->castNames) > 1 ? ' are' : ' is') . ' not in it yet',
+            $references->firstShowsCast => 'the start frame of the shot: the reference for the place and the camera, for the state of objects and for how the people look',
+            default => 'the start frame of the shot: the reference for the place and the camera; ' . implode(' and ', $references->castNames) . (count($references->castNames) > 1 ? ' are' : ' is') . ' not in it yet',
         }];
 
         foreach ($references->elementImages as $entry) {
@@ -670,9 +756,61 @@ class KeyframePainter
             }
         }
 
-        if ($references->previous !== null) {
-            $images[] = $references->previous;
-            $roles[] = 'the keyframe directly before: the reference for the state of objects, such as what is held or what is in a box, and for how the people look in this shot';
+        return [$images, $roles];
+    }
+
+    /**
+     * The references the start frame of a shot that continues another is
+     * checked against: the end frame it continues, for the instant it shows,
+     * and the pictures of the people for who they are.
+     *
+     * @return array{0: list<StoredImage>, 1: list<string>}
+     */
+    private function matchCutCheckImages(KeyframeReferences $references): array
+    {
+        $images = [$references->setting];
+        $roles = [$references->master !== null
+            ? "{$references->settingLabel}: the reference for the people's clothing, their poses and hand positions, and the objects and their state; the keyframe to check shows that same instant from another camera position"
+            : "{$references->settingLabel}: the reference for the place, the light, the people's clothing, their poses and hand positions, and the objects and their state; the keyframe to check shows that same instant from another camera position"];
+
+        if ($references->master !== null) {
+            $images[] = $references->master;
+            $roles[] = "{$references->masterLabel}, the master plate: the reference for the place, its walls, floor, doors, signs, fixed objects and light, seen from another camera position";
+        }
+
+        foreach ($references->elementImages as $entry) {
+            if ($entry['element']->type !== ElementType::PLACE) {
+                $images[] = $entry['image'];
+                $roles[] = "the picture of {$entry['element']->name}: the reference for how " . ($entry['element']->type === ElementType::PERSON ? 'this person' : 'this object') . ' looks';
+            }
+        }
+
+        return [$images, $roles];
+    }
+
+    /**
+     * The references the start frame of a shot that returns to an earlier
+     * camera is checked against: that camera's last frame for the place, the
+     * camera and the framing, the end frame of the shot before for the
+     * poses, and the pictures of the people for who they are.
+     *
+     * @return array{0: list<StoredImage>, 1: list<string>}
+     */
+    private function returnCheckImages(KeyframeReferences $references): array
+    {
+        $images = [$references->view];
+        $roles = ["{$references->viewLabel}, from the same camera: the reference for the place, the camera and the framing, which must match exactly" . ($references->setting === null ? ', and for the people\'s clothing, poses and hand positions and the objects and their state' : '')];
+
+        if ($references->setting !== null) {
+            $images[] = $references->setting;
+            $roles[] = "{$references->settingLabel}: the reference for the people's clothing, their poses and hand positions, and the objects and their state, from another camera position";
+        }
+
+        foreach ($references->elementImages as $entry) {
+            if ($entry['element']->type !== ElementType::PLACE) {
+                $images[] = $entry['image'];
+                $roles[] = "the picture of {$entry['element']->name}: the reference for how " . ($entry['element']->type === ElementType::PERSON ? 'this person' : 'this object') . ' looks';
+            }
         }
 
         return [$images, $roles];
@@ -747,22 +885,17 @@ class KeyframePainter
 
     /**
      * The style sheet, up to the configured number of the keyframe's cast and
-     * sets with a reference image, keyframe 1 from the second keyframe on and
-     * the keyframe directly before from the third on.
+     * sets with a reference image, and the start frame for the end frame.
      *
      * @param  Collection<int, Keyframe>  $siblings
      */
     public function referencesFor(Keyframe $keyframe, Collection $siblings): KeyframeReferences
     {
         $elements = $keyframe->elements->values();
-        // A still of a montage has its own place: it is drawn like keyframe 1, from the style sheet and the pictures.
+        // A still of a montage has its own place: it is drawn like a start frame, from the style sheet and the pictures.
         $standalone = $keyframe->shot->drawsStandalone();
         $firstKeyframe = ! $standalone && KeyframeImageBrief::usesFirstKeyframe($keyframe->position) ? $siblings->firstWhere('position', 1) : null;
         $first = $firstKeyframe?->render();
-
-        $previous = ! $standalone && KeyframeImageBrief::usesPreviousKeyframe($keyframe->position)
-            ? $siblings->firstWhere('position', $keyframe->position - 1)?->render()
-            : null;
 
         // Who the base image does not show yet: they are added when the keyframe is drawn on top of it.
         $people = $elements->filter(fn(Element $element) => $element->type === ElementType::PERSON);
@@ -770,61 +903,71 @@ class KeyframePainter
             ? collect()
             : $people->reject(fn(Element $person) => $firstKeyframe->elements->contains($person))->values();
 
-        // Drawn on top of keyframe 1, the place and the style come from it; only who and what is pictured stays.
+        // Drawn from scratch, the start frame can play in the setting of another shot: the instant the shot before ends with, or for an insert only its place.
+        $setting = $first === null && (! $standalone || $keyframe->shot->isInsert()) ? $this->settingFor($keyframe->shot) : null;
+        // Back at an earlier camera, the start frame is drawn on its last frame; when that is the frame it continues, the poses are in it already.
+        $view = $first === null ? $this->viewFor($keyframe) : null;
+        $returnShot = $view !== null ? $keyframe->shot->returnShot() : null;
+        $setting = $view !== null && $view->is($setting['render'] ?? null) ? null : $setting;
+        // Elsewhere in a sequence, the place comes from the master plate, never from a copy of a copy.
+        $master = $first === null && $view === null && ! $keyframe->shot->isMontage() && ! $keyframe->shot->isPresenter() ? $this->masterFor($keyframe->shot, $setting) : null;
+
+        // Drawn on top of an image, or in the place of a master plate, the place comes from that image; only who and what is pictured stays.
+        $placeFromImage = $first !== null || $view !== null || $master !== null;
         $elementImages = $elements
-            ->filter(fn(Element $element) => $element->reference() !== null && ($first === null || $element->type !== ElementType::PLACE))
+            ->filter(fn(Element $element) => $element->reference() !== null && (! $placeFromImage || $element->type !== ElementType::PLACE))
             ->take((int) Config::get('pipeline.keyframes.max_element_references', 3))
             ->map(fn(Element $element) => ['element' => $element, 'image' => $this->referenceFor($element->reference())])
             ->values()
             ->all();
 
-        // Drawn from scratch, keyframe 1 can play in the setting of another shot, such as a close-up on the moment the shot before ends with.
-        $setting = $first === null && ! $standalone ? $this->settingFor($keyframe->shot) : null;
-
         return new KeyframeReferences(
-            style: $first === null ? $this->styleReferenceFor($keyframe->shot->project) : null,
+            style: $first === null && $view === null ? $this->styleReferenceFor($keyframe->shot->project) : null,
             elements: $elements->all(),
             elementImages: $elementImages,
             first: $first ? $this->referenceFor($first) : null,
-            previous: $previous ? $this->referenceFor($previous) : null,
             firstShowsCast: $missing->isEmpty(),
             castNames: $missing->pluck('name')->all(),
             setting: $setting['image'] ?? null,
             settingLabel: $setting['label'] ?? '',
+            settingIsMoment: $setting['moment'] ?? false,
+            view: $view !== null ? $this->referenceFor($view) : null,
+            viewLabel: $returnShot !== null ? "the end frame of {$returnShot->code()}" : '',
+            master: $master !== null ? $this->referenceFor($master) : null,
+            masterLabel: $master !== null ? $this->masterLabel($keyframe->shot) : '',
         );
     }
 
     /**
-     * The image of the setting the shot takes from another shot, with what it is.
+     * The image of the setting the shot takes from another shot, with what it
+     * is and whether it is an instant to continue or only a place. A shot
+     * that renders in its sequence has none: its start frame is the start of
+     * its own act, and the master plate gives it only the place.
      *
-     * @return array{image: StoredImage, label: string}|null
+     * @return array{image: StoredImage, render: Media, label: string, moment: bool}|null
      */
     public function settingFor(Shot $shot): ?array
     {
-        $from = $shot->settingFrom();
+        if ($shot->rendersInSequence()) {
+            return null;
+        }
 
-        if ($from === null) {
+        $from = $shot->settingFrom();
+        $render = $shot->settingRender();
+
+        if ($from === null || $render === null) {
             return null;
         }
 
         $source = $from['shot'];
-        $position = $from['keyframe'] === Shot::LAST_KEYFRAME ? (int) $source->keyframes()->max('position') : $from['keyframe'];
-        $keyframe = $position > 0 ? $source->keyframes()->with('media')->where('position', $position)->first() : null;
-        $image = $position > 0
-            ? $keyframe?->render()
-            : $source->keyframes()->with('media')->where('position', 1)->first()?->render();
-
-        if ($image === null) {
-            return null;
-        }
 
         $label = match (true) {
-            ! $from['chosen'] => "the last keyframe of {$source->code()}, the shot before",
-            $from['keyframe'] === Shot::LAST_KEYFRAME => "the last keyframe of {$source->code()}",
+            ! $from['chosen'] => "the end frame of {$source->code()}, the shot before",
+            $from['keyframe'] === Shot::LAST_KEYFRAME => "the end frame of {$source->code()}",
             $from['keyframe'] === 0 => "the place of {$source->code()}",
             default => "keyframe {$from['keyframe']} of {$source->code()}",
         };
 
-        return ['image' => $this->referenceFor($image), 'label' => $label];
+        return ['image' => $this->referenceFor($render), 'render' => $render, 'label' => $label, 'moment' => $from['keyframe'] !== 0];
     }
 }

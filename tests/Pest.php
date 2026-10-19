@@ -29,6 +29,10 @@ pest()
         App\Ai\Agents\VoiceOverWriter::fake(fn() => ['text' => 'A short voice-over.']);
         // Timing a shot again changes nothing unless a test fakes the timer itself.
         App\Ai\Agents\ShotTimer::fake(fn() => throw new RuntimeException('Shots are not timed again in tests.'));
+        // Adjusting or deleting records a correction, classified in the background; tests that check the class fake it themselves.
+        App\Ai\Agents\CorrectionClassifier::fake(fn() => ['kind' => 'instruction', 'category' => 'test', 'rule' => '']);
+        // A drawn place has its layout read in the background; tests that check the layout fake it themselves.
+        App\Ai\Agents\PlaceLayoutReader::fake(fn() => ['layout' => '']);
 
         $this->withoutVite();
     });

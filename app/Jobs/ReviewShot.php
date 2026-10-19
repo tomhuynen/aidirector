@@ -32,6 +32,8 @@ class ReviewShot implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     /** The statuses in which every keyframe is drawn and the shot was reviewed before. */
     private const REVIEWED = [ShotStatus::KEYFRAMES_READY, ShotStatus::VIDEO_PENDING, ShotStatus::VIDEO_READY];
 

@@ -103,7 +103,6 @@ describe('acting on one keyframe', function () {
         'edit the description' => ['public.shots.keyframes.update', fn(Keyframe $keyframe) => ['description' => 'He smiles at the mailbox.']],
         'adjust the image' => ['public.shots.keyframes.tweak', fn(Keyframe $keyframe) => ['instruction' => 'Make the mailbox brighter.']],
         'choose a version' => ['public.shots.keyframes.render', fn(Keyframe $keyframe) => ['render' => $keyframe->render_id]],
-        'copy it' => ['public.shots.keyframes.copy', fn(Keyframe $keyframe) => []],
     ];
 
     it('waits while that keyframe is being drawn', function (string $route, Closure $data) {

@@ -16,12 +16,15 @@ use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * Draws keyframes in the order they depend on each other. Every keyframe is
- * drawn from the keyframe before it, and keyframe 1 of a shot that continues
+ * Draws keyframes in the order they depend on each other. The end frame is
+ * drawn from the start frame, and the start frame of a shot that continues
  * another from that shot's keyframe. A keyframe waits until the one it
- * depends on is ready. When a keyframe changes, what is drawn from it stays
- * as it is unless the director asks to update it too; then it is drawn
- * again, in turn. What was never drawn is always drawn.
+ * depends on is ready. When a keyframe changes, the end frame drawn from it
+ * stays as it is unless the director asks to update it too; then it is drawn
+ * again, in turn. What was never drawn is always drawn. The start frame of
+ * another shot is never drawn again by itself: the director confirms the end
+ * frame it continues from, and decides what happens to the shots drawn from
+ * an earlier version of it.
  */
 class KeyframeChain
 {
@@ -31,7 +34,7 @@ class KeyframeChain
     public function link(Shot $shot): void
     {
         $keyframes = $shot->keyframes()->orderBy('position')->get();
-        // A copied keyframe 1 is never drawn again, so it depends on nothing.
+        // A copied start frame is never drawn again, so it depends on nothing.
         $before = $shot->opensWithCopy() ? null : $this->continuesFrom($shot);
 
         foreach ($keyframes as $keyframe) {
@@ -98,16 +101,16 @@ class KeyframeChain
     }
 
     /**
-     * The keyframes after a changed one that are drawn again: all that are
-     * drawn from it when the director asks for that, otherwise only those
-     * never drawn, which would be missing.
+     * The keyframes of the same shot after a changed one that are drawn
+     * again: all that are drawn from it when the director asks for that,
+     * otherwise only those never drawn, which would be missing.
      *
      * @return Collection<int, Keyframe>
      */
     private function following(Keyframe $keyframe, bool $following): Collection
     {
         return $this->drawnFrom($keyframe)
-            ->filter(fn(Keyframe $dependent) => $following || $dependent->render_id === null)
+            ->filter(fn(Keyframe $dependent) => $dependent->shot_id === $keyframe->shot_id && ($following || $dependent->render_id === null))
             ->values();
     }
 
@@ -149,9 +152,10 @@ class KeyframeChain
     {
         $keyframe->forceFill(['status' => KeyframeStatus::READY, 'render_error' => null])->save();
 
-        $keyframe->dependents()->pluck('shot_id')->push($keyframe->shot_id)->unique()->each(fn(int $shotId) => $this->advance($shotId));
-
+        // The shot is done before what waits starts, so a keyframe drawn straight away does not finish it twice.
         $this->finishShot($keyframe->shot()->with('project')->firstOrFail());
+
+        $keyframe->dependents()->pluck('shot_id')->push($keyframe->shot_id)->unique()->each(fn(int $shotId) => $this->advance($shotId));
     }
 
     /**
@@ -227,7 +231,7 @@ class KeyframeChain
     }
 
     /**
-     * The keyframe of another shot this shot's keyframe 1 is drawn from, if it continues one.
+     * The keyframe of another shot this shot's start frame is drawn from, if it continues one.
      */
     private function continuesFrom(Shot $shot): ?Keyframe
     {

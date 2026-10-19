@@ -28,11 +28,13 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Turns the shot's keyframes into a video request: has the text model write
- * the shot-specific prompt and submits it with every keyframe image, in order,
- * to the video model before handing off to {@see PollVideos}. On OpenRouter the
- * keyframes are references; on Luma each is pinned to the frame it is reached on.
- * An insert's clip is made from its still in code straight away.
+ * Turns the shot's keyframes into a video request. A scene or close-up has
+ * the text model write the shot-specific prompt and goes to Luma with its
+ * start frame pinned on the first frame and its end frame pinned where the
+ * act ends and on the last frame, before handing off to {@see PollVideos}.
+ * A montage gets one Luma clip per still, a presenter one lip-synced clip
+ * per language, both followed by {@see PollShotClips}. An insert's clip is
+ * made from its still in code straight away.
  */
 #[DeleteWhenMissingModels]
 class GenerateVideo implements ShouldQueue
@@ -44,6 +46,11 @@ class GenerateVideo implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
+    /** Where the clips of scenes, close-ups and montages render. */
+    public const PROVIDER = 'luma';
+
     public function __construct(
         public readonly Shot $shot,
     ) {
@@ -51,7 +58,7 @@ class GenerateVideo implements ShouldQueue
         $this->followPlan($this->shot);
     }
 
-    public function handle(OpenRouterVideoClient $videos, KeyframePainter $painter, StillVideo $stills): void
+    public function handle(LumaVideoClient $luma, OpenRouterVideoClient $videos, KeyframePainter $painter, StillVideo $stills): void
     {
         $shot = $this->shot->load(['project', 'keyframes.media']);
         $keyframes = $shot->keyframes;
@@ -61,7 +68,7 @@ class GenerateVideo implements ShouldQueue
         }
 
         if ($shot->isMontage()) {
-            $this->submitStills($shot, $keyframes, $videos);
+            $this->submitStills($shot, $keyframes, $luma);
 
             return;
         }
@@ -78,23 +85,28 @@ class GenerateVideo implements ShouldQueue
             return;
         }
 
+        $sorted = $keyframes->sortBy('position')->values();
         $duration = self::duration($shot);
-        $parts = $this->writePrompt($shot, $keyframes, $duration, $painter);
-        // A scene is paced by the video model itself; a close-up the director timed keeps its times.
-        $prompt = VideoPrompt::compose(
-            $parts,
-            $keyframes->count(),
-            $duration,
-            $shot->kindOrScene()->timedByHand() ? self::timeline($shot, $keyframes) : [],
-        );
+        $parts = $this->writePrompt($shot, $sorted, $painter);
+        $ends = $sorted->count() > 1;
+        // With an end frame, Ray plays the act at its own speed in the whole clip, and the download cuts where it ends; one frame is held for the shot.
+        $prompt = VideoPrompt::compose($parts, $ends ? LumaVideoClient::lengthFor($duration) : $duration, $ends);
 
         if ($this->planReplaced()) {
             return;
         }
 
-        $jobId = self::rendersOnLuma()
-            ? $this->submitToLuma($shot, $keyframes, $prompt, app(LumaVideoClient::class))
-            : $this->submitToOpenRouter($shot, $keyframes, $prompt, $duration, $videos);
+        $pins = self::lumaPins($shot, $sorted);
+
+        $jobId = $luma->submit(
+            self::model(),
+            $prompt,
+            array_map(fn(array $pin) => ['bytes' => $this->bytes($sorted[$pin['keyframe']]), 'mime' => (string) $sorted[$pin['keyframe']]->render()->mime_type], $pins['pins']),
+            array_column($pins['pins'], 'frame'),
+            $pins['seconds'],
+            $shot->aspectRatio()->value,
+            $shot->videoResolution(),
+        );
 
         $shot->forceFill([
             'video_prompt' => $prompt,
@@ -121,7 +133,7 @@ class GenerateVideo implements ShouldQueue
         $this->shot->generations()->create([
             'director_id' => $this->shot->project->director_id,
             'kind' => 'video',
-            'provider' => self::provider(),
+            'provider' => self::PROVIDER,
             'model' => self::model(),
             'prompt' => $this->shot->video_prompt,
             'error' => $exception?->getMessage(),
@@ -134,43 +146,12 @@ class GenerateVideo implements ShouldQueue
     }
 
     /**
-     * @param  Collection<int, Keyframe>  $keyframes
-     */
-    private function submitToOpenRouter(Shot $shot, Collection $keyframes, string $prompt, int $duration, OpenRouterVideoClient $videos): string
-    {
-        $references = $keyframes
-            ->map(fn(Keyframe $keyframe) => 'data:' . $keyframe->render()->mime_type . ';base64,' . base64_encode($this->bytes($keyframe)))
-            ->values()
-            ->all();
-
-        // No first frame: with one, Wan 3.0 animates from that image alone and leaves the references out, so the cast changes.
-        return $videos->submit((string) Config::get('pipeline.models.video'), $prompt, $references, $duration, $shot->aspectRatio()->value, $shot->videoResolution());
-    }
-
-    /**
-     * @param  Collection<int, Keyframe>  $keyframes
-     */
-    private function submitToLuma(Shot $shot, Collection $keyframes, string $prompt, LumaVideoClient $luma): string
-    {
-        $sorted = $keyframes->sortBy('position')->values();
-        $pins = self::lumaPins($shot, $sorted);
-
-        return $luma->submit(
-            self::model(),
-            $prompt,
-            array_map(fn(array $pin) => ['bytes' => $this->bytes($sorted[$pin['keyframe']]), 'mime' => (string) $sorted[$pin['keyframe']]->render()->mime_type], $pins['pins']),
-            array_column($pins['pins'], 'frame'),
-            $pins['seconds'],
-            $shot->aspectRatio()->value,
-            $shot->videoResolution(),
-        );
-    }
-
-    /**
-     * Where each keyframe is pinned in a Luma clip: on the frame it is
-     * reached, and the last one also on the frame the shot ends, so it is
-     * held until then. The clip is the shortest length Ray renders that
-     * holds the shot; a longer shot is pinned into it in proportion.
+     * Where the keyframes are pinned in a Luma clip: the start frame on the
+     * first frame and the end frame on the last, so Ray chooses how fast the
+     * act goes and holds the end frame once it is reached; a frame between
+     * them is pinned in proportion to the planned seconds. One frame alone
+     * is pinned on the first frame and held to where the shot ends. The
+     * clip is the shortest length Ray renders that holds the shot.
      *
      * @param  Collection<int, Keyframe>  $keyframes
      * @return array{seconds: int, pins: list<array{keyframe: int, frame: int}>}
@@ -180,66 +161,60 @@ class GenerateVideo implements ShouldQueue
         $duration = self::duration($shot);
         $clip = LumaVideoClient::lengthFor($duration);
         $lastFrame = $clip * LumaVideoClient::FPS;
-        $scale = min(1.0, $clip / $duration) * LumaVideoClient::FPS;
+
+        if ($keyframes->count() < 2) {
+            return ['seconds' => $clip, 'pins' => [['keyframe' => 0, 'frame' => 0], ['keyframe' => 0, 'frame' => min($lastFrame, $duration * LumaVideoClient::FPS)]]];
+        }
+
+        $acts = array_slice($shot->keyframeSeconds($keyframes), 0, $keyframes->count() - 1);
+        $total = array_sum($acts) ?: 1.0;
         $pins = [];
-        $frame = -1;
         $start = 0.0;
 
-        foreach ($shot->keyframeSeconds($keyframes) as $index => $seconds) {
-            $frame = min($lastFrame, max($frame + 1, (int) round($start * $scale)));
-            $pins[] = ['keyframe' => $index, 'frame' => $frame];
-            $start += $seconds;
+        foreach (array_keys($keyframes->all()) as $index) {
+            $pins[] = ['keyframe' => $index, 'frame' => (int) round($lastFrame * min(1.0, $start / $total))];
+            $start += $acts[$index] ?? 0.0;
         }
 
-        $end = min($lastFrame, (int) round($duration * $scale));
-
-        if ($pins !== [] && $end > $frame) {
-            $pins[] = ['keyframe' => $pins[count($pins) - 1]['keyframe'], 'frame' => $end];
-        }
+        $pins[count($pins) - 1]['frame'] = $lastFrame;
 
         return ['seconds' => $clip, 'pins' => $pins];
     }
 
     /**
-     * Whether scenes and close-ups render on Luma instead of OpenRouter.
-     */
-    public static function rendersOnLuma(): bool
-    {
-        return Config::get('pipeline.video.provider') === 'luma';
-    }
-
-    public static function provider(): string
-    {
-        return self::rendersOnLuma() ? 'luma' : 'openrouter';
-    }
-
-    /**
-     * The model scenes and close-ups render with.
+     * The model scenes, close-ups and montages render with.
      */
     public static function model(): string
     {
-        return (string) Config::get(self::rendersOnLuma() ? 'pipeline.models.luma_video' : 'pipeline.models.video');
+        return (string) Config::get('pipeline.models.video');
     }
 
     /**
-     * A montage gets one clip per still, each starting on its still; they are
+     * A montage gets one clip per still, each pinned on its still; they are
      * joined with crossfades once all are rendered, by {@see PollShotClips}.
      *
      * @param  Collection<int, Keyframe>  $keyframes
      */
-    private function submitStills(Shot $shot, Collection $keyframes, OpenRouterVideoClient $videos): void
+    private function submitStills(Shot $shot, Collection $keyframes, LumaVideoClient $luma): void
     {
-        // Each clip lasts as long as its still shows, rounded up to the whole seconds the model renders; the join cuts it to that.
+        // Each clip lasts as long as its still shows, in the shortest length Ray renders that holds it; the join cuts it to that.
         $lengths = PollShotClips::clipLengths($shot->keyframeSeconds($keyframes));
-        $model = (string) Config::get('pipeline.models.video');
 
-        $clips = $keyframes->sortBy('position')->values()->map(function (Keyframe $keyframe, int $index) use ($shot, $videos, $lengths, $model): array {
-            $still = 'data:' . $keyframe->render()->mime_type . ';base64,' . base64_encode($this->bytes($keyframe));
-            $duration = Shot::clampSeconds((int) ceil($lengths[$index]));
+        $clips = $keyframes->sortBy('position')->values()->map(function (Keyframe $keyframe, int $index) use ($shot, $luma, $lengths): array {
+            $seconds = LumaVideoClient::lengthFor((int) ceil($lengths[$index]));
 
             return [
                 'position' => $keyframe->position,
-                'job_id' => $videos->submit($model, VideoPrompt::still($keyframe->fullDescription(), $duration), [], $duration, $shot->aspectRatio()->value, $shot->videoResolution(), ['first_frame' => $still]),
+                'job_id' => $luma->submit(
+                    self::model(),
+                    VideoPrompt::still($keyframe->fullDescription(), $seconds),
+                    [['bytes' => $this->bytes($keyframe), 'mime' => (string) $keyframe->render()->mime_type]],
+                    [0],
+                    $seconds,
+                    $shot->aspectRatio()->value,
+                    $shot->videoResolution(),
+                ),
+                'seconds' => $seconds,
                 'status' => 'pending',
             ];
         })->all();
@@ -247,7 +222,7 @@ class GenerateVideo implements ShouldQueue
         $shot->clearMediaCollection(Shot::MONTAGE_CLIPS);
 
         $shot->forceFill([
-            'video_prompt' => VideoPrompt::still('(the description of each still)', Shot::clampSeconds((int) ceil(max($lengths)))),
+            'video_prompt' => VideoPrompt::still('(the description of each still)', (int) max(array_column($clips, 'seconds'))),
             'video_summary' => $keyframes->sortBy('position')->map(fn(Keyframe $keyframe) => rtrim($keyframe->staged()->summary ?: $keyframe->title, '.') . '.')->join(' '),
             'video_job_id' => null,
             'montage_clips' => $clips,
@@ -313,7 +288,7 @@ class GenerateVideo implements ShouldQueue
     {
         $started = hrtime(true);
         $prompt = __('A slow push-in on the still, made in code.');
-        $seconds = $shot->keyframeSeconds(collect([$still]))[0];
+        $seconds = (float) self::duration($shot);
         $clip = $stills->make($this->bytes($still), $seconds, $shot->aspectRatio()->value, $shot->videoResolution());
 
         if ($this->planReplaced()) {
@@ -393,31 +368,10 @@ class GenerateVideo implements ShouldQueue
     }
 
     /**
-     * When each keyframe is reached: every keyframe lasts its own seconds
-     * until the next one, as the editor shows them.
-     *
-     * @param  Collection<int, Keyframe>  $keyframes
-     * @return list<array{position: int, title: string, seconds: float}>
-     */
-    public static function timeline(Shot $shot, Collection $keyframes): array
-    {
-        $seconds = $shot->keyframeSeconds($keyframes);
-        $starts = array_map(fn(int $index) => round(array_sum(array_slice($seconds, 0, $index)), 1), array_keys($seconds));
-
-        return $keyframes->sortBy('position')->values()
-            ->map(fn(Keyframe $keyframe, int $index) => [
-                'position' => $keyframe->position,
-                'title' => $keyframe->title,
-                'seconds' => $starts[$index],
-            ])
-            ->all();
-    }
-
-    /**
      * @param  Collection<int, Keyframe>  $keyframes
      * @return array{style: string, action: string, details: string, summary: string}
      */
-    private function writePrompt(Shot $shot, Collection $keyframes, int $duration, KeyframePainter $painter): array
+    private function writePrompt(Shot $shot, Collection $keyframes, KeyframePainter $painter): array
     {
         $writer = new VideoPromptWriter($shot);
         $model = Config::get('pipeline.models.text');
@@ -427,7 +381,7 @@ class GenerateVideo implements ShouldQueue
         $images = $keyframes->map(fn(Keyframe $keyframe) => $painter->referenceFor($keyframe->render()))->values()->all();
 
         /** @var StructuredAgentResponse $response */
-        $response = $writer->prompt($writer->promptFor($keyframes, $duration), attachments: $images, provider: 'openrouter', model: $model);
+        $response = $writer->prompt($writer->promptFor($keyframes), attachments: $images, provider: 'openrouter', model: $model);
 
         $shot->generations()->create([
             'director_id' => $shot->project->director_id,

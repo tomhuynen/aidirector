@@ -32,7 +32,7 @@ it('keeps the spatial fact apart in the plan and on the drawn keyframe', functio
     Queue::fake();
     Bus::fake();
     App\Ai\Agents\PlanDirector::fake([[
-        'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'shots' => [],
+        'reply' => 'The plan is written.', 'stage' => 'plan', 'cast' => [], 'new_elements' => [], 'adjust_elements' => [], 'direct' => '',
         'proposal' => ['title' => '', 'kind' => 'scene', 'storyline' => 'The plan.', 'seconds' => 4, 'setting_from' => null, 'keyframes' => [['title' => 'Waits', 'summary' => 'She holds an unlit cigarette.', 'place' => '', 'cast' => [], 'spatial' => 'Both feet are outside the shelter boundary.', 'elements' => []]]],
     ]]);
     $shot = Shot::factory()->for($this->project)->create(['status' => ShotStatus::STORYLINE_READY, 'storyline' => ['framing' => ['spot' => 'At the shelter.', 'seconds' => 5], 'keyframes' => []]]);

@@ -27,6 +27,8 @@ class PollCoverLoop implements ShouldQueue
 
     public int $timeout = 360;
 
+    public bool $failOnTimeout = true;
+
     private const RUNNING = ['pending', 'queued', 'in_progress', 'processing', 'running'];
 
     public function __construct(

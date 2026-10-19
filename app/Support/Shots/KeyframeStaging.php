@@ -131,6 +131,18 @@ final class KeyframeStaging
     }
 
     /**
+     * What the keyframe shows for a model that draws on an image with a box
+     * for everyone: the line and what each person does, without the spot,
+     * where they stand or any distance, which the image and the boxes decide.
+     */
+    public function withinBoxes(): string
+    {
+        $sentences = [$this->summary, ...array_map(fn(array $member) => self::sentence([...$member, 'stands' => '']), $this->cast)];
+
+        return implode(' ', array_map(fn(string $sentence) => preg_match('/[.!?]$/', $sentence) === 1 ? $sentence : "{$sentence}.", array_filter(array_map('trim', $sentences))));
+    }
+
+    /**
      * The fields as plain lines, for a prompt that writes them again.
      */
     public function outline(): string

@@ -17,7 +17,7 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 /**
- * Reads keyframe 1 after the image model drew it whole: where each of the
+ * Reads the start frame after the image model drew it whole: where each of the
  * cast stands, whether they stand where the description puts them, and
  * whether they look like their picture. What it finds wrong becomes a note
  * for the director; the boxes it reads are the layout the keyframes after
@@ -39,7 +39,7 @@ class KeyframeReader implements Agent, HasReasoningEffort, HasStructuredOutput
     public function instructions(): Stringable|string
     {
         return <<<'TEXT'
-            You check keyframe 1 of an animated e-learning film, the first attached image, against what it should show. The pictures of the cast follow it, in the order listed.
+            You check the start frame of a shot of an animated e-learning film, the first attached image, against what it should show. The pictures of the cast follow it, in the order listed.
 
             For each of the cast, give:
             - box: where they are in the image, as top, left, bottom and right on a 0 to 1000 grid of the frame, from the top left. The box holds the whole person or vehicle tightly; its bottom is where the feet or wheels touch the floor.
@@ -82,7 +82,7 @@ class KeyframeReader implements Agent, HasReasoningEffort, HasStructuredOutput
 
     public function promptFor(): string
     {
-        $lines = ['What keyframe 1 should show: ' . $this->keyframe->fullDescription(), '', 'The cast, with their pictures attached in this order after the keyframe:'];
+        $lines = ['What the start frame should show: ' . $this->keyframe->fullDescription(), '', 'The cast, with their pictures attached in this order after the keyframe:'];
 
         foreach ($this->cast as $element) {
             $lines[] = "- {$element->name} ({$element->type->value})";

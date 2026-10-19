@@ -76,6 +76,52 @@ class ReplicateClient
     }
 
     /**
+     * Starts one prediction of an official model without waiting for it, and returns its id.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    public function start(string $model, array $input): string
+    {
+        $id = $this->request()->post("models/{$model}/predictions", ['input' => $input])->throw()->json('id');
+
+        if (! is_string($id) || $id === '') {
+            throw new RuntimeException('Replicate did not start the prediction.');
+        }
+
+        return $id;
+    }
+
+    /**
+     * The state of a prediction: its status, its output once it succeeded and its error once it failed.
+     *
+     * @return array{status: string, output: mixed, error: string|null}
+     */
+    public function prediction(string $id): array
+    {
+        $prediction = $this->request()->get("predictions/{$id}")->throw()->json();
+
+        return [
+            'status' => (string) ($prediction['status'] ?? ''),
+            'output' => $prediction['output'] ?? null,
+            'error' => isset($prediction['error']) ? (string) $prediction['error'] : null,
+        ];
+    }
+
+    /**
+     * Uploads a file for a model's input, and returns the URL the input takes.
+     */
+    public function upload(string $bytes, string $name, string $mime): string
+    {
+        $url = $this->request()->attach('content', $bytes, $name, ['Content-Type' => $mime])->post('files')->throw()->json('urls.get');
+
+        if (! is_string($url) || $url === '') {
+            throw new RuntimeException('Replicate did not take the file.');
+        }
+
+        return $url;
+    }
+
+    /**
      * The bytes behind an output URL.
      */
     public function download(string $url): string

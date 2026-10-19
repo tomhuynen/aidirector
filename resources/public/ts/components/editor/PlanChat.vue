@@ -228,39 +228,14 @@
             {{ $t('Yes, go on') }}
           </Button>
 
-          <!-- The cast and sets it suggests: tick the ones to use. -->
-          <div v-if="turnOf(message)?.cast?.length" class="space-y-2">
-            <ul class="grid grid-cols-3 gap-2">
-              <li v-for="id in turnOf(message)?.cast ?? []" :key="id">
-                <label
-                  class="relative flex cursor-pointer flex-col gap-1 rounded-lg border border-border bg-card p-1.5 has-checked:border-signal has-checked:ring-2 has-checked:ring-signal/40 has-disabled:cursor-default"
-                >
-                  <input
-                    v-model="picked[message.id]"
-                    type="checkbox"
-                    class="sr-only"
-                    :value="id"
-                    :disabled="!isLast(message)"
-                  />
-                  <!-- While it is drawn, the old picture fades behind a loader; the new one replaces it when ready. -->
-                  <span class="relative block aspect-square w-full overflow-hidden rounded-md bg-muted">
-                    <img
-                      v-if="elementOf(id)?.imageUrl"
-                      :src="elementOf(id)?.imageUrl ?? undefined"
-                      :alt="elementOf(id)?.name"
-                      :class="cn('size-full object-cover transition-opacity', elementOf(id)?.rendering && 'opacity-30')"
-                    />
-                    <span v-if="elementOf(id)?.rendering" class="absolute inset-0 flex items-center justify-center">
-                      <LoaderCircle class="size-5 animate-spin text-signal" />
-                    </span>
-                  </span>
-                  <span class="truncate text-xs font-medium">
-                    {{ elementOf(id)?.name }}
-                    <span v-if="elementOf(id)?.rendering" class="text-muted-foreground"> · {{ $t('drawing') }}</span>
-                  </span>
-                </label>
-              </li>
-            </ul>
+          <!-- The cast and sets it suggests: tick the ones to use. A sequence offers them on its own card. -->
+          <div v-if="turnOf(message)?.cast?.length && !turnOf(message)?.sequence" class="space-y-2">
+            <CastTicks
+              v-model="picked[message.id]"
+              :ids="turnOf(message)?.cast ?? []"
+              :elements="elements"
+              :disabled="!isLast(message)"
+            />
             <Button
               v-if="isLast(message)"
               type="button"
@@ -315,6 +290,93 @@
                 turnOf(message)?.voiceOver?.state === 'accepted'
                   ? $t('Used as the voice-over')
                   : $t('Kept the voice-over as it was')
+              }}
+            </p>
+          </div>
+
+          <!-- The story directed into shots: each with its size, purpose and act; the shots are made once the director accepts. -->
+          <div v-if="turnOf(message)?.sequence" class="space-y-2">
+            <p class="text-sm text-muted-foreground">{{ turnOf(message)?.sequence?.change }}</p>
+            <ol class="space-y-2">
+              <li
+                v-for="(shot, s) in turnOf(message)?.sequence?.shots ?? []"
+                :key="s"
+                class="space-y-1 rounded-lg border border-border bg-card p-3"
+              >
+                <p class="flex items-baseline justify-between gap-3">
+                  <span class="font-medium">{{ s + 1 }}. {{ shot.title }}</span>
+                  <span class="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {{ kindLabel(shot.kind) }} · {{ $t(':count s', { count: String(shot.seconds) }) }}
+                  </span>
+                </p>
+                <p class="text-xs text-muted-foreground">{{ shot.purpose }}</p>
+                <p class="text-sm">{{ shot.action }}</p>
+              </li>
+            </ol>
+            <p
+              v-for="(line, c) in turnOf(message)?.sequence?.context ?? []"
+              :key="c"
+              class="text-xs text-muted-foreground"
+            >
+              {{ $t('The viewer must already know: :what', { what: line }) }}
+            </p>
+            <!-- The cast and sets of every shot: the shots use only those left ticked. -->
+            <template v-if="turnOf(message)?.cast?.length">
+              <p class="text-sm">
+                {{
+                  $t(
+                    'The cast and sets of these shots: untick what they should not use, and I direct them again without it.',
+                  )
+                }}
+              </p>
+              <CastTicks
+                v-model="picked[message.id]"
+                :ids="turnOf(message)?.cast ?? []"
+                :elements="elements"
+                :disabled="!!turnOf(message)?.sequence?.state"
+              />
+            </template>
+            <p v-if="!turnOf(message)?.sequence?.state && newElements?.length" class="text-xs text-muted-foreground">
+              {{ $t('Make or leave out what is missing first, below.') }}
+            </p>
+            <div v-if="!turnOf(message)?.sequence?.state" class="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                :disabled="answeringSequence || !sequenceUrl"
+                @click="answerSequence(turnIndex(message), false)"
+              >
+                <X class="size-3.5" />
+                {{ $t('Not like this') }}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                :disabled="answeringSequence || !sequenceUrl || !!newElements?.length || adding.processing"
+                @click="answerSequence(turnIndex(message), true)"
+              >
+                <LoaderCircle v-if="answeringSequence && unticked(message)" class="size-3.5 animate-spin" />
+                <RefreshCw v-else-if="unticked(message)" class="size-3.5" />
+                <Check v-else class="size-3.5" />
+                {{
+                  !unticked(message)
+                    ? $t('Make these shots')
+                    : answeringSequence
+                      ? $t('Directing again…')
+                      : $t('Direct again without the unticked')
+                }}
+              </Button>
+            </div>
+            <p v-else class="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <component
+                :is="turnOf(message)?.sequence?.state === 'accepted' ? Check : X"
+                class="size-3.5 text-signal"
+              />
+              {{
+                turnOf(message)?.sequence?.state === 'accepted'
+                  ? $t('The shots are made and drawn')
+                  : $t('Left as it was')
               }}
             </p>
           </div>
@@ -387,6 +449,7 @@ import { Button } from '@shared:ui/button'
 import { Check, ChevronRight, LoaderCircle, RefreshCw, TriangleAlert, Wand2, X } from 'lucide-vue-next'
 import { computed, reactive, ref, watch } from 'vue'
 
+import CastTicks from './CastTicks.vue'
 import FollowingDialog from './FollowingDialog.vue'
 import type { PanelIssueGroup } from './KeyframesPanel.vue'
 
@@ -423,6 +486,23 @@ export type PlanChatTurn = {
   places?: string[]
   /** A new voice-over, used once the director accepts it, or declined. */
   voiceOver?: { text: string; seconds?: number; state?: string }
+  /** The director's story directed into shots, made once the director accepts them, or declined. */
+  sequence?: {
+    title: string
+    change: string
+    facts: string[]
+    context: string[]
+    shots: {
+      title: string
+      kind: string
+      purpose: string
+      notice: string
+      action: string
+      seconds: number
+      cut: string
+    }[]
+    state?: string
+  }
 }
 
 export type StorylineOption = { title: string; kind: string; storyline: string; needs?: string }
@@ -451,6 +531,8 @@ const props = defineProps<{
   changeUrl?: string
   /** Uses or declines a suggested voice-over. */
   voiceOverUrl?: string
+  /** Makes the shots of a sequence the chat laid out, or leaves it. */
+  sequenceUrl?: string
   /** Per keyframe id, how many drawn keyframes come after it; they may be drawn again to follow a change. */
   following?: Record<string, number>
   /** What the check found in the selected keyframe, shown as the latest message. */
@@ -497,18 +579,23 @@ const addElements = () => {
     },
   })
 }
+/** Left out: the conversation goes on from there, unless a sequence waits to be accepted with the cast it has. */
 const leaveOut = () =>
   props.elementsUrl &&
   adding.delete(props.elementsUrl, {
     preserveScroll: true,
-    onSuccess: () => send($t('Leave those out.')),
+    onSuccess: () => {
+      const waiting = turns.value.at(-1)?.sequence && !turns.value.at(-1)?.sequence?.state
+
+      if (!waiting) void send($t('Leave those out.'))
+    },
   })
 
 /** The steps the shot is built up in; the plan director says which one it is at. */
 const steps = [
   { value: 'idea', label: $t('Idea') },
   { value: 'storyline', label: $t('Storyline') },
-  { value: 'keyframes', label: $t('Keyframes') },
+  { value: 'keyframes', label: $t('Frames') },
   { value: 'cast', label: $t('Cast') },
   { value: 'plan', label: $t('Plan') },
 ]
@@ -610,6 +697,40 @@ const answerVoiceOver = async (turn: number, accept: boolean) => {
       exception instanceof Error ? exception.message : $t('The voice-over could not be saved. Please try again.')
   } finally {
     answeringVoiceOver.value = false
+  }
+}
+
+const answeringSequence = ref(false)
+
+/** Whether the director unticked any of the cast and sets the sequence uses: it is then directed again. */
+const unticked = (message: ChatMessage) => {
+  const kept = picked[message.id] ?? []
+
+  return (turnOf(message)?.cast ?? []).some((id) => !kept.includes(id))
+}
+
+/** Makes the shots of the directed sequence and draws them, or leaves the plan as it is. */
+const answerSequence = async (turn: number, accept: boolean) => {
+  if (!props.sequenceUrl || answeringSequence.value) return
+
+  answeringSequence.value = true
+  error.value = null
+
+  try {
+    const { messages: saved, reload } = await postJson<{ messages: PlanChatTurn[]; reload: boolean }>(
+      props.sequenceUrl,
+      { turn, accept, cast: picked[`turn-${turn}`] ?? [] },
+    )
+    turns.value = saved
+
+    // Directed again: the ticks start from the cast and sets of the new sequence.
+    if (!saved[turn]?.sequence?.state) picked[`turn-${turn}`] = [...(saved[turn]?.cast ?? [])]
+
+    if (reload) router.reload({ only: ['shot', 'keyframes', 'siblings'] })
+  } catch (exception) {
+    error.value = exception instanceof Error ? exception.message : $t('The shots could not be made. Please try again.')
+  } finally {
+    answeringSequence.value = false
   }
 }
 

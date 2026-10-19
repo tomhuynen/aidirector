@@ -7,49 +7,43 @@ namespace App\Ai\Prompts;
 /**
  * The full prompt for the video model: the shot-specific parts written by the
  * {@see \App\Ai\Agents\VideoPromptWriter} wrapped in fixed instructions that
- * explain the keyframe references and forbid anything the keyframes do not show.
+ * explain the start frame and the end frame and forbid anything they do not show.
  */
 class VideoPrompt
 {
     /**
-     * Without a timeline the model paces the steps itself within the length;
-     * with one, from a director who timed the keyframes, each is reached when it says.
+     * With an end frame, the clip plays the act at the speed people really
+     * move and holds the end frame for the rest, so the shot can be cut
+     * where the act ends; without one it holds the start frame for the whole clip.
      *
      * @param  array{style: string, action: string, details: string}  $parts
-     * @param  list<array{position: int, title: string, seconds: float}>  $timeline
      */
-    public static function compose(array $parts, int $count, int $duration, array $timeline = []): string
+    public static function compose(array $parts, int $duration, bool $ends): string
     {
-        $timing = $timeline === []
-            ? "Pace it naturally within the {$duration} seconds: every step takes as long as it would in life, a glance short and a walk longer."
-            : 'Timing: ' . collect($timeline)
-                ->map(fn(array $frame) => sprintf('Keyframe %d (%s) at about %.1F s.', $frame['position'], $frame['title'], $frame['seconds']))
-                ->join(' ');
+        $timing = $ends
+            ? 'The act plays at the speed real people move at, never slowed down and never stretched to fill the clip: the end frame is reached as soon as the act is done, and from there everything holds still, exactly as in the end frame, until the clip ends.'
+            : 'The shot holds the start frame: nothing changes, only the small natural movement of people who stand still, and the very last frame of the video still matches the start frame.';
 
         return implode("\n\n", [
-            "Create one continuous, natural {$duration}-second animation following the supplied keyframes in chronological order.",
+            "Create one continuous, natural {$duration}-second animation of one shot, from the supplied start frame to the supplied end frame.",
 
-            "Most important requirement: the very first frame of the video must match keyframe 1 exactly, and the very last frame of the video must match keyframe {$count} exactly. Same pose, same position, same framing, same objects and object states, same expression and same gaze. The video starts on keyframe 1 as it is shown, not before it and not after it, and it ends on keyframe {$count} as it is shown and holds that pose until the last frame. Do not start or end on any other moment.",
-
-            "The {$count} reference images are the keyframes of this shot, supplied in chronological order: reference image 1 is keyframe 1 and reference image {$count} is keyframe {$count}. Each image is one moment of the same continuous shot, with the same framing; the video passes through them in this order. {$timing}",
+            "Most important requirement: the very first frame of the video must match the start frame exactly, and the very last frame of the video must match the end frame exactly. Same pose, same position, same framing, same objects and object states, same expression and same gaze. The video starts on the start frame as it is shown, not before it and not after it, and it ends on the end frame as it is shown. {$timing}",
 
             "Visual style: {$parts['style']}",
 
-            "Action sequence: {$parts['action']}",
+            "Action: {$parts['action']}",
 
-            'Follow every supplied keyframe in chronological order and use them as temporal visual anchors. Preserve the important pose, composition, object placement, gaze direction and action represented by each keyframe.',
+            'Generate the natural body motion that takes the people from the start frame to the end frame: hand and arm movement, head rotation, eye direction, facial expression, posture changes, balance and weight transfer, leg movement, and appropriate secondary motion. These connecting movements may be inferred where necessary, but they must only serve to get from the start frame to the end frame.',
 
-            'Generate the natural intermediate body motion needed to connect these keyframes smoothly: hand and arm movement, head rotation, eye direction, facial expression, posture changes, balance and weight transfer, leg movement, and appropriate secondary motion. These connecting movements may be inferred where necessary, but they must only serve to transition naturally from one supplied keyframe to the next.',
-
-            'Do not introduce new story events or visual elements. Do not add new objects, characters, signs, props, camera shots or actions that are not required by the keyframe sequence. Do not embellish the story. At the same time, do not freeze the character or mechanically morph between poses: create whatever subtle physical movement is necessary for a believable continuous performance.',
+            'Do not introduce new story events or visual elements. Do not add new objects, characters, signs, props, camera shots or actions that the two frames do not require. Do not embellish the story. At the same time, do not freeze the character or mechanically morph between the frames: create whatever subtle physical movement is necessary for a believable continuous performance.',
 
             'Let the people act, as animated characters do: facial expressions that fit the moment, such as concentration, surprise, relief or a friendly smile, eye contact between people, a nod, and small natural reactions to what happens. They bring the moment to life without adding a new action, object or story event.',
 
             $parts['details'],
 
-            'Keep the camera stationary and maintain the same framing whenever possible. No cuts, camera transitions, scene changes, morphing, duplicated body parts, disappearing objects, unexplained object movement or changes to the character\'s appearance. No text, captions, numbers or logos. No sound.',
+            'Keep the camera stationary and maintain the same framing. No cuts, camera transitions, scene changes, morphing, duplicated body parts, disappearing objects, unexplained object movement or changes to the character\'s appearance. No text, captions, numbers or logos. No sound.',
 
-            "Primary objective: faithfully animate the supplied storyboard rather than reinterpret it. Preserve what is shown in the keyframes; invent only the intermediate motion necessary to connect them naturally. Remember: the first frame is keyframe 1 exactly and the last frame is keyframe {$count} exactly.",
+            'Primary objective: faithfully animate the act between the two frames rather than reinterpret it. Preserve what the frames show; invent only the motion necessary to connect them naturally. Remember: the first frame is the start frame exactly and the last frame is the end frame exactly.',
         ]);
     }
 

@@ -49,9 +49,10 @@ it('keeps the image and who stays, moves who moves out of it and names every box
 
     expect($rows)->toBe([
         ['id' => 'frame', 'from' => 'ref_image_0', 'src_bbox' => [0, 0, 1000, 1000], 'tgt_bbox' => [0, 0, 1000, 1000], 'desc' => 'the image before this keyframe: the place and everything in it that does not change', 'kind' => 'anchor'],
-        // Moved out of the image before, from where he stood, so he keeps his look and light.
-        ['id' => 'security_guard', 'from' => 'ref_image_0', 'src_bbox' => [550, 122, 730, 267], 'tgt_bbox' => [595, 272, 802, 428], 'desc' => 'Security guard, side-on, facing the driver window on the right, holds out an open, empty hand', 'kind' => 'move'],
+        // What stays comes before what changes, so a change over part of it wins.
         ['id' => 'visitor_car', 'from' => 'ref_image_0', 'src_bbox' => [650, 330, 920, 800], 'tgt_bbox' => [650, 330, 920, 800], 'desc' => 'Visitor car, unchanged', 'kind' => 'anchor'],
+        // Moved out of the image before, from where he stood, so he keeps his look and light.
+        ['id' => 'security_guard', 'from' => 'ref_image_0', 'src_bbox' => [550, 122, 717, 267], 'tgt_bbox' => [595, 272, 787, 428], 'desc' => 'Security guard, side-on, facing the driver window on the right, holds out an open, empty hand', 'kind' => 'move'],
         // New in this keyframe: from his picture.
         ['id' => 'driver', 'from' => 'ref_image_2', 'src_bbox' => [0, 0, 1000, 1000], 'tgt_bbox' => [700, 500, 800, 560], 'desc' => 'Driver, facing the guard, hands the permit out of the window', 'kind' => 'move'],
         ['id' => 'barrier_arm', 'from' => null, 'src_bbox' => null, 'tgt_bbox' => [430, 220, 760, 300], 'desc' => 'the barrier arm, now open, pointing up', 'kind' => 'new'],
@@ -135,7 +136,7 @@ describe('drawing on the image before', function () {
         ]);
     });
 
-    it('stages the keyframe, sizes the cast by the depth of the place, draws it on the plate and keeps the layout for the next keyframe', function () {
+    it('stages the keyframe, sizes the cast by the depth of the place and keeps the layout for the next keyframe', function () {
         $siblings = $this->shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $this->shot);
 
         app(KeyframePainter::class)->render($siblings->firstWhere('position', 2), $siblings);
@@ -144,19 +145,15 @@ describe('drawing on the image before', function () {
         $guard = KeyframeLayout::fromArray($second->layout)->member('Security guard');
 
         expect($second->render())->not->toBeNull()
-            ->and($second->render()->getCustomProperty(Keyframe::SENT)['images'])->toBe(['The place without people, from this camera, the image that is kept', 'The keyframe before, where the people and changed things come from', 'The picture of Security guard'])
-            // Keyframe 1 has nobody in it, so it is the plate itself.
-            ->and($this->shot->fresh()->getFirstMedia(App\Models\Shot::PLATE)->getCustomProperty(App\Models\Shot::PLATE_FROM))->toBe($this->first->fresh()->render()->id)
+            ->and($second->render()->getCustomProperty(Keyframe::SENT)['images'])->toBe(['The start frame, the image that is kept', 'The picture of Security guard'])
             // 156 high and 111 wide at 4 m; at 2 m twice that, with the feet where the stager put them.
             ->and($guard['box'])->toBe([588, 239, 900, 461])
-            ->and($second->prompt)->toContain('"id":"security_guard","from":"ref_image_1","src_bbox":[550,122,730,267]')->toContain('<security_guard> looks exactly like <ref_image_2>');
+            ->and($second->prompt)->toContain('"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,717,267]')->toContain('<security_guard> looks exactly like <ref_image_1>');
         Http::assertSentCount(2);
         Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
-            && count($request['input']['images']) === 3
-            && str_contains($request['input']['prompt'], '<ref_image_0> is the place of this shot without people')
-            && ! str_contains($request['input']['prompt'], '_behind')
+            && count($request['input']['images']) === 2
             && str_starts_with($request['input']['images'][0], 'data:image/png;base64,')
-            && str_contains($request['input']['prompt'], '"tgt_bbox":[579,206,937,494]'));
+            && str_contains($request['input']['prompt'], '"tgt_bbox":[579,206,912,494]'));
         KeyframeStager::assertPrompted(fn($prompt) => str_contains($prompt->prompt, '- Security guard (person): in the image at [555, 139, 711, 250]')
             && $prompt->attachments->count() === 1);
     });
@@ -174,43 +171,7 @@ describe('drawing on the image before', function () {
         expect($repaired->fresh()->getCustomProperty(Keyframe::CHECK_ISSUES))->toBe(['The guard\'s wrist bends the wrong way.']);
     });
 
-    it('throws a plate away whose background moved from keyframe 1, tries once more and goes on without one', function () {
-        $this->first->elements()->attach($this->guard->id);
-        $drift = Mockery::mock(App\Support\Images\BackgroundDrift::class);
-        $drift->shouldReceive('measure')->twice()->andReturn(['stillness' => 0.01, 'aligned' => 0.03, 'moved' => true]);
-        app()->instance(App\Support\Images\BackgroundDrift::class, $drift);
-
-        expect(app(App\Ai\LayoutPainter::class)->plate($this->second->fresh()))->toBeNull()
-            ->and($this->shot->fresh()->getMedia(App\Models\Shot::PLATE))->toBeEmpty();
-        Http::assertSentCount(4);
-    });
-
-    it('makes the plate once from keyframe 1 with its people taken out, keeps it, and makes it again when keyframe 1 changes', function () {
-        $gate = Element::factory()->for($this->project)->create(['name' => 'Entrance gate', 'type' => ElementType::PLACE]);
-        $gate->addMediaFromString(layoutPng())->usingFileName('gate.png')->toMediaCollection(Element::REFERENCE);
-        $this->first->elements()->attach([$this->guard->id, $gate->id]);
-        $painter = app(App\Ai\LayoutPainter::class);
-        $plates = fn() => collect(Http::recorded())->map(fn(array $pair) => $pair[0])->filter(fn(Request $request) => str_ends_with($request->url(), 'predictions') && str_contains($request['input']['prompt'], 'Take every person out'));
-
-        $painter->plate($this->second->fresh());
-        $painter->plate($this->second->fresh());
-
-        $plate = $this->shot->fresh()->getFirstMedia(App\Models\Shot::PLATE);
-        expect($plates())->toHaveCount(1)
-            ->and($plates()->first()['input']['images'])->toHaveCount(1)
-            ->and($plates()->first()['input']['prompt'])->toContain('"id":"security_guard","from":"ref_image_0","src_bbox":[550,122,730,267],"tgt_bbox":null')
-            ->not->toContain('ref_image_1')
-            ->and($plate->getCustomProperty(App\Models\Shot::PLATE_FROM))->toBe($this->first->fresh()->render()->id);
-
-        $this->first->addMediaFromString(layoutPng())->usingFileName('first-again.png')->toMediaCollection(Keyframe::RENDERS);
-        $this->first->forceFill(['render_id' => $this->first->fresh()->renders()->last()->id])->save();
-        $painter->plate($this->second->fresh());
-
-        expect($plates())->toHaveCount(2)
-            ->and($this->shot->fresh()->getMedia(App\Models\Shot::PLATE))->toHaveCount(1);
-    });
-
-    it('takes out who left since the keyframe before when there is no plate', function () {
+    it('takes out who left since the start frame', function () {
         $before = new KeyframeLayout([
             ['name' => 'Security guard', 'box' => [555, 139, 711, 250], 'facing' => 'right', 'pose' => 'arms down', 'changed' => true],
             ['name' => 'Visitor', 'box' => [500, 600, 800, 700], 'facing' => 'left', 'pose' => 'waits', 'changed' => true],
@@ -220,51 +181,64 @@ describe('drawing on the image before', function () {
 
         expect(KeyframeLayoutBrief::for($keyframe, $stays, $before, []))
             ->toContain('<visitor> leaves the frame and is no longer in this keyframe.')
-            ->toContain('"id":"visitor","from":"ref_image_0","src_bbox":[491,585,836,715],"tgt_bbox":null,"desc":"Visitor, removed","kind":"move"');
+            ->toContain('"id":"visitor","from":"ref_image_0","src_bbox":[491,585,812,715],"tgt_bbox":null,"desc":"Visitor, removed"');
     });
 
-    it('draws a later keyframe on the plate, with the cast and what changed earlier moved out of the keyframe before', function () {
+    it('keeps whoever does not change at the box of the start frame, and keeps an option\'s layout on the option', function () {
+        KeyframeStager::fake([[
+            'cast' => [['name' => 'Security guard', 'box' => ['top' => 560, 'left' => 150, 'bottom' => 730, 'right' => 260], 'facing' => 'facing the camera', 'pose' => 'arms down', 'changed' => false]],
+            'changes' => [],
+        ]]);
+        $siblings = $this->shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $this->shot);
+
+        $option = app(KeyframePainter::class)->render($siblings->firstWhere('position', 2), $siblings, choose: false);
+
+        // The stager guessed a slightly other box for him; he stays where keyframe 1 has him.
+        expect(KeyframeLayout::fromArray($option->getCustomProperty(Keyframe::LAYOUT))->member('Security guard')['box'])->toBe([555, 139, 711, 250])
+            ->and($this->second->fresh()->layout)->toBeNull();
+        Http::assertSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions')
+            && str_contains($request['input']['prompt'], '"id":"security_guard","from":"ref_image_0","src_bbox":[555,139,711,250],"tgt_bbox":[555,139,711,250]'));
+    });
+
+    it('sends the rows as the bare array the layout model reads, without what kind of row each is', function () {
+        $layout = new KeyframeLayout([['name' => 'Security guard', 'box' => [555, 139, 711, 250], 'facing' => 'right', 'pose' => 'waves', 'changed' => false]]);
+        $keyframe = Keyframe::factory()->make(['position' => 2, 'description' => 'The guard waves.']);
+
+        expect(KeyframeLayoutBrief::for($keyframe, $layout, $layout, []))
+            ->toContain('[{"id":"frame","from":"ref_image_0","src_bbox":[0,0,1000,1000],"tgt_bbox":[0,0,1000,1000],"desc":"the image before this keyframe: the place and everything in it that does not change"}')
+            ->not->toContain('"rows"')
+            ->not->toContain('"kind"');
+    });
+
+    it('tells the layout model only what happens, and leaves where things are to the boxes', function () {
+        $keyframe = Keyframe::factory()->make(['position' => 2, 'spatial' => 'She keeps about half a metre of floor between her shoes and it.']);
+        $keyframe->restage(new App\Support\Shots\KeyframeStaging('The visitor stops beside the bag.', 'The backpack sits near the centre-right of the path.', [
+            ['name' => 'Helmeted visitor', 'stands' => 'centre', 'faces' => 'right', 'looks_at' => 'the backpack', 'holds' => '', 'hand' => '', 'doing' => 'stands still'],
+        ]));
+        $layout = new KeyframeLayout([['name' => 'Helmeted visitor', 'box' => [230, 300, 720, 600], 'facing' => 'side-on, facing right', 'pose' => 'stands still', 'changed' => true]]);
+
+        expect(KeyframeLayoutBrief::for($keyframe, $layout, $layout, []))
+            ->toContain('What this keyframe shows: The visitor stops beside the bag. The Helmeted visitor is side-on facing right, looks at the backpack and stands still.')
+            ->not->toContain('centre-right of the path')
+            ->not->toContain('stands in the centre')
+            ->not->toContain('half a metre');
+    });
+
+    it('keeps the padded box of who moves clear of what stays, so it is never kept and drawn again at once', function () {
         $before = new KeyframeLayout([
-            ['name' => 'Security guard', 'box' => [555, 139, 711, 250], 'facing' => 'right', 'pose' => 'arms down', 'changed' => true],
-            ['name' => 'Visitor', 'box' => [500, 600, 800, 700], 'facing' => 'left', 'pose' => 'waits', 'changed' => true],
-            ['name' => 'Black backpack', 'box' => [700, 750, 800, 850], 'facing' => 'front', 'pose' => 'on the floor', 'changed' => false],
-            ['name' => 'Permit', 'box' => [600, 300, 650, 340], 'facing' => 'front', 'pose' => 'on the desk', 'changed' => false],
+            ['name' => 'Helmeted visitor', 'box' => [243, 381, 757, 693], 'facing' => 'right', 'pose' => 'reaches', 'changed' => true],
+            ['name' => 'Black backpack', 'box' => [610, 712, 772, 938], 'facing' => 'front', 'pose' => 'on the floor', 'changed' => false],
         ]);
         $layout = new KeyframeLayout([
-            ['name' => 'Security guard', 'box' => [555, 139, 711, 250], 'facing' => 'right', 'pose' => 'arms down', 'changed' => false],
-            ['name' => 'Visitor', 'box' => [520, 400, 820, 500], 'facing' => 'right', 'pose' => 'walks to the gate', 'changed' => true],
-            ['name' => 'Black backpack', 'box' => [700, 750, 800, 850], 'facing' => 'front', 'pose' => 'on the floor', 'changed' => false],
-            ['name' => 'Driver', 'box' => [500, 800, 700, 900], 'facing' => 'left', 'pose' => 'steps out', 'changed' => true],
-        ], [['thing' => 'gate', 'state' => 'open', 'box' => [300, 400, 600, 600]]]);
-        $onPlate = ['Black backpack' => [700, 750, 800, 850], 'Permit' => [600, 300, 650, 340]];
-        $carried = [['thing' => 'barrier arm', 'state' => 'open, pointing up', 'box' => [430, 220, 760, 300]]];
-        $keyframe = Keyframe::factory()->make(['position' => 3, 'description' => 'The visitor walks to the gate.']);
+            ['name' => 'Black backpack', 'box' => [610, 712, 772, 938], 'facing' => 'front', 'pose' => 'on the floor', 'changed' => false],
+            ['name' => 'Helmeted visitor', 'box' => [236, 352, 784, 684], 'facing' => 'right', 'pose' => 'pulls her hands back', 'changed' => true],
+        ]);
 
-        $rows = KeyframeLayoutBrief::plateRows($layout, $before, $onPlate, $carried, ['Driver' => 2]);
-        $prompt = KeyframeLayoutBrief::onPlate($keyframe, $layout, $before, $onPlate, $carried, ['Driver' => 2]);
+        $visitor = collect(KeyframeLayoutBrief::rows($layout, $before, []))->firstWhere('id', 'helmeted_visitor');
 
-        expect($rows)->toBe([
-            ['id' => 'frame', 'from' => 'ref_image_0', 'src_bbox' => [0, 0, 1000, 1000], 'tgt_bbox' => [0, 0, 1000, 1000], 'desc' => 'the place without people: everything that does not change', 'kind' => 'anchor'],
-            // The permit was picked up: it is taken out of the place.
-            ['id' => 'permit_plate', 'from' => 'ref_image_0', 'src_bbox' => [599, 294, 656, 346], 'tgt_bbox' => null, 'desc' => 'Permit, taken out of the place', 'kind' => 'move'],
-            // An earlier keyframe opened the barrier; the plate still shows it closed.
-            ['id' => 'barrier_arm', 'from' => 'ref_image_1', 'src_bbox' => [430, 220, 760, 300], 'tgt_bbox' => [430, 220, 760, 300], 'desc' => 'the barrier arm, still open, pointing up', 'kind' => 'move'],
-            // From back to front: who stands lower in the frame is nearer and drawn last.
-            ['id' => 'driver', 'from' => 'ref_image_2', 'src_bbox' => [0, 0, 1000, 1000], 'tgt_bbox' => [500, 800, 700, 900], 'desc' => 'Driver, left, steps out', 'kind' => 'move'],
-            ['id' => 'security_guard', 'from' => 'ref_image_1', 'src_bbox' => [550, 122, 730, 267], 'tgt_bbox' => [550, 122, 730, 267], 'desc' => 'Security guard, unchanged', 'kind' => 'move'],
-            ['id' => 'black_backpack', 'from' => 'ref_image_0', 'src_bbox' => [700, 750, 800, 850], 'tgt_bbox' => [700, 750, 800, 850], 'desc' => 'Black backpack, unchanged', 'kind' => 'anchor'],
-            ['id' => 'visitor', 'from' => 'ref_image_1', 'src_bbox' => [491, 585, 836, 715], 'tgt_bbox' => [511, 385, 856, 515], 'desc' => 'Visitor, right, walks to the gate', 'kind' => 'move'],
-            ['id' => 'gate', 'from' => null, 'src_bbox' => null, 'tgt_bbox' => [300, 400, 600, 600], 'desc' => 'the gate, now open', 'kind' => 'new'],
-        ])
-            ->and($prompt)->toContain('<ref_image_0> is the place of this shot without people')
-            ->toContain('<security_guard> stays where they stand, exactly as in <ref_image_1>.')
-            ->toContain('<black_backpack> stays exactly as it is.')
-            ->toContain('<permit> is no longer there.')
-            ->toContain('The barrier arm stays open, pointing up, exactly as in <ref_image_1>.')
-            ->toContain('The gate is now open.')
-            ->toContain('<driver> looks exactly like <ref_image_2>.')
-            ->toContain('The feet of <visitor> touch the floor at 820 of the frame height, on the 0 to 1000 grid')
-            ->not->toContain('_behind');
+        // Padded, both boxes would reach into the backpack's box at 712; they stop where it starts.
+        expect($visitor['src_bbox'])->toBe([228, 334, 778, 712])
+            ->and($visitor['tgt_bbox'])->toBe([220, 302, 806, 712]);
     });
 
     it('says who is in front where boxes overlap, by who stands lower in the frame', function () {
@@ -275,29 +249,28 @@ describe('drawing on the image before', function () {
         ]);
         $keyframe = Keyframe::factory()->make(['position' => 5, 'description' => 'She walks past the backpack.']);
 
-        expect(KeyframeLayoutBrief::onPlate($keyframe, $layout, $layout, ['Black backpack' => [609, 542, 786, 804]], [], []))
+        expect(KeyframeLayoutBrief::for($keyframe, $layout, $layout, []))
             ->toContain('<black_backpack> is in front of <helmeted_visitor>, nearer to the camera: <helmeted_visitor> stays in its spot and is partly hidden behind <black_backpack>.')
-            ->not->toContain('<security_guard> is in front')
-            ->and(KeyframeLayoutBrief::for($keyframe, $layout, $layout, []))->toContain('<black_backpack> is in front of <helmeted_visitor>');
+            ->not->toContain('<security_guard> is in front');
     });
 
-    it('lets the layout model pick the ratio and search first, unless the shot ratio and no grounding are set', function () {
+    it('draws at the shot\'s aspect ratio and lets the layout model search first unless grounding is off', function () {
         $siblings = $this->shot->keyframes()->with(['media', 'elements.media'])->get()->each->setRelation('shot', $this->shot);
         $sent = fn() => collect(Http::recorded())->map(fn(array $pair) => $pair[0])->filter(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions'))->last()['input'];
 
         app(KeyframePainter::class)->render($siblings->firstWhere('position', 2), $siblings);
 
-        expect($sent()['aspect_ratio'])->toBe('auto')
+        expect($sent()['aspect_ratio'])->toBe($this->shot->aspectRatio()->value)
             ->and($sent())->not->toHaveKey('grounding');
 
-        Config::set(['pipeline.keyframes.layout.fixed_ratio' => true, 'pipeline.keyframes.layout.grounding' => false]);
+        Config::set('pipeline.keyframes.layout.grounding', false);
         app(KeyframePainter::class)->render($siblings->firstWhere('position', 2), $siblings);
 
         expect($sent()['aspect_ratio'])->toBe($this->shot->aspectRatio()->value)
             ->and($sent()['grounding'])->toBeFalse();
     });
 
-    it('draws keyframe 1 whole from the place\'s picture, notes who stands wrong without redrawing and keeps where everyone stands', function () {
+    it('draws the start frame from the place picture with its own camera, and keeps where everyone stands', function () {
         Config::set('pipeline.models.keyframe', 'chat/image-model');
         Laravel\Ai\Image::fake(fn() => base64_encode(layoutPng()));
         $this->first->clearMediaCollection(Keyframe::RENDERS);
@@ -315,11 +288,15 @@ describe('drawing on the image before', function () {
         $first = $this->first->fresh();
 
         expect($first->renders())->toHaveCount(1)
+            ->and($first->render()->id)->toBe($first->renders()->first()->id)
             ->and($first->render()->getCustomProperty(Keyframe::CHECK_ISSUES))->toBe(['He stands behind the booth.'])
-            ->and(KeyframeLayout::fromArray($first->layout)->member('Security guard')['box'])->toBe([300, 600, 450, 680]);
+            ->and(KeyframeLayout::fromArray($first->layout)->member('Security guard')['box'])->toBe([300, 600, 450, 680])
+            ->and($first->render()->getCustomProperty(Keyframe::SENT)['images'])->toBe(['The place', 'Picture of Security guard']);
         Laravel\Ai\Image::assertGenerated(fn($prompt) => $prompt->contains('attached image is the place of this shot. Draw this same place')
             && $prompt->contains('Choose the camera and the framing for the action')
+            && $prompt->contains('The second attached image is the reference for Security guard (person)')
             && $prompt->attachments->count() === 2);
+        Laravel\Ai\Image::assertGenerated(fn($prompt) => $prompt->attachments->count() === 2);
         Http::assertNotSent(fn(Request $request) => str_ends_with($request->url(), 'flux-3-image/predictions'));
         KeyframeStager::assertNeverPrompted();
     });
@@ -373,4 +350,43 @@ describe('drawing on the image before', function () {
         Http::assertNothingSent();
         KeyframeStager::assertNeverPrompted();
     });
+});
+
+it('keeps someone cut off by the frame edge at the same crop, and reads a box that barely changed as staying', function () {
+    $before = new KeyframeLayout([['name' => 'Helmeted visitor', 'box' => [0, 0, 904, 755], 'facing' => 'right', 'pose' => 'reaches for the handle', 'changed' => true]]);
+    $layout = new KeyframeLayout([['name' => 'Helmeted visitor', 'box' => [2, 0, 904, 717], 'facing' => 'right', 'pose' => 'pulls her hand back', 'changed' => true]]);
+    $keyframe = Keyframe::factory()->make(['position' => 2, 'description' => 'Her hand withdraws.']);
+
+    expect(KeyframeLayoutBrief::for($keyframe, $layout, $before, []))
+        ->toContain('<helmeted_visitor> stays where they stand, right; pulls her hand back.')
+        ->toContain('<helmeted_visitor> is cut off by the edge of the frame, as in <ref_image_0>: only the part of them inside the frame shows, at the same size. What is outside the frame there, such as their head, stays outside it.')
+        ->not->toContain('Where <helmeted_visitor> stood before');
+});
+
+it('leaves out the feet of someone cut off at the bottom of the frame', function () {
+    $layout = new KeyframeLayout([['name' => 'Helmeted visitor', 'box' => [300, 200, 1000, 600], 'facing' => 'right', 'pose' => 'holds the badge', 'changed' => true]]);
+    $keyframe = Keyframe::factory()->make(['position' => 2, 'description' => 'She holds the badge.']);
+
+    expect(KeyframeLayoutBrief::for($keyframe, $layout, $layout, []))
+        ->not->toContain('The feet of <helmeted_visitor>')
+        ->not->toContain('is cut off by the edge');
+});
+
+it('has the plan and the staging say where a hand is at the instant, never only which way it moves', function () {
+    $shot = Shot::factory()->create();
+    $keyframe = Keyframe::factory()->make(['position' => 2, 'description' => 'Her hand withdraws.']);
+    $visitor = Element::factory()->make(['name' => 'Helmeted visitor', 'type' => ElementType::PERSON]);
+
+    expect((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain(App\Ai\Briefs\HandRules::AT_THE_INSTANT)
+        ->and((string) (new KeyframeStager($keyframe, [$visitor], new KeyframeLayout()))->instructions())->toContain(App\Ai\Briefs\HandRules::AT_THE_INSTANT);
+});
+
+it('has the plan, the staging and the check keep the frames as far apart as a walk between them covers', function () {
+    $shot = Shot::factory()->create();
+    $keyframe = Keyframe::factory()->for($shot)->create(['position' => 2, 'description' => 'She stops beside the bag.']);
+    $visitor = Element::factory()->make(['name' => 'Helmeted visitor', 'type' => ElementType::PERSON]);
+
+    expect((string) (new App\Ai\Agents\StorylineWriter($shot))->instructions())->toContain(App\Ai\Briefs\BodyRules::WALK_DISTANCE)
+        ->and((string) (new KeyframeStager($keyframe, [$visitor], new KeyframeLayout()))->instructions())->toContain(App\Ai\Briefs\BodyRules::WALK_DISTANCE)
+        ->and((string) (new App\Ai\Agents\KeyframeChecker($keyframe, ['the start frame', 'the keyframe to check']))->instructions())->toContain(App\Ai\Briefs\BodyRules::WALK_DISTANCE);
 });

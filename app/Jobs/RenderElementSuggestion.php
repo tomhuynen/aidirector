@@ -25,6 +25,8 @@ class RenderElementSuggestion implements ShouldQueue
 
     public int $timeout = 300;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public readonly ElementSuggestion $suggestion,
     ) {

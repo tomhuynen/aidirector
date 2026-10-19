@@ -9,6 +9,7 @@ use App\Enums\ElementSuggestionStatus;
 use App\Enums\ElementType;
 use App\Http\Requests\Public\ElementPickRequest;
 use App\Jobs\JudgeElementVoice;
+use App\Jobs\ReadPlaceLayout;
 use App\Models\Element;
 use App\Models\ElementRound;
 use App\Models\ElementSuggestion;
@@ -54,10 +55,14 @@ class PickController
                 $render = $suggestion->render();
 
                 if ($render !== null) {
-                    $element->addMediaFromDisk($render->getPathRelativeToRoot(), $render->disk)
+                    $picture = $element->addMediaFromDisk($render->getPathRelativeToRoot(), $render->disk)
                         ->preservingOriginal()
                         ->usingFileName('element-' . $element->sqid . '.' . pathinfo($render->file_name, PATHINFO_EXTENSION))
                         ->toMediaCollection(Element::REFERENCE);
+
+                    if ($element->type === ElementType::PLACE) {
+                        ReadPlaceLayout::dispatch($picture)->afterCommit();
+                    }
                 }
 
                 $suggestion->forceFill(['picked_at' => now()])->save();
