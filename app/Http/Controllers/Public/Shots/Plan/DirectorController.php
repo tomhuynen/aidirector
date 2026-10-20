@@ -11,6 +11,7 @@ use App\Enums\KeyframeStatus;
 use App\Enums\ShotKind;
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\PlanDirectorRequest;
+use App\Jobs\DirectSequence;
 use App\Jobs\GenerateStoryline;
 use App\Jobs\GenerateVoiceOver;
 use App\Jobs\TweakKeyframeImage;
@@ -22,7 +23,6 @@ use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Shots\KeyframeLayout;
 use App\Support\Shots\KeyframeStaging;
-use App\Support\Shots\SequenceDirecting;
 use App\Support\Shots\ShotPlan;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -121,31 +121,28 @@ class DirectorController
 
         $addedShot = $this->addShot($project, $shot, $data['add_shot'] ?? null);
         $reply = $addedShot === null ? $reply : trim("{$reply} {$addedShot}");
-        [$sequence, $undirected, $missing] = $plan === null && $addedShot === null ? SequenceDirecting::direct($project, $shot, (string) ($data['direct'] ?? '')) : [null, null, []];
-        $reply = $undirected === null ? $reply : trim("{$reply} {$undirected}");
-
-        // What the sequence needs that the cast and sets do not have is offered to make, like the cast step does.
-        if ($missing !== []) {
-            $new = GenerateStoryline::newElementsFrom($shot, [...$new, ...$missing]);
-            $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'new_elements' => $new]);
-        }
-        // A sequence offers the cast and sets of all its frames to tick, as one set for every shot.
-        $cast = $sequence === null ? $cast : $sqids($sequence->elementNames());
+        // A story with more than one beat is laid out into shots in the background; the sequence then offers its cast and sets to tick.
+        $story = $plan === null && $addedShot === null ? trim((string) ($data['direct'] ?? '')) : '';
+        $cast = $story === '' ? $cast : [];
         $voiceOver = $this->voiceOver($shot, $data['voice_over'] ?? null);
         $storylines = $this->storylines($data['storylines'] ?? null);
         $pickPlace = (bool) ($data['pick_place'] ?? false);
         // The places to choose from, such as every corridor; without names, every place.
         $places = $pickPlace ? array_values(array_intersect($sqids((array) ($data['places'] ?? [])), $elements->filter(fn(Element $element) => $element->type === ElementType::PLACE)->pluck('sqid')->all())) : [];
         // A message with buttons of its own is answered with those, never with a plain yes.
-        $confirm = (bool) ($data['confirm'] ?? false) && $voiceOver === null && $proposed === null && $storylines === [] && ! $pickPlace && $cast === [] && $sequence === null;
+        $confirm = (bool) ($data['confirm'] ?? false) && $voiceOver === null && $proposed === null && $storylines === [] && ! $pickPlace && $cast === [] && $story === '';
 
         // Added to the conversation as stored now: what changed in it while the director waited, such as cast made meanwhile, stays.
         $shot->updateStoredJson('plan_chat', fn(?array $stored) => [
             ...array_values((array) $stored),
             array_filter(['role' => 'director', 'text' => $message, 'made' => $made, 'about' => $selected]),
-            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'proposed' => $proposed, 'storylines' => $storylines, 'confirm' => $confirm, 'pickPlace' => $pickPlace, 'places' => $places, 'voiceOver' => $voiceOver, 'sequence' => $sequence?->toArray(), 'story' => $sequence === null ? null : trim((string) $data['direct'])]),
+            array_filter(['role' => 'assistant', 'text' => $changes['waiting'] === null ? $reply : "{$reply} {$changes['waiting']}", 'stage' => $stage, 'cast' => $cast, 'adjusted' => $adjusted, 'proposal' => $plan, 'changes' => $changes['made'], 'proposed' => $proposed, 'storylines' => $storylines, 'confirm' => $confirm, 'pickPlace' => $pickPlace, 'places' => $places, 'voiceOver' => $voiceOver, 'story' => $story ?: null, 'directing' => $story !== '']),
         ]);
-        $turns = $shot->plan_chat;
+        if ($story !== '') {
+            DirectSequence::dispatch($shot, count($shot->plan_chat) - 1);
+        }
+
+        $turns = $shot->fresh()->plan_chat;
 
         $removed = $this->removeShots($project, $shot, $data['remove_shots'] ?? null);
 
@@ -154,7 +151,7 @@ class DirectorController
             $shot->drawKeyframes();
         }
 
-        return response()->json(['messages' => $turns, 'reload' => $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $addedShot !== null || $removed !== [] || $offered]);
+        return response()->json(['messages' => $turns, 'reload' => $plan !== null || $changes['made'] !== [] || $new !== [] || $adjusted !== [] || $addedShot !== null || $removed !== [] || $offered || $story !== '']);
     }
 
     /**

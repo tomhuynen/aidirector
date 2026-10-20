@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Ai\Briefs\BodyRules;
 use App\Models\Shot;
 use App\Support\Video\ClipSplicer;
 use App\Support\Video\LumaVideoClient;
@@ -104,7 +105,7 @@ class RepairSequenceShot implements ShouldQueue
 
     private function prompt(): string
     {
-        $act = trim((string) ($this->part->idea ?: ($this->part->chosen_storyline['storyline'] ?? $this->part->title)));
+        $act = BodyRules::withoutTempo(trim((string) ($this->part->idea ?: ($this->part->chosen_storyline['storyline'] ?? $this->part->title))));
 
         return implode("\n\n", array_filter([
             'One continuous shot with a fixed camera, from the supplied start frame to the supplied end frame. Keep exactly the look of the frames: the same render style, people, objects, place and light. Nothing is added and the style does not change.',

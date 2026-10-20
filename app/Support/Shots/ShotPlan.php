@@ -11,8 +11,9 @@ use Illuminate\Support\Str;
 
 /**
  * Puts the plan agreed in the plan chat into the shot: the title, the kind,
- * the storyline, the keyframes with the cast and sets they show, the length
- * and where the setting comes from. A scene or close-up keeps its start frame
+ * the storyline, the keyframes with the cast and sets they show, the length,
+ * what the frame is centred on and where the setting comes from. A plan
+ * without a subject keeps the one the shot has while its kind stays. A scene or close-up keeps its start frame
  * and its end frame, whatever lies between them in the proposal. A plan that
  * changes what happens, or how long it takes, has its voice-over written again.
  */
@@ -51,6 +52,11 @@ class ShotPlan
             $keyframes[0] = $shot->storylineKeyframes()[0];
         }
 
+        $subject = match (true) {
+            in_array($proposal['subject'] ?? null, ShotKind::SUBJECTS, true) => $kind->subject($proposal['subject']),
+            $kind === $shot->kindOrScene() => $shot->storylineFraming()['subject'] ?? null,
+            default => null,
+        };
         $storyline = trim((string) ($proposal['storyline'] ?? ''));
         $title = trim((string) ($proposal['title'] ?? ''));
         $seconds = Shot::clampSeconds((int) ($proposal['seconds'] ?? $shot->durationInSeconds()));
@@ -69,7 +75,7 @@ class ShotPlan
             'chosen_storyline' => ['storyline' => $storyline],
             'storyline' => [
                 ...array_diff_key($shot->storyline ?? [], ['setting_from' => true, 'keyframes' => true, 'framing' => true]),
-                'framing' => ['spot' => (string) ($shot->storyline['framing']['spot'] ?? ''), 'seconds' => $seconds],
+                'framing' => ['spot' => (string) ($shot->storyline['framing']['spot'] ?? ''), 'seconds' => $seconds, 'subject' => $subject],
                 ...($source !== null ? ['setting_from' => ['shot_id' => $source->id, 'keyframe' => $keyframe]] : []),
                 'keyframes' => $keyframes,
             ],

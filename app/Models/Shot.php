@@ -702,10 +702,11 @@ class Shot extends Model implements HasMedia
     }
 
     /**
-     * Where in the place the shot plays and how long it lasts. The camera
-     * follows the kind of shot and the light is always the visual style's.
+     * Where in the place the shot plays, how long it lasts and what the frame
+     * is centred on, one of {@see ShotKind::SUBJECTS}. The camera follows
+     * the kind of shot and the light is always the visual style's.
      *
-     * @return array{spot: string, seconds: int|null}|null
+     * @return array{spot: string, seconds: int|null, subject: string|null}|null
      */
     public function storylineFraming(): ?array
     {
@@ -718,7 +719,27 @@ class Shot extends Model implements HasMedia
         return [
             'spot' => (string) ($framing['spot'] ?? ''),
             'seconds' => is_numeric($framing['seconds'] ?? null) ? self::clampSeconds((int) $framing['seconds']) : null,
+            'subject' => is_string($framing['subject'] ?? null) ? $framing['subject'] : null,
         ];
+    }
+
+    /**
+     * Whether the shot is a close-up of a face, for a reaction, rather than of hands and an object.
+     */
+    public function showsFace(): bool
+    {
+        return $this->kindOrScene() === ShotKind::CLOSE_UP && ($this->storylineFraming()['subject'] ?? null) === 'face';
+    }
+
+    /**
+     * The shots of the project before this one, one line each with their code, kind and what happens in them, for the directors.
+     */
+    public function earlierShotsBrief(): string
+    {
+        return self::query()->where('project_id', $this->project_id)->whereNull('merged_into_id')
+            ->where('position', '<', $this->position)->orderBy('position')->get()
+            ->map(fn(self $shot) => "- {$shot->code()}, {$shot->kindOrScene()->value}: " . (trim((string) ($shot->chosen_storyline['storyline'] ?? '')) ?: trim((string) $shot->idea) ?: trim((string) $shot->title) ?: '(not planned yet)'))
+            ->join("\n") ?: '(none)';
     }
 
     /**

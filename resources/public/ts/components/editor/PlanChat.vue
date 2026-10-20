@@ -294,8 +294,13 @@
             </p>
           </div>
 
+          <p v-if="turnOf(message)?.directing" class="flex items-center gap-2 text-sm text-signal">
+            <LoaderCircle class="size-4 animate-spin" />
+            {{ $t('Laying out the shots. This takes about a minute.') }}
+          </p>
+
           <!-- The story directed into shots: each with its size, purpose and act; the shots are made once the director accepts. -->
-          <div v-if="turnOf(message)?.sequence" class="space-y-2">
+          <div v-if="turnOf(message)?.sequence && !turnOf(message)?.directing" class="space-y-2">
             <p class="text-sm text-muted-foreground">{{ turnOf(message)?.sequence?.change }}</p>
             <ol class="space-y-2">
               <li
@@ -339,6 +344,16 @@
             <p v-if="!turnOf(message)?.sequence?.state && newElements?.length" class="text-xs text-muted-foreground">
               {{ $t('Make or leave out what is missing first, below.') }}
             </p>
+            <!-- What the review of the sequence still found after one repair: the director can accept it anyway. -->
+            <div v-if="turnOf(message)?.sequence?.issues?.length" class="space-y-1.5">
+              <p class="text-sm">{{ $t('Still to check:') }}</p>
+              <ul class="space-y-1.5">
+                <li v-for="(issue, i) in turnOf(message)?.sequence?.issues ?? []" :key="i" class="flex gap-2 text-sm">
+                  <TriangleAlert class="mt-0.5 size-4 shrink-0 text-amber-500" />
+                  {{ issue }}
+                </li>
+              </ul>
+            </div>
             <div v-if="!turnOf(message)?.sequence?.state" class="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -486,6 +501,8 @@ export type PlanChatTurn = {
   places?: string[]
   /** A new voice-over, used once the director accepts it, or declined. */
   voiceOver?: { text: string; seconds?: number; state?: string }
+  /** The story is being laid out into shots in the background; the sequence follows on this turn. */
+  directing?: boolean
   /** The director's story directed into shots, made once the director accepts them, or declined. */
   sequence?: {
     title: string
@@ -501,6 +518,8 @@ export type PlanChatTurn = {
       seconds: number
       cut: string
     }[]
+    /** What the review still found in the sequence, for the director to check before accepting. */
+    issues?: string[]
     state?: string
   }
 }
@@ -548,6 +567,19 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 /** The cast and sets ticked per message, starting with all it suggested. */
 const picked = reactive<Record<string, string[]>>({})
+
+/** Shots laid out in the background arrive with the stored conversation; the ticks start from the sequence's cast and sets. */
+watch(
+  () => props.conversation,
+  (stored) => {
+    if (!stored || !turns.value.some((turn) => turn.directing) || stored.length < turns.value.length) return
+
+    stored.forEach((turn, i) => {
+      if (turns.value[i]?.directing && !turn.directing) picked[`turn-${i}`] = [...(turn.cast ?? [])]
+    })
+    turns.value = [...stored]
+  },
+)
 
 const adding = useForm<{ elements?: string }>({})
 

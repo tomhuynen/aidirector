@@ -6,15 +6,13 @@ namespace App\Http\Controllers\Public\Shots\Plan;
 
 use App\Enums\ShotStatus;
 use App\Http\Requests\Public\PlanSequenceRequest;
-use App\Jobs\GenerateStoryline;
+use App\Jobs\DirectSequence;
 use App\Models\Element;
 use App\Models\Policies\Public\ShotPolicy;
 use App\Models\Project;
 use App\Models\Shot;
 use App\Support\Shots\SceneDirection;
-use App\Support\Shots\SequenceDirecting;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
@@ -40,6 +38,10 @@ class SequenceController
         $index = $request->integer('turn');
         $stored = $turns[$index]['sequence'] ?? null;
 
+        if (($turns[$index]['directing'] ?? false) === true) {
+            throw ValidationException::withMessages(['turn' => __('The shots are still being laid out.')]);
+        }
+
         if (! is_array($stored) || isset($stored['state'])) {
             throw ValidationException::withMessages(['turn' => __('This sequence was already answered.')]);
         }
@@ -51,7 +53,7 @@ class SequenceController
         $unticked = $elements->filter(fn(Element $element) => in_array($element->sqid, (array) ($turns[$index]['cast'] ?? []), true) && ! in_array($element->sqid, $cast, true));
 
         if ($accepted && $unticked->isNotEmpty()) {
-            return $this->directAgain($project, $shot, $turns, $index, $elements, $unticked->pluck('name')->all());
+            return $this->directAgain($shot, $turns, $index, $unticked->pluck('name')->all());
         }
 
         $turns[$index]['sequence']['state'] = $accepted ? 'accepted' : 'declined';
@@ -72,37 +74,21 @@ class SequenceController
     }
 
     /**
-     * Directs the story of the sequence again without the cast and sets the
-     * director unticked, and shows the new sequence in its place.
+     * Has the story of the sequence directed again without the cast and sets
+     * the director unticked, in the background; the new sequence takes the
+     * place of this one.
      *
      * @param  list<array<string, mixed>>  $turns
-     * @param  Collection<int, Element>  $elements
      * @param  list<string>  $unticked
      */
-    private function directAgain(Project $project, Shot $shot, array $turns, int $index, Collection $elements, array $unticked): JsonResponse
+    private function directAgain(Shot $shot, array $turns, int $index, array $unticked): JsonResponse
     {
         $leftOut = array_values(array_unique([...(array) ($turns[$index]['left_out'] ?? []), ...$unticked]));
-        [$direction, $undirected, $missing] = SequenceDirecting::direct($project, $shot, (string) ($turns[$index]['story'] ?? ''), $leftOut);
-
-        if ($direction === null) {
-            throw ValidationException::withMessages(['cast' => $undirected ?? __('This sequence cannot be directed again. Tell the story again in the chat.')]);
-        }
-
-        $names = array_map(fn(string $name) => mb_strtolower($name), $direction->elementNames());
-        $turns[$index] = [
-            ...$turns[$index],
-            'sequence' => $direction->toArray(),
-            'cast' => $elements->filter(fn(Element $element) => in_array(mb_strtolower($element->name), $names, true))->pluck('sqid')->values()->all(),
-            'left_out' => $leftOut,
-        ];
+        $turns[$index]['directing'] = true;
         $shot->forceFill(['plan_chat' => $turns])->save();
 
-        // What the new sequence needs that the cast and sets do not have is offered to make.
-        if ($missing !== []) {
-            $new = GenerateStoryline::newElementsFrom($shot, [...(array) ($shot->storyline['new_elements'] ?? []), ...$missing]);
-            $shot->updateStoredJson('storyline', fn(?array $storyline) => [...($storyline ?? []), 'new_elements' => $new]);
-        }
+        DirectSequence::dispatch($shot, $index, $leftOut);
 
-        return response()->json(['messages' => $shot->fresh()->plan_chat, 'reload' => $missing !== []]);
+        return response()->json(['messages' => $shot->fresh()->plan_chat, 'reload' => true]);
     }
 }

@@ -47,6 +47,8 @@ return [
         'scene_director' => env('AI_SCENE_DIRECTOR_MODEL', 'anthropic/claude-sonnet-5.5'),
         // Reads the layout of a place from its picture. Tried 2026-10-19 on four places against gemini-3.8-flash: both got the doors right, Haiku was faster and named more of the openings.
         'place_layout' => env('AI_PLACE_LAYOUT_MODEL', 'anthropic/claude-haiku-5.5'),
+        // Reviews a directed sequence against its story, the place layouts and the rendering mode before the director sees it.
+        'sequence_reviewer' => env('AI_SEQUENCE_REVIEWER_MODEL', 'anthropic/claude-sonnet-5.5'),
     ],
 
     /*
@@ -87,6 +89,7 @@ return [
         'plan_director' => 'medium',
         'scene_director' => 'low',
         'place_layout_reader' => null,
+        'sequence_reviewer' => 'low',
     ],
 
     /*

@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 use App\Ai\Agents\KeyframeChecker;
+use App\Ai\Agents\SceneDirector;
 use App\Ai\Agents\ShotReviewer;
-use App\Ai\Briefs\DirectingRules;
 use App\Ai\Briefs\KeyframeImageBrief;
+use App\Ai\Briefs\RenderCapabilities;
 use App\Ai\KeyframePainter;
 use App\Ai\KeyframeReferences;
 use App\Enums\Disk;
@@ -331,7 +332,7 @@ it('writes the match cut into the rules the director, the reviewer and the check
     $keyframe = Keyframe::factory()->for($shot)->create(['position' => 2]);
     $shot->load('project');
 
-    expect(DirectingRules::brief())
+    expect(RenderCapabilities::keyframePairs())
         ->toContain('as a match on action')
         ->toContain('is mid-action: a hand halfway to the handle')
         ->and((string) (new ShotReviewer($shot, collect()))->instructions())->toContain('is played by the video and is never missing from a frame')
@@ -440,4 +441,64 @@ it('adds the place its staging names to the elements of a frame', function () {
 
     expect($direction->shots[0]['start']['elements'])->toBe(['Meeting Room Corridor'])
         ->and($direction->shots[0]['end']['elements'])->toBe(['Meeting Room Corridor']);
+});
+
+it('keeps the start frame the director staged for every shot of a sequence rendered in one clip', function () {
+    Config::set('pipeline.models.sequence_video', 'kwaivgi/kling-v3-omni-video');
+    $frame = fn(string $place, string $looks) => ['title' => 'Frame', 'summary' => 'She holds the phone.', 'place' => $place, 'cast' => [['name' => 'Visitor', 'stands' => 'centre', 'faces' => 'right', 'looks_at' => $looks, 'holds' => 'the smartphone', 'hand' => 'both', 'doing' => 'holds it at eye level']], 'spatial' => '', 'elements' => []];
+    $shot = fn(string $kind, array $start, array $end) => ['title' => 'Shot', 'kind' => $kind, 'start' => $start, 'action' => 'She acts.', 'end' => $end, 'seconds' => 3];
+
+    $direction = SceneDirection::fromArray(['shots' => [
+        $shot('scene', $frame('The quay walkway.', 'the naval vessel'), $frame('The quay walkway.', 'the left edge of the frame')),
+        $shot('medium', $frame('The quay walkway, the sign on the wall panel behind her.', 'the naval vessel'), $frame('The quay walkway.', 'the sign')),
+    ]], $this->project);
+
+    expect($direction->shots[1]['start']['staging']['place'])->toBe('The quay walkway, the sign on the wall panel behind her.')
+        ->and($direction->shots[1]['start']['staging']['cast'][0]['looks_at'])->toBe('the naval vessel');
+});
+
+it('finds the events no shot depicts and the numbers that point at no fact or event', function () {
+    $shot = fn(array $shows, array $depicts) => ['title' => 'Shot', 'kind' => 'scene', 'action' => 'She acts.', 'seconds' => 3, 'shows' => $shows, 'depicts' => $depicts];
+
+    $direction = SceneDirection::fromArray([
+        'facts' => ['She aims the phone at the vessel.'],
+        'events' => ['she aims the smartphone at the vessel', 'she turns her head', 'she lowers the smartphone'],
+        'shots' => [$shot([1], [1, 3]), $shot([2], [5])],
+    ], $this->project);
+
+    expect($direction->problems())->toBe([
+        'No shot depicts: she turns her head',
+        'Shot 2 shows fact 2, which the facts do not have.',
+        'Shot 2 depicts event 5, which the events do not have.',
+    ]);
+});
+
+it('centres every directed shot on a subject, the one its kind has by itself when none fits', function () {
+    $shot = fn(string $kind, string $subject) => ['title' => 'Shot', 'kind' => $kind, 'subject' => $subject, 'action' => 'She acts.', 'seconds' => 3];
+
+    $direction = SceneDirection::fromArray(['shots' => [
+        $shot('scene', ''),
+        $shot('close-up', 'face'),
+        $shot('close-up', 'nose'),
+        $shot('insert', 'face'),
+        $shot('medium', 'hands'),
+    ]], $this->project);
+
+    expect(array_column($direction->shots, 'subject'))->toBe(['body', 'face', 'hands', 'object', 'hands'])
+        ->and(SceneDirection::fromArray($direction->toArray(), $this->project)->toArray())->toBe($direction->toArray())
+        ->and($direction->withIssues(['The cut names a head turn the action does not show.'])->toArray()['issues'])->toBe(['The cut names a head turn the action does not show.']);
+});
+
+it('directs the story again with the issues of the review and the previous direction, and shows the shots seen before by code, kind and plan', function () {
+    sequenceShot($this->project, 1, ShotKind::INSERT, ['group_key' => null, 'chosen_storyline' => ['storyline' => 'A wall-mounted no-camera sign on a metal wall panel.']]);
+    $shot = sequenceShot($this->project, 2, ShotKind::SCENE, ['group_key' => null]);
+    $previous = ['title' => 'No photo', 'shots' => [['title' => 'She raises the phone', 'cut' => 'Her head begins to turn.']]];
+
+    $prompt = (new SceneDirector($shot, 'She turns her head and sees the sign.', [], ['The cut names a head turn the action does not show.'], $previous))->promptFor();
+
+    expect($prompt)->toContain('- SH010, insert: A wall-mounted no-camera sign on a metal wall panel.')
+        ->toContain('"cut": "Her head begins to turn."')
+        ->toContain("A review found these issues in it:\n- The cut names a head turn the action does not show.")
+        ->toContain('fix these issues and keep everything of the previous direction that was right')
+        ->and((new SceneDirector($shot, 'She turns her head.'))->promptFor())->not->toContain('A review found');
 });

@@ -16,38 +16,48 @@ use Illuminate\Support\Str;
 /**
  * A story directed into shots, as the scene director answered it and as it
  * is kept on the chat turn until the director accepts it: the decisive
- * change, the facts a viewer must see, the context they need, and per shot
- * its start frame, act and end frame. Every shot after the first starts
- * from the end frame of the last shot before it with people, as a match
- * cut; an insert takes only the place from it. Accepted, it becomes the
- * shots of the film: the shot of the chat first, the others right after
- * it, each with its plan filled.
+ * change, the facts a viewer must see, the events of the story, the context
+ * they need, and per shot its subject, camera, composition, start frame,
+ * action and end frame, with the facts it shows and the events it depicts.
+ * With start and end frames drawn per shot, every shot after the first
+ * starts from the end frame of the last shot before it with people, as a
+ * match cut; an insert takes only the place from it. With the sequence
+ * rendered in one clip, every shot keeps its own start frame. The issues are
+ * what the review still found in it. Accepted, it becomes the shots of the
+ * film: the shot of the chat first, the others right after it, each with
+ * its plan filled.
  *
  * @phpstan-type Frame array{title: string, staging: array<string, mixed>, description: string, spatial: string, elements: list<string>}
- * @phpstan-type DirectedShot array{title: string, kind: string, purpose: string, notice: string, start: Frame, action: string, end: Frame, seconds: int, cut: string, shows: list<int>}
+ * @phpstan-type DirectedShot array{title: string, kind: string, subject: string, purpose: string, notice: string, camera: string, composition: string, reason: string, start: Frame, action: string, end: Frame, seconds: int, cut: string, shows: list<int>, depicts: list<int>}
  */
 final class SceneDirection
 {
     /**
      * @param  list<string>  $facts
+     * @param  list<string>  $events
      * @param  list<string>  $context
      * @param  list<string>  $mustNot
      * @param  list<DirectedShot>  $shots
+     * @param  list<string>  $issues
      */
     public function __construct(
         public readonly string $title,
         public readonly string $change,
         public readonly array $facts,
+        public readonly array $events,
         public readonly array $context,
         public readonly array $mustNot,
         public readonly array $shots,
+        public readonly array $issues = [],
     ) {}
 
     /**
      * The answer of the scene director, or a stored direction, made whole:
      * the kinds the app has, the cast and sets by their exact names, with
-     * every place the staging names among them, the frames as staging, and every shot after the first starting from the
-     * end frame of the last shot before it with people.
+     * every place the staging names among them, the frames as staging, the
+     * subject each shot is centred on, and, with start and end frames drawn
+     * per shot, every shot after the first starting from the end frame of
+     * the last shot before it with people.
      *
      * @param  array<string, mixed>  $answer
      */
@@ -66,6 +76,8 @@ final class SceneDirection
             ->merge($places->filter(fn(string $place) => mb_stripos((string) ($frame['staging']['place'] ?? ''), $place) !== false))
             ->unique()->values()->all()];
 
+        $numbers = fn(mixed $list): array => collect(is_array($list) ? $list : [])->map(fn(mixed $number) => (int) $number)->filter(fn(int $number) => $number > 0)->unique()->sort()->values()->all();
+        $continues = ! Shot::rendersSequences();
         $shots = [];
         $before = null;
 
@@ -75,15 +87,20 @@ final class SceneDirection
             $shots[] = [
                 'title' => Str::limit(trim((string) ($shot['title'] ?? '')), 80, ''),
                 'kind' => $kind->value,
+                'subject' => $kind->subject(is_string($shot['subject'] ?? null) ? trim($shot['subject']) : null),
                 'purpose' => trim((string) ($shot['purpose'] ?? '')),
                 'notice' => trim((string) ($shot['notice'] ?? '')),
-                // A match cut picks up the instant the last shot with people ended on, in the place as this camera sees it; a still of its own starts from its own frame.
-                'start' => $placed($before !== null && ! $kind->drawsStandalone() ? self::continued($before['end'], $frame($shot['start'] ?? null)) : $frame($shot['start'] ?? null)),
+                'camera' => trim((string) ($shot['camera'] ?? '')),
+                'composition' => trim((string) ($shot['composition'] ?? '')),
+                'reason' => trim((string) ($shot['reason'] ?? '')),
+                // A match cut picks up the instant the last shot with people ended on, in the place as this camera sees it; a still of its own, or a shot of a sequence rendered in one clip, starts from its own frame.
+                'start' => $placed($continues && $before !== null && ! $kind->drawsStandalone() ? self::continued($before['end'], $frame($shot['start'] ?? null)) : $frame($shot['start'] ?? null)),
                 'action' => trim((string) ($shot['action'] ?? '')),
                 'end' => $placed($frame($shot['end'] ?? null)),
                 'seconds' => Shot::clampSeconds((int) ($shot['seconds'] ?? 0)),
                 'cut' => trim((string) ($shot['cut'] ?? '')),
-                'shows' => collect((array) ($shot['shows'] ?? []))->map(fn(mixed $number) => (int) $number)->filter(fn(int $number) => $number > 0)->unique()->sort()->values()->all(),
+                'shows' => $numbers($shot['shows'] ?? null),
+                'depicts' => $numbers($shot['depicts'] ?? null),
             ];
 
             if (! $kind->drawsStandalone()) {
@@ -97,10 +114,22 @@ final class SceneDirection
             Str::limit(trim((string) ($answer['title'] ?? '')), 80, ''),
             trim((string) ($answer['change'] ?? '')),
             $lines($answer['facts'] ?? null),
+            $lines($answer['events'] ?? null),
             $lines($answer['context'] ?? null),
             $lines($answer['must_not'] ?? null),
             $shots,
+            $lines($answer['issues'] ?? null),
         );
+    }
+
+    /**
+     * The direction with the issues the review still found in it.
+     *
+     * @param  list<string>  $issues
+     */
+    public function withIssues(array $issues): self
+    {
+        return new self($this->title, $this->change, $this->facts, $this->events, $this->context, $this->mustNot, $this->shots, $issues);
     }
 
     /**
@@ -121,8 +150,37 @@ final class SceneDirection
     }
 
     /**
+     * The frames that name none of the project's places among their
+     * elements, so they would be drawn without the place's picture and
+     * reviewed without its layout.
+     *
+     * @param  list<string>  $places
+     * @return list<string>
+     */
+    public function unplaced(array $places): array
+    {
+        if ($places === []) {
+            return [];
+        }
+
+        $problems = [];
+
+        foreach ($this->shots as $index => $shot) {
+            foreach (['start' => $shot['start'], 'end' => $shot['end']] as $which => $frame) {
+                if (array_intersect($frame['elements'], $places) === []) {
+                    $problems[] = 'Shot ' . ($index + 1) . " names no place in its {$which} frame: put the place it plays in, by its exact name, among its elements and in its place field.";
+                }
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
      * What keeps the direction from being used, in plain sentences: a fact
-     * no shot shows, or a frame that shows what must never happen.
+     * no shot shows, an event no shot depicts, a shot that names a fact or
+     * an event the direction does not have, or a frame that shows what must
+     * never happen.
      *
      * @return list<string>
      */
@@ -140,7 +198,21 @@ final class SceneDirection
             }
         }
 
+        foreach ($this->events as $index => $event) {
+            if (! collect($this->shots)->contains(fn(array $shot) => in_array($index + 1, $shot['depicts'], true))) {
+                $problems[] = "No shot depicts: {$event}";
+            }
+        }
+
         foreach ($this->shots as $index => $shot) {
+            foreach (array_filter($shot['shows'], fn(int $number) => $number > count($this->facts)) as $number) {
+                $problems[] = 'Shot ' . ($index + 1) . " shows fact {$number}, which the facts do not have.";
+            }
+
+            foreach (array_filter($shot['depicts'], fn(int $number) => $number > count($this->events)) as $number) {
+                $problems[] = 'Shot ' . ($index + 1) . " depicts event {$number}, which the events do not have.";
+            }
+
             foreach ($this->mustNot as $phrase) {
                 foreach (['start' => $shot['start'], 'end' => $shot['end']] as $which => $frame) {
                     if (mb_stripos($frame['description'], $phrase) !== false) {
@@ -154,7 +226,7 @@ final class SceneDirection
     }
 
     /**
-     * @return array{title: string, change: string, facts: list<string>, context: list<string>, must_not: list<string>, shots: list<DirectedShot>}
+     * @return array{title: string, change: string, facts: list<string>, events: list<string>, context: list<string>, must_not: list<string>, shots: list<DirectedShot>, issues: list<string>}
      */
     public function toArray(): array
     {
@@ -162,9 +234,11 @@ final class SceneDirection
             'title' => $this->title,
             'change' => $this->change,
             'facts' => $this->facts,
+            'events' => $this->events,
             'context' => $this->context,
             'must_not' => $this->mustNot,
             'shots' => $this->shots,
+            'issues' => $this->issues,
         ];
     }
 
@@ -191,10 +265,7 @@ final class SceneDirection
             ->filter(fn(string $name) => in_array($name, $frame['elements'], true) || mb_stripos($frame['description'], $name) !== false)
             ->values()->all()];
 
-        return new self($this->title, $this->change, $this->facts, $this->context, $this->mustNot, array_map(
-            fn(array $shot) => [...$shot, 'start' => $frame($shot['start']), 'end' => $frame($shot['end'])],
-            $this->shots,
-        ));
+        return $this->withFrames($frame);
     }
 
     /**
@@ -208,10 +279,20 @@ final class SceneDirection
         $left = array_map(fn(string $name) => mb_strtolower($name), $names);
         $frame = fn(array $frame): array => [...$frame, 'elements' => array_values(array_filter($frame['elements'], fn(string $name) => ! in_array(mb_strtolower($name), $left, true)))];
 
-        return new self($this->title, $this->change, $this->facts, $this->context, $this->mustNot, array_map(
+        return $this->withFrames($frame);
+    }
+
+    /**
+     * The direction with every start frame and end frame changed by the given function.
+     *
+     * @param  callable(Frame): Frame  $frame
+     */
+    private function withFrames(callable $frame): self
+    {
+        return new self($this->title, $this->change, $this->facts, $this->events, $this->context, $this->mustNot, array_map(
             fn(array $shot) => [...$shot, 'start' => $frame($shot['start']), 'end' => $frame($shot['end'])],
             $this->shots,
-        ));
+        ), $this->issues);
     }
 
     /**
@@ -288,6 +369,7 @@ final class SceneDirection
         ShotPlan::apply($shot, [
             'title' => $directed['title'],
             'kind' => $directed['kind'],
+            'subject' => $directed['subject'],
             'storyline' => $directed['action'],
             'keyframes' => [$this->proposed($directed['start']), $this->proposed($directed['end'])],
             'seconds' => $directed['seconds'],

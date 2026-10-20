@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Ai\Briefs\BodyRules;
 use App\Ai\KeyframePainter;
+use App\Ai\Prompts\SequencePrompt;
 use App\Enums\Disk;
 use App\Enums\KeyframeStatus;
 use App\Enums\ShotKind;
@@ -227,6 +229,48 @@ it('sends the first start frame as the start, the other start frames and the peo
         && ! isset($request['input']['end_image']));
     Queue::assertPushed(PollSequenceVideo::class, fn(PollSequenceVideo $job) => $job->jobId === 'pred-1');
 });
+
+it('plays the act of each shot without tempo words, and keeps what happens', function () {
+    $shots = collect([
+        klingShot($this->project, 1, attributes: ['idea' => 'She slowly aims the smartphone at the vessel, then calmly turns her head to the sign.']),
+        klingShot($this->project, 2, ShotKind::MEDIUM, ['idea' => 'Her hand pauses for a moment before the handle, then withdraws.']),
+    ]);
+
+    $prompt = SequencePrompt::compose($shots, [1 => 1], []);
+
+    expect($prompt)->toContain('Shot 1: wide shot, fixed camera, starting on the first frame: She aims the smartphone at the vessel, then turns her head to the sign.')
+        ->toContain('Shot 2: medium shot from closer framed like <<<image_1>>>: Her hand stops before the handle, then withdraws.')
+        ->not->toMatch('/\b(slowly|calmly|pauses|for a moment)\b/i');
+});
+
+it('frames a close-up on the face for a reaction, and on the hands and the object for a detail', function () {
+    $face = klingShot($this->project, 1, ShotKind::CLOSE_UP, ['storyline' => ['framing' => ['spot' => '', 'seconds' => 2, 'subject' => 'face'], 'keyframes' => []]]);
+    $hands = klingShot($this->project, 2, ShotKind::CLOSE_UP, ['storyline' => ['framing' => ['spot' => '', 'seconds' => 2, 'subject' => 'hands'], 'keyframes' => []]]);
+    $unknown = klingShot($this->project, 3, ShotKind::CLOSE_UP);
+
+    $prompt = SequencePrompt::compose(collect([$face, $hands, $unknown]), [1 => 1, 2 => 2], []);
+
+    expect($prompt)->toContain('Shot 1: close-up on the face, starting on the first frame:')
+        ->toContain('Shot 2: close-up on the hands and the object framed like <<<image_1>>>:')
+        ->toContain('Shot 3: close-up on the hands and the object framed like <<<image_2>>>:');
+});
+
+it('removes tempo from an act without removing the event', function (string $act, string $expected) {
+    expect(BodyRules::withoutTempo($act))->toBe($expected);
+})->with([
+    'an adverb' => ['her hand slowly stops before the handle, then withdraws', 'her hand stops before the handle, then withdraws'],
+    'a pause' => ['she pauses, then lowers the phone', 'she stops, then lowers the phone'],
+    'a pause with a beat' => ['Her hand pauses for a beat before the handle, then withdraws.', 'Her hand stops before the handle, then withdraws.'],
+    'at the start of a sentence' => ['She aims the phone. Slowly, she turns her head.', 'She aims the phone. She turns her head.'],
+    'a pause at the start' => ['After a pause, she lowers the phone.', 'She lowers the phone.'],
+    'two adverbs' => ['She turns her head slowly and carefully to the sign.', 'She turns her head to the sign.'],
+    'between commas' => ['She looks, for a moment, at the sign, then lowers the phone.', 'She looks at the sign, then lowers the phone.'],
+    'between commas before then' => ['She turns, slowly, then lowers the phone.', 'She turns, then lowers the phone.'],
+    'at the end' => ['She lowers the phone quickly.', 'She lowers the phone.'],
+    'an unhurried step' => ['She takes an unhurried step back.', 'She takes a step back.'],
+    'a slowing to a stop' => ['She slows and stops at the edge.', 'She stops at the edge.'],
+    'no tempo' => ['She walks out of view past the slowcoach.', 'She walks out of view past the slowcoach.'],
+]);
 
 it('checks again while the clip renders, and stores it with where each part starts', function () {
     Queue::fake();

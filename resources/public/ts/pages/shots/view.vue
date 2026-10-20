@@ -192,6 +192,7 @@ const busy = computed(
     // Waiting for another shot or new cast pictures: drawing starts by itself, so the page keeps looking.
     Boolean(props.shot.waitingFor) ||
     planning.value ||
+    (props.shot.planChat ?? []).some((turn) => turn.directing) ||
     props.shot.status === 'first-keyframe-pending' ||
     props.shot.status === 'keyframes-pending' ||
     props.shot.status === 'video-pending' ||

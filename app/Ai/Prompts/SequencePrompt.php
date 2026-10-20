@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ai\Prompts;
 
+use App\Ai\Briefs\BodyRules;
 use App\Enums\ShotSize;
 use App\Models\Shot;
 use Illuminate\Support\Collection;
@@ -12,8 +13,8 @@ use Illuminate\Support\Str;
 /**
  * The prompt for a video model that renders a whole sequence in one clip:
  * the cast by their reference pictures, then the shots in order, each with
- * its framing, the drawn keyframe it looks like and its act. The model cuts
- * between the shots and times them itself.
+ * its framing, the drawn keyframe it looks like and its act without tempo
+ * words. The model cuts between the shots and times them itself.
  */
 class SequencePrompt
 {
@@ -36,7 +37,7 @@ class SequencePrompt
         $lines[] = 'Keep the exact render style, colours and place of the first frame. People move at real, natural speed. Nobody talks or looks at the camera. No text and no music.';
 
         foreach ($shots->values() as $index => $shot) {
-            $framing = self::framing($shot->kindOrScene()->size());
+            $framing = self::framing($shot->kindOrScene()->size(), $shot->storyline['framing']['subject'] ?? null);
             $look = isset($frames[$index]) ? " framed like <<<image_{$frames[$index]}>>>" : ($index === 0 ? ', starting on the first frame' : '');
             $lines[] = 'Shot ' . ($index + 1) . ": {$framing}{$look}: " . self::act($shot);
         }
@@ -44,21 +45,21 @@ class SequencePrompt
         return Str::limit(implode("\n", $lines), self::LIMIT, '');
     }
 
-    private static function framing(ShotSize $size): string
+    private static function framing(ShotSize $size, ?string $subject): string
     {
         return match ($size) {
             ShotSize::FULL => 'wide shot, fixed camera',
             ShotSize::MEDIUM => 'medium shot from closer',
-            ShotSize::CLOSE_UP => 'close-up on the hands and the object',
+            ShotSize::CLOSE_UP => $subject === 'face' ? 'close-up on the face' : 'close-up on the hands and the object',
             ShotSize::INSERT => 'insert of the one thing',
         };
     }
 
     /**
-     * What happens in a shot, in the director's words.
+     * What happens in a shot, in the director's words without tempo: the model plays it at real speed.
      */
     private static function act(Shot $shot): string
     {
-        return Str::limit(trim((string) ($shot->idea ?: ($shot->chosen_storyline['storyline'] ?? $shot->title))), 400);
+        return Str::limit(BodyRules::withoutTempo(trim((string) ($shot->idea ?: ($shot->chosen_storyline['storyline'] ?? $shot->title)))), 400);
     }
 }

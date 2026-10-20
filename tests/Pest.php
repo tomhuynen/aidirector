@@ -33,6 +33,8 @@ pest()
         App\Ai\Agents\CorrectionClassifier::fake(fn() => ['kind' => 'instruction', 'category' => 'test', 'rule' => '']);
         // A drawn place has its layout read in the background; tests that check the layout fake it themselves.
         App\Ai\Agents\PlaceLayoutReader::fake(fn() => ['layout' => '']);
+        // A directed sequence is reviewed before the director sees it; tests that check the review fake it themselves.
+        App\Ai\Agents\SequenceReviewer::fake(fn() => ['passes' => true, 'issues' => []]);
 
         $this->withoutVite();
     });

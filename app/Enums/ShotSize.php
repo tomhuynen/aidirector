@@ -24,6 +24,24 @@ enum ShotSize: string
     case INSERT = 'insert';
 
     /**
+     * How the image model frames the keyframe of a shot centred on the
+     * subject, one of {@see ShotKind::SUBJECTS}: a close-up of a face has
+     * its own framing; every other size frames the same for each subject.
+     */
+    public function framingFor(?string $subject): string
+    {
+        return $this === self::CLOSE_UP && $subject === 'face' ? self::faceFraming() : $this->framing();
+    }
+
+    /**
+     * How the image model frames a close-up of a face, for a reaction.
+     */
+    public static function faceFraming(): string
+    {
+        return 'Close-up of a face: the face and the shoulders fill the frame, at eye level, the eyes sharp and readable. What the person reacts to may be a soft shape at the edge of the frame or out of the frame. The place is only a soft, blurred hint behind.';
+    }
+
+    /**
      * How the image model frames the keyframe.
      */
     public function framing(): string

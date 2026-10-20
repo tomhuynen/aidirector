@@ -14,8 +14,8 @@ use App\Enums\Traits\EnumHelpers;
  * still is drawn on its own, animated a little, and the clips are joined
  * with crossfades. A presenter is one person who speaks the voice-over to
  * the camera, lip-synced, once per language. A close-up shows hands and one
- * object large in frame: the start frame is drawn straight away with them,
- * and the end frame is drawn on it. An insert shows one thing the viewer
+ * object large in frame, or one face for a reaction: the start frame is
+ * drawn straight away with them, and the end frame is drawn on it. An insert shows one thing the viewer
  * must see, such as a sign, alone in one keyframe; its clip is made from
  * that still in code, without the video model. A medium shot is a scene
  * framed from the waist up: the face and the hands of one person with the
@@ -36,6 +36,14 @@ enum ShotKind: string
     case MEDIUM = 'medium';
 
     case INSERT = 'insert';
+
+    /**
+     * What the frame of a shot can be centred on: the whole body, the face,
+     * the hands or an object.
+     *
+     * @var list<string>
+     */
+    public const array SUBJECTS = ['body', 'face', 'hands', 'object'];
 
     public function label(): string
     {
@@ -73,6 +81,24 @@ enum ShotKind: string
     }
 
     /**
+     * What the frame is centred on: the subject given when it is one of
+     * {@see self::SUBJECTS}, otherwise what this kind is centred on by
+     * itself. An insert is always centred on its object.
+     */
+    public function subject(?string $subject = null): string
+    {
+        if ($this === self::INSERT) {
+            return 'object';
+        }
+
+        if (in_array($subject, self::SUBJECTS, true)) {
+            return $subject;
+        }
+
+        return $this === self::CLOSE_UP ? 'hands' : 'body';
+    }
+
+    /**
      * When the planner chooses this kind.
      */
     public function useWhen(): string
@@ -81,9 +107,9 @@ enum ShotKind: string
             self::SCENE => 'the idea is something people do at one place: an action, a behaviour or a danger, such as putting on gear, stopping behind a line or keeping a door shut',
             self::MONTAGE => 'the idea is an overview, a list or a range that spans places or time, such as "we design, build, repair and service vessels" or the steps of a process at different places',
             self::PRESENTER => 'the idea is said straight to the viewer by a person: a welcome, an introduction, a summary or a call to action',
-            self::CLOSE_UP => 'the point is what hands do with one small object, too small to read in a scene: clipping on a badge, closing a padlock or a buckle, reading a gauge, a damaged part handed over',
+            self::CLOSE_UP => 'the point is a small decisive action of the hands on one small object, too small to read in a scene, such as clipping on a badge, closing a padlock or a buckle, reading a gauge or a damaged part handed over; or a reaction on one face that changes the story, such as the moment someone recognises a warning sign',
             self::MEDIUM => 'the point is what one person does with one object where the face and the hands must both be read: a reach, a hesitation, a glance at what they hold, such as a hand that reaches for a bag and stops',
-            self::INSERT => 'the point is one thing the viewer must see on its own for a moment, with no people and no action: a sign, a label, a warning or a gauge, such as "a no-camera sign is visible"',
+            self::INSERT => 'the point is one thing the viewer must see on its own, with no people and no action: a sign, a label, a warning or a gauge, such as "a no-camera sign is visible"',
         };
     }
 
@@ -97,9 +123,9 @@ enum ShotKind: string
         return [
             ['value' => self::SCENE->value, 'label' => self::SCENE->label(), 'description' => __('One place and one action, with a camera that does not move.')],
             ['value' => self::MONTAGE->value, 'label' => self::MONTAGE->label(), 'description' => __('Separate stills, each its own place, joined with crossfades.')],
-            ['value' => self::CLOSE_UP->value, 'label' => self::CLOSE_UP->label(), 'description' => __('Hands and one object, large in frame: a badge, a lock, a buckle, a gauge.')],
+            ['value' => self::CLOSE_UP->value, 'label' => self::CLOSE_UP->label(), 'description' => __('Hands and one object large in frame, such as a badge, a lock or a gauge; or one face, for a reaction.')],
             ['value' => self::MEDIUM->value, 'label' => self::MEDIUM->label(), 'description' => __('One person from the waist up, face and hands in frame, with the object they act on.')],
-            ['value' => self::INSERT->value, 'label' => self::INSERT->label(), 'description' => __('One thing on its own for a moment, such as a sign: one still with a slow push-in.')],
+            ['value' => self::INSERT->value, 'label' => self::INSERT->label(), 'description' => __('One thing on its own, such as a sign: one still with a slow push-in.')],
             ['value' => self::PRESENTER->value, 'label' => self::PRESENTER->label(), 'description' => __('One person speaks the voice-over to the camera, lip-synced, in every language of the project.')],
         ];
     }

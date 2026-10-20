@@ -61,7 +61,7 @@ class KeyframeImageBrief
         }
 
         $framing = $shot->storylineFraming();
-        $lines[] = 'Framing: ' . $shot->kindOrScene()->size()->framing();
+        $lines[] = 'Framing: ' . $shot->kindOrScene()->size()->framingFor($framing['subject'] ?? null);
 
         if (filled($framing['spot'] ?? null)) {
             $lines[] = "Spot: {$framing['spot']}";
@@ -72,10 +72,13 @@ class KeyframeImageBrief
         }
 
         $closeUp = $shot->kindOrScene() === ShotKind::CLOSE_UP;
+        $face = $shot->showsFace();
 
-        // A close-up is about the hands and the object; the scene's composition and staging would pull back to whole figures.
+        // A close-up is about the hands and the object, or a face; the scene's composition and staging would pull back to whole figures.
         if ($shot->isInsert()) {
             $lines[] = 'Composition: the one thing is the only subject, large, sharp and readable in the middle of the frame. No people, no hands and no other objects in front of it.';
+        } elseif ($face) {
+            $lines[] = 'Composition: the face and the shoulders are the subject, large, sharp and in the middle of the frame, the eyes readable. Draw the person exactly as in their picture: face, hair, headwear and clothing, one layer.';
         } elseif ($closeUp) {
             $lines[] = 'Composition: the object and the hands are the subject, large, sharp and in the middle of the frame. Draw only the part of the people the frame shows: their clothing exactly as in their pictures, one layer, never a second jacket or shirt.';
         } elseif ($shot->kindOrScene() === ShotKind::MEDIUM) {
@@ -120,7 +123,7 @@ class KeyframeImageBrief
                 continue;
             }
 
-            $lines[] = $closeUp && $element->type === ElementType::PERSON
+            $lines[] = $closeUp && ! $face && $element->type === ElementType::PERSON
                 ? 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} (person). Use it only for their clothing, skin and hands, exactly as in the picture; draw only the part of {$element->name} this close frame shows. Do not copy its background, pose or framing."
                 : 'The ' . $ordinals[$attached++] . " attached image is the reference for {$element->name} ({$element->type->value}). Draw {$element->name} exactly like it: same shape, proportions, colours and details" . ($element->type === ElementType::PERSON ? ', same face, hair, build, clothing and headwear' : '') . ". The picture decides how {$element->name} looks, whatever any other wording says; the description decides its state, such as open, held or lifted off its hook. Do not copy its background or pose.";
         }
@@ -187,7 +190,7 @@ class KeyframeImageBrief
             match (true) {
                 $references->firstShowsCast => 'The people already in the first image move and change pose as described; never add a second copy of anyone.',
                 // A close-up shows the hands at work on the surface; the people's sleeves and gloves show who they are.
-                $shot->kindOrScene() === ShotKind::CLOSE_UP => "Add the hands and forearms of {$castNames} into it, reaching in from the edge of the frame at the size this close framing gives, with their sleeves, gloves and cuffs exactly as in their pictures; their faces stay out of the frame.",
+                $shot->kindOrScene() === ShotKind::CLOSE_UP && ! $shot->showsFace() => "Add the hands and forearms of {$castNames} into it, reaching in from the edge of the frame at the size this close framing gives, with their sleeves, gloves and cuffs exactly as in their pictures; their faces stay out of the frame.",
                 default => "{$castNames} " . (count($references->castNames) > 1 ? 'are' : 'is') . ' not in the first image yet: add them into it, standing on the floor of the place at a natural size for where they stand.',
             },
             '',
